@@ -1,0 +1,39 @@
+{
+  "mcpServers": {
+    "firecrawl": {
+      "type": "stdio",
+      "command": "bunx",
+      "args": ["-y", "firecrawl-mcp"],
+      "env": {
+        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}"
+      }
+    },
+    "vercel": {
+      "type": "http",
+      "url": "https://mcp.vercel.com",
+      "headers": {
+        "Authorization": "Bearer ${VERCEL_ACCESS_TOKEN}"
+      }
+    },
+    "posthog": {
+      "type": "stdio",
+      "command": "bunx",
+      "args": ["-y", "@posthog/mcp"],
+      "env": {
+        "POSTHOG_API_KEY": "${POSTHOG_API_KEY}",
+        "POSTHOG_PROJECT_ID": "${POSTHOG_PROJECT_ID}"
+      }
+    },
+    "browser-use": {
+      "type": "http",
+      "url": "https://api.browser-use.com/mcp"
+    },
+    "nano-banana": {
+      "command": "bunx",
+      "args": ["nano-banana-mcp"],
+      "env": {
+        "GEMINI_API_KEY": "${GEMINI_API_KEY}"
+      }
+    }
+  }
+}

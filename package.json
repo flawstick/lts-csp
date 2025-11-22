@@ -1,0 +1,31 @@
+{
+  "name": "repo",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "containers/*"
+  ],
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "web": "cd apps/web && bun run dev",
+    "jobs": "cd containers/jobs && bun run dev",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "clean": "turbo clean",
+    "docker:build": "turbo docker:build",
+    "db:generate": "cd packages/database && bun run db:generate",
+    "db:migrate": "cd packages/database && bun run db:migrate",
+    "db:push": "cd packages/database && bun run db:push",
+    "db:studio": "cd packages/database && bun run db:studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.3.3"
+  },
+  "packageManager": "pnpm@9.14.2",
+  "engines": {
+    "node": ">=20"
+  }
+}
