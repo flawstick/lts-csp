@@ -1,4 +1,6 @@
-import { postRouter } from "@/server/api/routers/post";
+import { taxReturnRouter } from "@/server/api/routers/tax-return";
+import { substanceFormRouter } from "@/server/api/routers/substance-form";
+import { analyticsRouter } from "@/server/api/routers/analytics";
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 
 /**
@@ -7,7 +9,9 @@ import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
  * All routers added in /api/routers should be manually added here.
  */
 export const appRouter = createTRPCRouter({
-  post: postRouter,
+  taxReturn: taxReturnRouter,
+  substanceForm: substanceFormRouter,
+  analytics: analyticsRouter,
 });
 
 // export type definition of API

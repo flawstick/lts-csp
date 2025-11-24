@@ -1,0 +1,26 @@
+{
+  "family": "lts-tax-sync",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::988904099875:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::988904099875:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "lts-tax-sync",
+      "image": "988904099875.dkr.ecr.eu-west-2.amazonaws.com/lts-tax-sync:latest",
+      "essential": true,
+      "environment": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/lts-tax-sync",
+          "awslogs-region": "eu-west-2",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

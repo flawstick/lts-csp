@@ -1,4 +1,5 @@
 import { type Config } from "drizzle-kit";
+import "dotenv/config";
 
 export default {
   schema: "./src/schema.ts",
@@ -6,5 +7,5 @@ export default {
   dbCredentials: {
     url: process.env.DATABASE_URL!,
   },
-  tablesFilter: ["web_*"],
+  tablesFilter: ["lts_*"],
 } satisfies Config;

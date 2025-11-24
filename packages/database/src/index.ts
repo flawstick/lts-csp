@@ -1,10 +1,13 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { eq, and, or, desc, asc, sql } from "drizzle-orm";
 
 import * as schema from "./schema";
 
 export * from "./schema";
 export * from "./queries";
+export { schema };
+export { eq, and, or, desc, asc, sql };
 
 const globalForDb = globalThis as unknown as {
   conn: postgres.Sql | undefined;

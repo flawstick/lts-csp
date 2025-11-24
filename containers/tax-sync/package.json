@@ -1,0 +1,22 @@
+{
+  "name": "@repo/tax-sync",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node --import tsx src/index.ts",
+    "docker:build": "docker build -t repo-tax-sync -f Dockerfile ../.."
+  },
+  "dependencies": {
+    "@repo/database": "workspace:*",
+    "cheerio": "^1.0.0",
+    "drizzle-orm": "^0.41.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.7.0",
+    "typescript": "^5.8.2"
+  }
+}

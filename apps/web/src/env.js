@@ -22,12 +22,22 @@ export const env = createEnv({
     ECS_SUBNETS: z.string(),
     ECS_SECURITY_GROUPS: z.string(),
     ECS_LOG_GROUP: z.string(),
+    // Tax Sync ECS
+    ECS_TAX_SYNC_TASK_DEFINITION: z.string().optional(),
+    ECS_TAX_SYNC_CONTAINER_NAME: z.string().optional(),
+    // Browser Task ECS (uses Browser Use Cloud)
+    ECS_BROWSER_TASK_DEFINITION: z.string().optional(),
+    ECS_BROWSER_TASK_CONTAINER_NAME: z.string().optional(),
     // Resend
     RESEND_API_KEY: z.string(),
     // Vercel Blob
     BLOB_READ_WRITE_TOKEN: z.string(),
     // Supabase
     SUPABASE_SERVICE_ROLE_KEY: z.string(),
+    // AI Gateway
+    AI_GATEWAY_API_KEY: z.string().optional(),
+    // Browser Use Cloud
+    BROWSER_USE_API_KEY: z.string(),
   },
 
   /**
@@ -58,6 +68,12 @@ export const env = createEnv({
     ECS_SUBNETS: process.env.ECS_SUBNETS,
     ECS_SECURITY_GROUPS: process.env.ECS_SECURITY_GROUPS,
     ECS_LOG_GROUP: process.env.ECS_LOG_GROUP,
+    // Tax Sync ECS
+    ECS_TAX_SYNC_TASK_DEFINITION: process.env.ECS_TAX_SYNC_TASK_DEFINITION,
+    ECS_TAX_SYNC_CONTAINER_NAME: process.env.ECS_TAX_SYNC_CONTAINER_NAME,
+    // Browser Task ECS
+    ECS_BROWSER_TASK_DEFINITION: process.env.ECS_BROWSER_TASK_DEFINITION,
+    ECS_BROWSER_TASK_CONTAINER_NAME: process.env.ECS_BROWSER_TASK_CONTAINER_NAME,
     // Resend
     RESEND_API_KEY: process.env.RESEND_API_KEY,
     // Vercel Blob
@@ -66,6 +82,10 @@ export const env = createEnv({
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    // AI Gateway
+    AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
+    // Browser Use Cloud
+    BROWSER_USE_API_KEY: process.env.BROWSER_USE_API_KEY,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

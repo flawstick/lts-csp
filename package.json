@@ -10,7 +10,7 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "web": "cd apps/web && bun run dev",
-    "jobs": "cd containers/jobs && bun run dev",
+    "task": "cd containers/task && bun run dev",
     "lint": "turbo lint",
     "test": "turbo test",
     "clean": "turbo clean",
