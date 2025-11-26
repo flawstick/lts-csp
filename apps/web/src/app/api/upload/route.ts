@@ -1,5 +1,6 @@
 import { put } from "@vercel/blob"
 import { NextResponse } from "next/server"
+import { trackServer } from "@/lib/analytics"
 
 const ALLOWED_TYPES = [
   "application/pdf",
@@ -40,6 +41,17 @@ export async function POST(request: Request) {
     const blob = await put(`${folder}/${Date.now()}-${file.name}`, file, {
       access: "public",
       contentType: file.type,
+    })
+
+    // Track document upload
+    await trackServer({
+      name: "document_uploaded",
+      data: {
+        documentType: file.type.startsWith("application/pdf") ? "pdf" :
+                     file.type.startsWith("image/") ? "image" : "other",
+        sizeBytes: file.size,
+        uploadContext: folder as "avatar" | "task",
+      },
     })
 
     return NextResponse.json({

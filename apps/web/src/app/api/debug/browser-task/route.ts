@@ -68,6 +68,10 @@ export async function POST(request: Request) {
       })
       .returning();
 
+    if (!task) {
+      return NextResponse.json({ error: "Failed to create task" }, { status: 500 });
+    }
+
     // Create job
     const [job] = await db
       .insert(jobs)
@@ -78,6 +82,10 @@ export async function POST(request: Request) {
         aiModel: "claude-sonnet-4",
       })
       .returning();
+
+    if (!job) {
+      return NextResponse.json({ error: "Failed to create job" }, { status: 500 });
+    }
 
     // Launch ECS task
     console.log("Launching browser task on ECS...");

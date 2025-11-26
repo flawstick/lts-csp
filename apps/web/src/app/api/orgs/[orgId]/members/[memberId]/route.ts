@@ -129,7 +129,7 @@ export async function DELETE(
     }
 
     // Admins can't remove owners
-    if (currentMembership.role === "admin" && targetMember.role === "owner") {
+    if (currentMembership?.role === "admin" && targetMember.role === "owner") {
       return NextResponse.json({ error: "Admins cannot remove owners" }, { status: 403 })
     }
 

@@ -51,6 +51,10 @@ export async function POST(request: Request) {
       })
       .returning()
 
+    if (!task) {
+      return NextResponse.json({ error: "Failed to create task" }, { status: 500 })
+    }
+
     // Get the count of existing jobs for this task
     const existingJobs = await db.query.jobs.findMany({
       where: eq(jobs.taskId, task.id),
@@ -66,6 +70,10 @@ export async function POST(request: Request) {
         aiModel: body.aiModel || "gpt-4",
       })
       .returning()
+
+    if (!job) {
+      return NextResponse.json({ error: "Failed to create job" }, { status: 500 })
+    }
 
     // Optionally launch on ECS
     let ecsResult = null

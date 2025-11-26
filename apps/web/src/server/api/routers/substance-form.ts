@@ -4,6 +4,7 @@ import { substanceForms, taxReturns } from "@repo/database";
 import { eq } from "drizzle-orm";
 import { createGateway } from "@ai-sdk/gateway";
 import { generateObject } from "ai";
+import { trackServer } from "@/lib/analytics";
 import {
   substanceFormSchema,
   getMissingFields,
@@ -249,17 +250,28 @@ export const substanceFormRouter = createTRPCRouter({
         form = newForm!;
       }
 
+      // Track AI extraction start
+      const extractionStartTime = Date.now();
+      await trackServer({
+        name: "ai_extraction_started",
+        data: {
+          taxReturnId: input.taxReturnId,
+          documentCount: input.fileUrls.length,
+          documentTypes: input.fileUrls.map(() => "pdf"), // Could be enhanced to detect actual types
+        },
+      });
+
       // Build file content for AI
       const fileContents = await Promise.all(
         input.fileUrls.map(async (url) => {
           const response = await fetch(url);
           const buffer = await response.arrayBuffer();
           const base64 = Buffer.from(buffer).toString("base64");
-          const mimeType = response.headers.get("content-type") || "application/pdf";
+          const mediaType = response.headers.get("content-type") || "application/pdf";
           return {
             type: "file" as const,
             data: base64,
-            mimeType,
+            mediaType,
           };
         })
       );
@@ -374,6 +386,22 @@ Do not make up or guess values - leave fields empty if information is not availa
         })
         .where(eq(substanceForms.taxReturnId, input.taxReturnId))
         .returning();
+
+      const extractedFieldsCount = Object.keys(extractedData).filter(
+        (k) => extractedData[k as keyof typeof extractedData] !== undefined
+      ).length;
+
+      // Track AI extraction completion
+      await trackServer({
+        name: "ai_extraction_completed",
+        data: {
+          taxReturnId: input.taxReturnId,
+          success: true,
+          fieldsExtracted: extractedFieldsCount,
+          extractionTimeMs: Date.now() - extractionStartTime,
+          model: "google/gemini-3-pro-preview",
+        },
+      });
 
       return {
         form: updated,

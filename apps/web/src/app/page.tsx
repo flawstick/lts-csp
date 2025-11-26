@@ -67,7 +67,7 @@ export default function DashboardPage() {
       completed: { bg: "bg-emerald-100 dark:bg-emerald-900/30", text: "text-emerald-700 dark:text-emerald-400" },
       failed: { bg: "bg-red-100 dark:bg-red-900/30", text: "text-red-700 dark:text-red-400" },
     }
-    const config = configs[status] ?? configs.pending
+    const config = configs[status] ?? configs.pending!
     return (
       <Badge className={`${config.bg} ${config.text} border-0 font-medium`}>
         {status.replace("_", " ")}

@@ -58,6 +58,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import Link from "next/link"
 import { api } from "@/trpc/react"
+import { trackClient } from "@/lib/analytics"
 
 // Types for SSE events
 interface JobEvent {
@@ -130,7 +131,7 @@ export default function TaskDetailPage() {
   })
 
   const resumeJobMutation = api.taxReturn.resumeJob.useMutation({
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       setChatMessages(prev => [...prev, {
         id: `sys-${Date.now()}`,
         role: "assistant",
@@ -138,6 +139,21 @@ export default function TaskDetailPage() {
         timestamp: Date.now()
       }])
       refetch()
+
+      // Track job resume
+      const job = task?.jobs?.find(j => j.id === variables.jobId)
+      if (job) {
+        // Calculate paused duration from when job was last updated
+        const pausedTime = job.updatedAt ? new Date(job.updatedAt).getTime() : Date.now()
+        trackClient({
+          name: "job_resumed",
+          data: {
+            jobId: variables.jobId,
+            taskId: taskId,
+            pausedDurationMs: Date.now() - pausedTime,
+          },
+        }).catch(console.error)
+      }
     },
   })
 
@@ -348,6 +364,38 @@ export default function TaskDetailPage() {
             }])
           }
           refetch()
+
+          // Track job completion or failure
+          const job = task?.jobs?.find(j => j.id === data.jobId)
+          if (job && task) {
+            const startTime = job.startedAt ? new Date(job.startedAt).getTime() : Date.now()
+            const duration = Date.now() - startTime
+
+            if (data.type === "job:completed") {
+              trackClient({
+                name: "job_completed",
+                data: {
+                  jobId: data.jobId,
+                  taskId: taskId,
+                  success: true,
+                  totalDurationMs: duration,
+                  stepsCompleted: steps.length,
+                  autoApproved: true,
+                },
+              }).catch(console.error)
+            } else {
+              trackClient({
+                name: "job_failed",
+                data: {
+                  jobId: data.jobId,
+                  taskId: taskId,
+                  errorType: data.data?.errorType as string || "unknown",
+                  stage: currentStep?.goal || "unknown",
+                  durationMs: duration,
+                },
+              }).catch(console.error)
+            }
+          }
         }
 
       } catch (err) {
@@ -444,11 +492,38 @@ export default function TaskDetailPage() {
     setFinalOutput(null)
     setChatMessages([])
     startJobMutation.mutate({ taskId, overrideSaved })
+
+    // Track job start
+    if (task) {
+      trackClient({
+        name: "job_started",
+        data: {
+          jobId: selectedJobId || "pending",
+          taskId: task.id,
+          taskType: task.taskType || "tax_return",
+          jurisdiction: task.taxReturn?.jurisdiction?.name || "unknown",
+          entityName: task.name,
+          source: overrideSaved ? "retry" : "manual",
+        },
+      }).catch(console.error)
+    }
   }
 
   const handlePause = () => {
     if (runningJob) {
       stopJobMutation.mutate({ jobId: runningJob.id })
+
+      // Track job pause
+      const startTime = runningJob.startedAt ? new Date(runningJob.startedAt).getTime() : Date.now()
+      trackClient({
+        name: "job_paused",
+        data: {
+          jobId: runningJob.id,
+          taskId: taskId,
+          reason: "user_requested",
+          durationMs: Date.now() - startTime,
+        },
+      }).catch(console.error)
     }
   }
 
@@ -860,7 +935,7 @@ export default function TaskDetailPage() {
                                           <p className="text-lg font-medium text-foreground">Ready to Start</p>
                                           <p className="text-sm">Initialize the task to begin automation</p>
                                         </div>
-                                        <Button variant="outline" size="sm" onClick={handleStart} disabled={startJobMutation.isPending}>
+                                        <Button variant="outline" size="sm" onClick={() => handleStart()} disabled={startJobMutation.isPending}>
                                           <Play className="h-3.5 w-3.5 mr-2" />
                                           Start Session
                                         </Button>

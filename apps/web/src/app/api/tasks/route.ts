@@ -2,6 +2,7 @@ import { db, tasks, jobs, organisations, jurisdictions } from "@repo/database"
 import { eq, desc } from "drizzle-orm"
 import { NextResponse } from "next/server"
 import { launchTask as launchEcsTask } from "@/lib/ecs"
+import { trackServer } from "@/lib/analytics"
 
 export async function GET() {
   try {
@@ -82,6 +83,23 @@ export async function POST(request: Request) {
       })
       .returning()
 
+    if (!task) {
+      return NextResponse.json({ error: "Failed to create task" }, { status: 500 })
+    }
+
+    // Track task creation
+    await trackServer({
+      name: "task_created",
+      data: {
+        taskId: task.id,
+        taskType: task.taskType || "tax_return",
+        jurisdiction: jurisdiction.name,
+        orgId: task.orgId,
+        hasDocuments: Array.isArray(pdfUrls) && pdfUrls.length > 0,
+        documentCount: Array.isArray(pdfUrls) ? pdfUrls.length : 0,
+      },
+    })
+
     // Create the first job
     const [job] = await db
       .insert(jobs)
@@ -91,6 +109,10 @@ export async function POST(request: Request) {
         status: "pending",
       })
       .returning()
+
+    if (!job) {
+      return NextResponse.json({ error: "Failed to create job" }, { status: 500 })
+    }
 
     // Optionally launch on ECS
     let ecsResult = null
