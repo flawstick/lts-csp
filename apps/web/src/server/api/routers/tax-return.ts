@@ -372,8 +372,7 @@ export const taxReturnRouter = createTRPCRouter({
     }),
 
   startSyncJob: publicProcedure
-    .input(z.object({ eformsCookie: z.string() }))
-    .mutation(async ({ ctx, input }) => {
+    .mutation(async ({ ctx }) => {
       // Get org and jurisdiction
       const org = await ctx.db.query.organisations.findFirst();
       const jurisdiction = await ctx.db.query.jurisdictions.findFirst({
@@ -397,10 +396,9 @@ export const taxReturnRouter = createTRPCRouter({
 
       if (!job) throw new Error("Failed to create job");
 
-      // Launch ECS task
+      // Launch ECS task (auth handled by container via MYGOV_USERNAME/MYGOV_PASSWORD env vars)
       const result = await launchTaxSync({
         jobId: job.id,
-        eformsCookie: input.eformsCookie,
       });
 
       // Extract log stream from task ARN (task ID is at the end)

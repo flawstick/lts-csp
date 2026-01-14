@@ -3,17 +3,8 @@ import { eq, desc } from "drizzle-orm"
 import { NextResponse } from "next/server"
 import { launchTaxSync } from "@/lib/ecs"
 
-export async function POST(request: Request) {
+export async function POST(_request: Request) {
   try {
-    const body = await request.json().catch(() => ({}))
-
-    if (!body.eformsCookie) {
-      return NextResponse.json(
-        { error: "eformsCookie is required" },
-        { status: 400 }
-      )
-    }
-
     const org = await db.query.organisations.findFirst({
       where: eq(organisations.slug, "lts"),
     })
@@ -51,12 +42,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Failed to create job" }, { status: 500 })
     }
 
-    // Launch on ECS
+    // Launch on ECS (auth handled by container via MYGOV_USERNAME/MYGOV_PASSWORD env vars)
     let ecsResult = null
     try {
       ecsResult = await launchTaxSync({
         jobId: job.id,
-        eformsCookie: body.eformsCookie,
       })
 
       if (ecsResult.taskArn) {
@@ -123,7 +113,7 @@ export async function GET() {
         createdAt: j.createdAt,
       })),
       usage: {
-        launch: "POST with { eformsCookie: '...' }",
+        launch: "POST (no body required - auth via MYGOV_USERNAME/PASSWORD env vars)",
       },
     })
   } catch (error) {

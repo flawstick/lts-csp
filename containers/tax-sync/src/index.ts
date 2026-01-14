@@ -1,22 +1,25 @@
 import * as cheerio from "cheerio";
 import { db, schema } from "@repo/database";
 import { eq } from "drizzle-orm";
+import { authenticate } from "./auth";
 
 const TOTAL_PAGES = 7;
 const BASE_URL = "https://my.gov.gg/revenue/employee-assigned-cases";
 
-const HEADERS = {
+let sessionCookies: string = "";
+
+const getHeaders = () => ({
   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
-  "Cookie": process.env.EFORMS_COOKIE || "",
+  "Cookie": sessionCookies,
   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-};
+});
 
 const log = (msg: string) => console.log(`[TAX-SYNC] ${msg}`);
 
 async function fetchPage(page: number): Promise<string> {
   const url = `${BASE_URL}?taxReferenceType=All&year=All&formStatus=All&items_per_page=50&page=${page}`;
-  const res = await fetch(url, { headers: HEADERS });
+  const res = await fetch(url, { headers: getHeaders() });
   if (!res.ok) throw new Error(`Page ${page} failed: ${res.status}`);
   return res.text();
 }
@@ -65,6 +68,19 @@ async function main() {
         .set({ status: "running", startedAt: new Date() })
         .where(eq(schema.taxSyncJobs.id, jobId));
     }
+
+    // Authenticate to get session cookies
+    const username = process.env.MYGOV_USERNAME;
+    const password = process.env.MYGOV_PASSWORD;
+
+    if (!username || !password) {
+      throw new Error("MYGOV_USERNAME and MYGOV_PASSWORD environment variables are required");
+    }
+
+    log("Authenticating with MyGov portal...");
+    const authResult = await authenticate(username, password);
+    sessionCookies = authResult.cookies;
+    log(`Session established, expires at ${authResult.expiresAt.toISOString()}`);
 
     const allReturns: any[] = [];
 

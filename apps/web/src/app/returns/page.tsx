@@ -28,8 +28,6 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -42,7 +40,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -64,9 +61,7 @@ export default function ReturnsPage() {
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(undefined)
   const [searchQuery, setSearchQuery] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
-  const [cookieDialogOpen, setCookieDialogOpen] = React.useState(false)
   const [logsDialogOpen, setLogsDialogOpen] = React.useState(false)
-  const [cookie, setCookie] = React.useState("")
   const [activeJobId, setActiveJobId] = React.useState<string | null>(null)
   
   // Selection State
@@ -123,7 +118,6 @@ export default function ReturnsPage() {
   const startSyncMutation = api.taxReturn.startSyncJob.useMutation({
     onSuccess: (data) => {
       setActiveJobId(data.jobId)
-      setCookieDialogOpen(false)
       setLogsDialogOpen(true)
     },
     onError: () => {
@@ -140,8 +134,7 @@ export default function ReturnsPage() {
   }, [activeJob, activeJobId])
 
   const handleStartSync = () => {
-    if (!cookie.trim()) return
-    startSyncMutation.mutate({ eformsCookie: cookie })
+    startSyncMutation.mutate()
   }
 
   const handleDeleteSelected = () => {
@@ -268,8 +261,12 @@ export default function ReturnsPage() {
                   Syncing...
                 </Button>
               ) : (
-                <Button onClick={() => setCookieDialogOpen(true)}>
-                  <Play className="mr-2 h-4 w-4" />
+                <Button onClick={handleStartSync} disabled={startSyncMutation.isPending}>
+                  {startSyncMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="mr-2 h-4 w-4" />
+                  )}
                   Scrape Returns
                 </Button>
               )}
@@ -467,41 +464,6 @@ export default function ReturnsPage() {
             )}
           </div>
         </div>
-
-        {/* Cookie Input Dialog */}
-        <Dialog open={cookieDialogOpen} onOpenChange={setCookieDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Start Sync Job</DialogTitle>
-              <DialogDescription>
-                Enter your Guernsey Tax Portal session cookie to start scraping returns.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="cookie">Session Cookie</Label>
-                <Input
-                  id="cookie"
-                  placeholder="SSESSf0e33fe76aa9..."
-                  value={cookie}
-                  onChange={(e) => setCookie(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Copy from your browser&apos;s dev tools (Application &gt; Cookies)
-                </p>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setCookieDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleStartSync} disabled={!cookie.trim() || startSyncMutation.isPending}>
-                {startSyncMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Start Sync
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
 
         {/* Logs Dialog */}
         <Dialog open={logsDialogOpen} onOpenChange={setLogsDialogOpen}>

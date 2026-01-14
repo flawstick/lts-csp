@@ -12,7 +12,9 @@
   "dependencies": {
     "@repo/database": "workspace:*",
     "cheerio": "^1.0.0",
-    "drizzle-orm": "^0.41.0"
+    "drizzle-orm": "^0.41.0",
+    "got-scraping": "^4.1.3",
+    "tough-cookie": "^6.0.0"
   },
   "devDependencies": {
     "@types/node": "^20",
