@@ -1,7 +1,6 @@
 import { taxReturnRouter } from "@/server/api/routers/tax-return";
 import { substanceFormRouter } from "@/server/api/routers/substance-form";
 import { analyticsRouter } from "@/server/api/routers/analytics";
-import { invoiceRouter } from "@/server/api/routers/invoice";
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 
 /**
@@ -13,7 +12,6 @@ export const appRouter = createTRPCRouter({
   taxReturn: taxReturnRouter,
   substanceForm: substanceFormRouter,
   analytics: analyticsRouter,
-  invoice: invoiceRouter,
 });
 
 // export type definition of API
