@@ -62,6 +62,21 @@ export const taskTypeEnum = pgEnum("task_type", [
   "inquiry",
 ]);
 
+export const invitationStatusEnum = pgEnum("invitation_status", [
+  "pending",
+  "accepted",
+  "expired",
+  "revoked",
+]);
+
+export const invoiceStatusEnum = pgEnum("invoice_status", [
+  "draft",
+  "sent",
+  "paid",
+  "overdue",
+  "cancelled",
+]);
+
 export const taxReturnStatusEnum = pgEnum("tax_return_status", [
   "pending",
   "in_progress",
@@ -268,6 +283,75 @@ export const orgMemberPermissions = createTable(
   (t) => [
     index("lts_org_member_permission_member_idx").on(t.orgMemberId),
     uniqueIndex("lts_org_member_permission_unique_idx").on(t.orgMemberId, t.permission),
+  ]
+);
+
+// ============================================================================
+// PENDING INVITATIONS - Org member invitations
+// ============================================================================
+
+export const pendingInvitations = createTable(
+  "pending_invitation",
+  (d) => ({
+    id: uuid().primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    email: varchar({ length: 256 }).notNull(),
+    role: orgMemberRoleEnum().notNull().default("member"),
+    status: invitationStatusEnum().notNull().default("pending"),
+    token: varchar({ length: 64 }).notNull().unique(), // Secure token for accept link
+    invitedBy: uuid("invited_by")
+      .notNull()
+      .references(() => accounts.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  }),
+  (t) => [
+    index("lts_pending_invitation_org_idx").on(t.orgId),
+    index("lts_pending_invitation_email_idx").on(t.email),
+    uniqueIndex("lts_pending_invitation_token_idx").on(t.token),
+    uniqueIndex("lts_pending_invitation_org_email_idx").on(t.orgId, t.email),
+  ]
+);
+
+// ============================================================================
+// INVOICES - Billing invoices (global admin managed)
+// ============================================================================
+
+export const invoices = createTable(
+  "invoice",
+  (d) => ({
+    id: uuid().primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    invoiceNumber: varchar("invoice_number", { length: 64 }).notNull(),
+    status: invoiceStatusEnum().notNull().default("draft"),
+    amount: integer("amount").notNull(), // Amount in cents
+    currency: varchar({ length: 3 }).notNull().default("GBP"),
+    description: text(),
+    dueDate: timestamp("due_date", { withTimezone: true }),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    pdfUrl: text("pdf_url"), // Vercel Blob URL
+    metadata: jsonb().$type<Record<string, unknown>>(),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => accounts.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
+      () => new Date()
+    ),
+  }),
+  (t) => [
+    index("lts_invoice_org_idx").on(t.orgId),
+    index("lts_invoice_status_idx").on(t.status),
+    uniqueIndex("lts_invoice_number_idx").on(t.invoiceNumber),
   ]
 );
 
@@ -594,6 +678,8 @@ export const accountsRelations = relations(accounts, ({ one, many }) => ({
   orgMembers: many(orgMembers),
   createdTasks: many(tasks),
   createdJobs: many(jobs),
+  sentInvitations: many(pendingInvitations),
+  createdInvoices: many(invoices),
 }));
 
 export const globalAdminsRelations = relations(globalAdmins, ({ one }) => ({
@@ -616,6 +702,8 @@ export const organisationsRelations = relations(organisations, ({ one, many }) =
   tasks: many(tasks),
   taxReturns: many(taxReturns),
   jurisdictionSettings: many(jurisdictionSettings),
+  pendingInvitations: many(pendingInvitations),
+  invoices: many(invoices),
 }));
 
 export const jurisdictionsRelations = relations(jurisdictions, ({ many }) => ({
@@ -666,6 +754,31 @@ export const orgMemberPermissionsRelations = relations(
     }),
   })
 );
+
+export const pendingInvitationsRelations = relations(
+  pendingInvitations,
+  ({ one }) => ({
+    organisation: one(organisations, {
+      fields: [pendingInvitations.orgId],
+      references: [organisations.id],
+    }),
+    invitedByAccount: one(accounts, {
+      fields: [pendingInvitations.invitedBy],
+      references: [accounts.id],
+    }),
+  })
+);
+
+export const invoicesRelations = relations(invoices, ({ one }) => ({
+  organisation: one(organisations, {
+    fields: [invoices.orgId],
+    references: [organisations.id],
+  }),
+  createdByAccount: one(accounts, {
+    fields: [invoices.createdBy],
+    references: [accounts.id],
+  }),
+}));
 
 export const taxReturnsRelations = relations(taxReturns, ({ one, many }) => ({
   organisation: one(organisations, {
@@ -767,6 +880,12 @@ export type NewOrgMember = typeof orgMembers.$inferInsert;
 
 export type OrgMemberPermission = typeof orgMemberPermissions.$inferSelect;
 export type NewOrgMemberPermission = typeof orgMemberPermissions.$inferInsert;
+
+export type PendingInvitation = typeof pendingInvitations.$inferSelect;
+export type NewPendingInvitation = typeof pendingInvitations.$inferInsert;
+
+export type Invoice = typeof invoices.$inferSelect;
+export type NewInvoice = typeof invoices.$inferInsert;
 
 export type TaxReturn = typeof taxReturns.$inferSelect;
 export type NewTaxReturn = typeof taxReturns.$inferInsert;

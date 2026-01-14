@@ -46,49 +46,100 @@ export async function authenticate(username: string, password: string): Promise<
     "Priority": "u=0, i",
   };
 
-  // Step 0: Visit my.gov.gg first to get initial session cookies (especially the nonce cookie)
-  log("Getting initial my.gov.gg session...");
-  const initialResponse = await gotScraping({
-    url: `${MYGOV_URL}/revenue/all-cases`,
-    followRedirect: false,
-    cookieJar,
-    headers: browserHeaders,
-    headerGeneratorOptions: {
-      browsers: ["firefox"],
-      devices: ["desktop"],
-      operatingSystems: ["macos"],
-    },
-  });
+  // Step 0: Visit my.gov.gg to trigger PingAccess redirect chain
+  // This is critical - we MUST follow my.gov.gg's redirects to get proper state
+  log("Requesting protected resource to trigger OAuth flow...");
+  let currentUrl = `${MYGOV_URL}/revenue/all-cases`;
+  let authUrl: string | null = null;
 
-  log(`Initial response status: ${initialResponse.statusCode}`);
-  const initialCookies = await cookieJar.getCookies(MYGOV_URL);
-  log(`Initial my.gov.gg cookies: ${initialCookies.map(c => c.key).join(", ")}`);
+  // Follow redirects from my.gov.gg until we reach identity.gov.gg
+  for (let i = 0; i < 10; i++) {
+    log(`Step ${i}: Requesting ${currentUrl.substring(0, 80)}...`);
 
-  // Step 1: Generate PKCE parameters
-  const codeVerifier = generateCodeVerifier();
-  const codeChallenge = generateCodeChallenge(codeVerifier);
-  const nonce = crypto.randomBytes(32).toString("base64url");
-  const state = crypto.randomBytes(32).toString("base64url");
+    const response = await gotScraping({
+      url: currentUrl,
+      followRedirect: false,
+      cookieJar,
+      headers: {
+        ...browserHeaders,
+        ...(currentUrl.includes("identity.gov.gg") ? { "Sec-Fetch-Site": "cross-site" } : {}),
+      },
+      headerGeneratorOptions: {
+        browsers: ["firefox"],
+        devices: ["desktop"],
+        operatingSystems: ["macos"],
+      },
+    });
 
-  log("Starting OAuth2 PKCE flow...");
+    log(`Step ${i} status: ${response.statusCode}`);
+    log(`Step ${i} headers: ${JSON.stringify(response.headers)}`);
 
-  // Step 2: Authorization request
-  const authParams = new URLSearchParams({
-    response_type: "code",
-    code_challenge: codeChallenge,
-    code_challenge_method: "S256",
-    client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
-    scope: "openid address email phone profile",
-    state: state,
-    nonce: nonce,
-    vnd_pi_requested_resource: `${MYGOV_URL}/revenue/all-cases`,
-    vnd_pi_application_name: "Drupal CIAM/MyGov/ESS/Corp Tax",
-  });
+    const cookies = await cookieJar.getCookies(currentUrl.includes("identity.gov.gg") ? IDENTITY_URL : MYGOV_URL);
+    log(`Step ${i} cookies: ${cookies.map(c => c.key).join(", ")}`);
 
-  const authUrl = `${IDENTITY_URL}/as/authorization.oauth2?${authParams.toString()}`;
-  log("Requesting authorization page...");
+    // Check for redirect
+    if (response.statusCode === 302 || response.statusCode === 301) {
+      const location = response.headers.location;
+      if (location) {
+        // Check if this is the OAuth authorization URL
+        if (location.includes("/as/authorization.oauth2") || location.includes("identity.gov.gg")) {
+          authUrl = location.startsWith("http") ? location : `${MYGOV_URL}${location}`;
+          log(`Found OAuth URL: ${authUrl}`);
+          break;
+        }
+        currentUrl = location.startsWith("http") ? location : `${MYGOV_URL}${location}`;
+        continue;
+      }
+    }
 
+    // Check for 401 with redirect in body or meta refresh
+    if (response.statusCode === 401 || response.statusCode === 200) {
+      const body = response.body;
+
+      // Check for meta refresh redirect
+      const metaRefreshMatch = body.match(/content=["']?\d+;\s*url=([^"'\s>]+)/i);
+      if (metaRefreshMatch) {
+        currentUrl = metaRefreshMatch[1];
+        log(`Found meta refresh redirect: ${currentUrl}`);
+        continue;
+      }
+
+      // Check for JavaScript redirect
+      const jsRedirectMatch = body.match(/window\.location\s*=\s*["']([^"']+)["']/i) ||
+                              body.match(/location\.href\s*=\s*["']([^"']+)["']/i);
+      if (jsRedirectMatch) {
+        // Unescape JS string: \/ -> /, \x26 -> &, etc.
+        let url = jsRedirectMatch[1]
+          .replace(/\\\//g, "/")
+          .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+          .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+        currentUrl = url;
+        log(`Found JS redirect: ${currentUrl}`);
+        continue;
+      }
+
+      // If 401 with no redirect, check if there's a WWW-Authenticate header or Location
+      if (response.headers.location) {
+        currentUrl = response.headers.location.startsWith("http")
+          ? response.headers.location
+          : `${MYGOV_URL}${response.headers.location}`;
+        continue;
+      }
+
+      // Log response body for debugging
+      log(`Response body preview: ${body.substring(0, 500)}`);
+    }
+
+    // If we get here without a redirect, something's wrong
+    log(`No redirect found at step ${i}`);
+    break;
+  }
+
+  if (!authUrl) {
+    throw new Error("Could not find OAuth authorization URL from my.gov.gg redirect chain");
+  }
+
+  log("Following OAuth URL from PingAccess...");
   const authResponse = await gotScraping({
     url: authUrl,
     followRedirect: false,
