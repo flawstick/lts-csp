@@ -1,5 +1,29 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "DATABASE_URL",
+    "REDIS_URL",
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "AWS_REGION",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "ECS_CLUSTER",
+    "ECS_TASK_DEFINITION",
+    "ECS_CONTAINER_NAME",
+    "ECS_SUBNETS",
+    "ECS_SECURITY_GROUPS",
+    "ECS_LOG_GROUP",
+    "MYGOV_USERNAME",
+    "MYGOV_PASSWORD",
+    "ANTHROPIC_API_KEY",
+    "BROWSER_USE_API_KEY",
+    "RESEND_API_KEY",
+    "BLOB_READ_WRITE_TOKEN",
+    "HEADLESS",
+    "JOB_PAYLOAD"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
