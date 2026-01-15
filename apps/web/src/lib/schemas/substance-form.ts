@@ -95,6 +95,12 @@ export const substanceFormSchema = z.object({
   registeredAddress: z.string().optional(),
   principalPlaceOfBusiness: z.string().optional(),
 
+  // Entity Structure
+  isIncorporatedInGuernsey: yesNoEnum.optional(),
+  economicClassificationCode: z.string().optional(), // Company Activity Code
+  certificateType: z.string().optional(), // Certificate 1, 2, or 3
+  entityActivity: z.string().optional(), // From Directors Report
+
   // =========================================================================
   // SECTION 3: PARTNERSHIP INFORMATION (if applicable)
   // =========================================================================
@@ -107,6 +113,8 @@ export const substanceFormSchema = z.object({
   areFinancialStatementsConsolidated: yesNoEnum.optional(),
   accountsPreparerName: z.string().optional(),
   accountsPreparerQualification: z.string().optional(), // e.g. ACCA, ICAEW
+  netBookValue: z.string().optional(), // From Balance Sheet
+  totalProfit: z.string().optional(), // From P&L Account
 
   // =========================================================================
   // SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
@@ -119,6 +127,23 @@ export const substanceFormSchema = z.object({
   // =========================================================================
   relevantActivity: relevantActivityEnum.optional(),
   hasMultipleRelevantActivities: yesNoEnum.optional(),
+  hasIntellectualPropertyHolding: yesNoEnum.optional(), // Does entity have IP?
+
+  // =========================================================================
+  // SECTION 6A: INTELLECTUAL PROPERTY (if IP Holding Company)
+  // =========================================================================
+  isHighRiskIpEntity: yesNoEnum.optional(),
+  wantsToRebutHighRiskStatus: yesNoEnum.optional(),
+  highRiskRebuttalNarrative: z.string().optional(),
+  ipIncomeType: z.string().optional(),
+
+  // =========================================================================
+  // SECTION 6B: ADEQUACY ASSESSMENT
+  // =========================================================================
+  hasAdequateExpenditure: yesNoNaEnum.optional(),
+  hasAdequatePhysicalPresence: yesNoNaEnum.optional(),
+  adequacyExpenditureDetails: z.string().optional(),
+  adequacyPhysicalPresenceDetails: z.string().optional(),
 
   // =========================================================================
   // SECTION 7: CORE INCOME GENERATING ACTIVITIES (CIGA)
@@ -170,6 +195,20 @@ export const substanceFormSchema = z.object({
   preparedDate: z.string().optional(),
   managerSignOff: z.string().optional(),
   managerSignOffDate: z.string().optional(),
+
+  // =========================================================================
+  // SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)
+  // =========================================================================
+  isConstituentEntity: yesNoEnum.optional(),
+
+  // =========================================================================
+  // SECTION 14: ADDITIONAL INFORMATION
+  // =========================================================================
+  hasPostBalanceSheetEvent: yesNoEnum.optional(),
+  postBalanceSheetEventDetails: z.string().optional(),
+  hasC42Association: yesNoEnum.optional(), // Statement of Practice C42
+  c42AssociatedCompanies: z.string().optional(),
+  contractInformation: z.string().optional(), // CSP standard contract info
 });
 
 export type SubstanceFormData = z.infer<typeof substanceFormSchema>;
@@ -238,6 +277,10 @@ export const FIELD_LABELS: Record<string, string> = {
   taxReferenceNumber: "Tax Reference Number",
   registeredAddress: "Registered Address",
   principalPlaceOfBusiness: "Principal Place of Business",
+  isIncorporatedInGuernsey: "Is Entity Incorporated in Guernsey?",
+  economicClassificationCode: "Economic Classification Code",
+  certificateType: "Certificate Type",
+  entityActivity: "Entity Activity",
 
   // Partnership Information
   partnershipName: "Partnership Name",
@@ -247,6 +290,8 @@ export const FIELD_LABELS: Record<string, string> = {
   areFinancialStatementsConsolidated: "Are Financial Statements Consolidated?",
   accountsPreparerName: "Accounts Preparer Name",
   accountsPreparerQualification: "Preparer Qualification (e.g. ACCA, ICAEW)",
+  netBookValue: "Net Book Value",
+  totalProfit: "Total Profit",
 
   // Financial Institutions
   isGuernseyFiFatca: "Is Guernsey FI under FATCA?",
@@ -255,6 +300,19 @@ export const FIELD_LABELS: Record<string, string> = {
   // Relevant Activities
   relevantActivity: "Relevant Activity",
   hasMultipleRelevantActivities: "Has Multiple Relevant Activities?",
+  hasIntellectualPropertyHolding: "Does Entity Have IP Holding?",
+
+  // Intellectual Property
+  isHighRiskIpEntity: "Is High Risk IP Entity?",
+  wantsToRebutHighRiskStatus: "Wants to Rebut High Risk Status?",
+  highRiskRebuttalNarrative: "High Risk Rebuttal Narrative",
+  ipIncomeType: "IP Income Type",
+
+  // Adequacy Assessment
+  hasAdequateExpenditure: "Has Adequate Expenditure?",
+  hasAdequatePhysicalPresence: "Has Adequate Physical Presence?",
+  adequacyExpenditureDetails: "Adequacy Expenditure Details",
+  adequacyPhysicalPresenceDetails: "Adequacy Physical Presence Details",
 
   // CIGA
   cigaPerformed: "CIGA Performed",
@@ -292,6 +350,16 @@ export const FIELD_LABELS: Record<string, string> = {
   preparedDate: "Prepared Date",
   managerSignOff: "Manager Sign Off",
   managerSignOffDate: "Manager Sign Off Date",
+
+  // Country by Country Reporting
+  isConstituentEntity: "Is Constituent Entity (CbCR)?",
+
+  // Additional Information
+  hasPostBalanceSheetEvent: "Has Post Balance Sheet Event?",
+  postBalanceSheetEventDetails: "Post Balance Sheet Event Details",
+  hasC42Association: "Has C42 Association?",
+  c42AssociatedCompanies: "C42 Associated Companies",
+  contractInformation: "Contract Information (CSP)",
 };
 
 // ============================================================================
@@ -314,12 +382,16 @@ export const FORM_SECTIONS = [
   {
     id: "company",
     title: "Company Information",
-    description: "Company registration and address details",
+    description: "Company registration, address details, and entity structure",
     fields: [
       "companyNumber",
       "taxReferenceNumber",
       "registeredAddress",
       "principalPlaceOfBusiness",
+      "isIncorporatedInGuernsey",
+      "economicClassificationCode",
+      "certificateType",
+      "entityActivity",
     ],
   },
   {
@@ -332,11 +404,13 @@ export const FORM_SECTIONS = [
   {
     id: "financialStatements",
     title: "Financial Statements",
-    description: "Details about the entity's financial statements",
+    description: "Details about the entity's financial statements and key figures",
     fields: [
       "areFinancialStatementsConsolidated",
       "accountsPreparerName",
       "accountsPreparerQualification",
+      "netBookValue",
+      "totalProfit",
     ],
   },
   {
@@ -349,7 +423,21 @@ export const FORM_SECTIONS = [
     id: "relevantActivities",
     title: "Relevant Activities",
     description: "Income-generating activities performed by the entity",
-    fields: ["relevantActivity", "hasMultipleRelevantActivities"],
+    fields: ["relevantActivity", "hasMultipleRelevantActivities", "hasIntellectualPropertyHolding"],
+  },
+  {
+    id: "intellectualProperty",
+    title: "Intellectual Property",
+    description: "IP holding company details and high-risk status",
+    fields: ["isHighRiskIpEntity", "wantsToRebutHighRiskStatus", "highRiskRebuttalNarrative", "ipIncomeType"],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.relevantActivity === "Intellectual Property Holding Company" || data.hasIntellectualPropertyHolding === "Yes",
+  },
+  {
+    id: "adequacy",
+    title: "Adequacy Assessment",
+    description: "Assessment of adequate substance (expenditure and physical presence)",
+    fields: ["hasAdequateExpenditure", "hasAdequatePhysicalPresence", "adequacyExpenditureDetails", "adequacyPhysicalPresenceDetails"],
   },
   {
     id: "ciga",
@@ -398,6 +486,18 @@ export const FORM_SECTIONS = [
     title: "Declaration",
     description: "Sign-off by preparer and manager",
     fields: ["preparedBy", "preparedDate", "managerSignOff", "managerSignOffDate"],
+  },
+  {
+    id: "countryByCountry",
+    title: "Country by Country Reporting",
+    description: "CbCR constituent entity status",
+    fields: ["isConstituentEntity"],
+  },
+  {
+    id: "additionalInformation",
+    title: "Additional Information",
+    description: "Post balance sheet events, C42 associations, and contract info",
+    fields: ["hasPostBalanceSheetEvent", "postBalanceSheetEventDetails", "hasC42Association", "c42AssociatedCompanies", "contractInformation"],
   },
 ] as const;
 

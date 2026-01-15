@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { type LucideIcon } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -21,7 +20,7 @@ export function NavOrg({
   items: {
     title: string
     url: string
-    icon?: LucideIcon
+    icon?: React.ComponentType<{ className?: string }>
   }[]
 }) {
   const pathname = usePathname()

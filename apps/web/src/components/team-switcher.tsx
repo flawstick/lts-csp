@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ChevronsUpDown, Building2 } from "lucide-react"
+import { ChevronsUpDown, Building2 } from "@/lib/icons"
 import { useOrgStore } from "@/lib/org-context"
 
 import {

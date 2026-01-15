@@ -1,6 +1,6 @@
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
-import { taxReturns, jurisdictions } from "@repo/database";
-import { count, desc, eq, ne } from "drizzle-orm";
+import { taxReturns, jurisdictions, tasks } from "@repo/database";
+import { count, desc, eq, ne, and, gte } from "drizzle-orm";
 
 export const analyticsRouter = createTRPCRouter({
   getStats: publicProcedure.query(async ({ ctx }) => {
@@ -63,7 +63,64 @@ export const analyticsRouter = createTRPCRouter({
         .from(taxReturns)
         .leftJoin(jurisdictions, eq(taxReturns.jurisdictionId, jurisdictions.id))
         .groupBy(jurisdictions.name);
-        
+
       return stats;
-  })
+  }),
+
+  getDashboardStats: publicProcedure.query(async ({ ctx }) => {
+    // Get returns stats
+    const [totalReturns] = await ctx.db
+      .select({ count: count(taxReturns.id) })
+      .from(taxReturns);
+
+    const [pendingReturns] = await ctx.db
+      .select({ count: count(taxReturns.id) })
+      .from(taxReturns)
+      .where(eq(taxReturns.status, "pending"));
+
+    const [completedReturns] = await ctx.db
+      .select({ count: count(taxReturns.id) })
+      .from(taxReturns)
+      .where(eq(taxReturns.status, "completed"));
+
+    // Get tasks stats
+    const [totalTasks] = await ctx.db
+      .select({ count: count(tasks.id) })
+      .from(tasks);
+
+    const [pendingTasks] = await ctx.db
+      .select({ count: count(tasks.id) })
+      .from(tasks)
+      .where(eq(tasks.status, "pending"));
+
+    const [runningTasks] = await ctx.db
+      .select({ count: count(tasks.id) })
+      .from(tasks)
+      .where(eq(tasks.status, "in_progress"));
+
+    const [completedTasks] = await ctx.db
+      .select({ count: count(tasks.id) })
+      .from(tasks)
+      .where(eq(tasks.status, "completed"));
+
+    const [failedTasks] = await ctx.db
+      .select({ count: count(tasks.id) })
+      .from(tasks)
+      .where(eq(tasks.status, "failed"));
+
+    return {
+      returns: {
+        total: totalReturns?.count ?? 0,
+        pending: pendingReturns?.count ?? 0,
+        completed: completedReturns?.count ?? 0,
+      },
+      tasks: {
+        total: totalTasks?.count ?? 0,
+        pending: pendingTasks?.count ?? 0,
+        running: runningTasks?.count ?? 0,
+        completed: completedTasks?.count ?? 0,
+        failed: failedTasks?.count ?? 0,
+      },
+    };
+  }),
 });

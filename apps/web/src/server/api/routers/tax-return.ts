@@ -358,8 +358,13 @@ export const taxReturnRouter = createTRPCRouter({
 
         return { logs, job };
       } catch (error) {
-        console.error("Failed to fetch CloudWatch logs:", error);
-        // CloudWatch error (ResourceNotFoundException = log stream doesn't exist)
+        const isResourceNotFound = (error as { name?: string })?.name === "ResourceNotFoundException";
+
+        // ResourceNotFoundException is expected when ECS task just started
+        if (!isResourceNotFound) {
+          console.error("Failed to fetch CloudWatch logs:", error);
+        }
+
         // Only mark as failed if running for >30s (give ECS time to create log stream)
         if (job.status === "running" && job.startedAt) {
           const ageMs = Date.now() - new Date(job.startedAt).getTime();
@@ -367,7 +372,13 @@ export const taxReturnRouter = createTRPCRouter({
             await markJobFailed("Task failed - log stream not found");
           }
         }
-        return { logs: [], job, error: "Failed to fetch logs" };
+
+        return {
+          logs: [],
+          job,
+          pending: isResourceNotFound && job.status === "running",
+          error: isResourceNotFound ? "Waiting for logs..." : "Failed to fetch logs"
+        };
       }
     }),
 
@@ -478,6 +489,15 @@ export const taxReturnRouter = createTRPCRouter({
     }
 
     return activeJob ?? null;
+  }),
+
+  deleteFailedSyncJobs: publicProcedure.mutation(async ({ ctx }) => {
+    const result = await ctx.db
+      .delete(taxSyncJobs)
+      .where(eq(taxSyncJobs.status, "failed"))
+      .returning({ id: taxSyncJobs.id });
+
+    return { deleted: result.length };
   }),
 
   deleteTasks: publicProcedure
@@ -912,6 +932,7 @@ export const taxReturnRouter = createTRPCRouter({
         url: z.string().optional(),
         message: z.string().optional(),
       })).optional(),
+      liveUrl: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const job = await ctx.db.query.jobs.findFirst({
@@ -931,6 +952,7 @@ export const taxReturnRouter = createTRPCRouter({
             ...currentData,
             ...(input.chatMessages && { chatMessages: input.chatMessages }),
             ...(input.steps && { steps: input.steps }),
+            ...(input.liveUrl && { liveUrl: input.liveUrl }),
           },
         })
         .where(eq(jobs.id, input.jobId));

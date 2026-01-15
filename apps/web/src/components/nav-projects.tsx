@@ -5,8 +5,8 @@ import {
   Forward,
   MoreHorizontal,
   Trash2,
-  type LucideIcon,
-} from "lucide-react"
+} from "@/lib/icons"
+import type { ComponentType } from "react"
 
 import {
   DropdownMenu,
@@ -31,7 +31,7 @@ export function NavProjects({
   projects: {
     name: string
     url: string
-    icon: LucideIcon
+    icon: ComponentType<{ className?: string }>
   }[]
 }) {
   const { isMobile } = useSidebar()
@@ -69,8 +69,8 @@ export function NavProjects({
                   <span>Share Project</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>
-                  <Trash2 className="text-muted-foreground" />
+                <DropdownMenuItem className="text-destructive focus:text-destructive">
+                  <Trash2 />
                   <span>Delete Project</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>

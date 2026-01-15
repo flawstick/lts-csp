@@ -1,3 +1,4 @@
+import { CloudWatchLogsClient, GetLogEventsCommand } from "@aws-sdk/client-cloudwatch-logs"
 import { db, taxSyncJobs, organisations, jurisdictions } from "@repo/database"
 import { eq, desc } from "drizzle-orm"
 import { NextResponse } from "next/server"
@@ -44,18 +45,20 @@ export async function POST(_request: Request) {
 
     // Launch on ECS (auth handled by container via MYGOV_USERNAME/MYGOV_PASSWORD env vars)
     let ecsResult = null
+    let logStream: string | null = null
     try {
       ecsResult = await launchTaxSync({
         jobId: job.id,
       })
 
       if (ecsResult.taskArn) {
+        logStream = `ecs/lts-tax-sync/${ecsResult.taskArn.split("/").pop()}`
         await db
           .update(taxSyncJobs)
           .set({
             status: "running",
             ecsTaskArn: ecsResult.taskArn,
-            cloudwatchLogStream: `ecs/lts-tax-sync/${ecsResult.taskArn.split("/").pop()}`,
+            cloudwatchLogStream: logStream,
           })
           .where(eq(taxSyncJobs.id, job.id))
       }
@@ -77,6 +80,8 @@ export async function POST(_request: Request) {
         id: job.id,
         status: "running",
         ecsTaskArn: ecsResult?.taskArn,
+        cloudwatchLogGroup: job.cloudwatchLogGroup,
+        cloudwatchLogStream: logStream,
       },
       organisation: { id: org.id, name: org.name },
       jurisdiction: { id: jurisdiction.id, code: jurisdiction.code, name: jurisdiction.name },
@@ -91,8 +96,51 @@ export async function POST(_request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url)
+    const jobId = searchParams.get("jobId")
+    const limitParam = searchParams.get("limit")
+    const limit = limitParam ? Math.min(Number(limitParam), 1000) : 200
+
+    if (jobId) {
+      const job = await db.query.taxSyncJobs.findFirst({
+        where: eq(taxSyncJobs.id, jobId),
+      })
+
+      if (!job) {
+        return NextResponse.json({ error: "Job not found" }, { status: 404 })
+      }
+
+      if (!job.cloudwatchLogGroup || !job.cloudwatchLogStream) {
+        return NextResponse.json({ logs: [], job })
+      }
+
+      try {
+        const client = new CloudWatchLogsClient({ region: "eu-west-2" })
+        const command = new GetLogEventsCommand({
+          logGroupName: job.cloudwatchLogGroup,
+          logStreamName: job.cloudwatchLogStream,
+          startFromHead: true,
+          limit,
+        })
+
+        const response = await client.send(command)
+        const logs = (response.events || []).map((event) => ({
+          timestamp: event.timestamp,
+          message: event.message || "",
+        }))
+
+        return NextResponse.json({ logs, job })
+      } catch (logError) {
+        console.error("Failed to fetch CloudWatch logs:", logError)
+        return NextResponse.json(
+          { error: "Failed to fetch logs", job, details: String(logError) },
+          { status: 500 }
+        )
+      }
+    }
+
     const jobs = await db.query.taxSyncJobs.findMany({
       with: { organisation: true, jurisdiction: true },
       orderBy: [desc(taxSyncJobs.createdAt)],
@@ -114,6 +162,7 @@ export async function GET() {
       })),
       usage: {
         launch: "POST (no body required - auth via MYGOV_USERNAME/PASSWORD env vars)",
+        logs: "GET /api/debug/tax-sync?jobId=<uuid>&limit=200",
       },
     })
   } catch (error) {

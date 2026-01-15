@@ -36,10 +36,12 @@ export const useOrgStore = create<OrgState>()(
             if (!currentOrg && data.orgs.length > 0) {
               set({ currentOrg: data.orgs[0] })
             }
-            // If current org exists, make sure it's still valid
+            // If current org exists, update it with fresh data from server
             else if (currentOrg) {
-              const stillExists = data.orgs.find((o: Organisation) => o.id === currentOrg.id)
-              if (!stillExists && data.orgs.length > 0) {
+              const updated = data.orgs.find((o: Organisation) => o.id === currentOrg.id)
+              if (updated) {
+                set({ currentOrg: updated })
+              } else if (data.orgs.length > 0) {
                 set({ currentOrg: data.orgs[0] })
               }
             }

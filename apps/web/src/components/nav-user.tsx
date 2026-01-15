@@ -10,7 +10,7 @@ import {
   Upload,
   Trash2,
   User,
-} from "lucide-react"
+} from "@/lib/icons"
 import { useTheme } from "next-themes"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
@@ -56,7 +56,7 @@ export function NavUser({
   }
 }) {
   const { isMobile } = useSidebar()
-  const { setTheme, theme } = useTheme()
+  const { setTheme, resolvedTheme } = useTheme()
   const router = useRouter()
   const supabase = createClient()
 
@@ -184,8 +184,8 @@ export function NavUser({
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
-                  {theme === "light" ? <Moon /> : <Sun />}
+                <DropdownMenuItem onClick={() => setTheme(resolvedTheme === "light" ? "dark" : "light")}>
+                  {resolvedTheme === "light" ? <Moon /> : <Sun />}
                   Toggle Theme
                 </DropdownMenuItem>
               </DropdownMenuGroup>

@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft } from "@/lib/icons"
 import Link from "next/link"
 
 export default function PrivacyPolicyPage() {

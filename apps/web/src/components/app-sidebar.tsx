@@ -8,7 +8,7 @@ import {
   SquareTerminal,
   FileText,
   Users,
-} from "lucide-react"
+} from "@/lib/icons"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 

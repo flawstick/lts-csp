@@ -17,6 +17,14 @@ const config = {
     // your project has type errors.
     ignoreBuildErrors: false, // Keep TypeScript strict
   },
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "ui.shadcn.com",
+      },
+    ],
+  },
 };
 
 export default config;

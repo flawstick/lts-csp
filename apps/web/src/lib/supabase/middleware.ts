@@ -1,5 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import type { ResponseCookie } from "next/dist/compiled/@edge-runtime/cookies";
+
+type CookieToSet = { name: string; value: string; options?: Partial<ResponseCookie> };
 
 // Routes that don't require authentication
 const publicRoutes = ["/login", "/auth/callback", "/auth/auth-code-error", "/api/debug", "/tos", "/privacy-policy"];
@@ -17,7 +20,7 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: CookieToSet[]) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );

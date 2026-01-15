@@ -5,48 +5,76 @@ import { eq } from "drizzle-orm";
 import { createGateway } from "@ai-sdk/gateway";
 import { generateObject } from "ai";
 import { trackServer } from "@/lib/analytics";
+import * as XLSX from "xlsx";
 import {
   substanceFormSchema,
   getMissingFields,
   type SubstanceFormData,
-  relevantActivityEnum,
-  yesNoEnum,
-  yesNoNaEnum,
-  entityTypeEnum,
   CIGA_BY_ACTIVITY,
 } from "@/lib/schemas/substance-form";
 
-// AI Extraction Schema - Matches actual Guernsey Economic Substance Register form
+// AI Extraction Schema - Uses inline enums to avoid Zod v4 JSON schema conversion issues
 const aiExtractionSchema = z.object({
   // SECTION 1: BACKGROUND
   entityName: z.string().optional().describe("Name of the entity/company"),
-  entityType: entityTypeEnum.optional().describe("Company or Partnership"),
+  entityType: z.enum(["Company", "Partnership"]).optional().describe("Company or Partnership"),
   accountingPeriodStart: z.string().optional().describe("Start date of accounting period (YYYY-MM-DD)"),
   accountingPeriodEnd: z.string().optional().describe("End date of accounting period (YYYY-MM-DD)"),
-  isCollectiveInvestmentVehicle: yesNoEnum.optional().describe("Is this entity a Collective Investment Vehicle?"),
+  isCollectiveInvestmentVehicle: z.enum(["Yes", "No"]).optional().describe("Is this entity a Collective Investment Vehicle?"),
 
   // SECTION 2: COMPANY INFORMATION
   companyNumber: z.string().optional().describe("Company registration number"),
   taxReferenceNumber: z.string().optional().describe("Tax reference number"),
   registeredAddress: z.string().optional().describe("Registered office address"),
   principalPlaceOfBusiness: z.string().optional().describe("Principal place of business address"),
+  isIncorporatedInGuernsey: z.enum(["Yes", "No"]).optional().describe("Is the entity incorporated in Guernsey?"),
+  economicClassificationCode: z.string().optional().describe("Economic classification code / Company Activity Code"),
+  certificateType: z.string().optional().describe("Certificate type (Certificate 1, 2, or 3)"),
+  entityActivity: z.string().optional().describe("Entity activity from Directors Report"),
 
   // SECTION 3: PARTNERSHIP INFORMATION
   partnershipName: z.string().optional().describe("Partnership name if applicable"),
   partnershipNumber: z.string().optional().describe("Partnership registration number"),
 
   // SECTION 4: FINANCIAL STATEMENTS
-  areFinancialStatementsConsolidated: yesNoEnum.optional().describe("Are financial statements consolidated?"),
+  areFinancialStatementsConsolidated: z.enum(["Yes", "No"]).optional().describe("Are financial statements consolidated?"),
   accountsPreparerName: z.string().optional().describe("Name of accounts preparer"),
   accountsPreparerQualification: z.string().optional().describe("Qualification of preparer (ACCA, ICAEW, etc.)"),
+  netBookValue: z.string().optional().describe("Net book value from Balance Sheet"),
+  totalProfit: z.string().optional().describe("Total profit from Profit & Loss Account"),
 
   // SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
-  isGuernseyFiFatca: yesNoEnum.optional().describe("Is Guernsey Financial Institution under FATCA?"),
-  isGuernseyFiCrs: yesNoEnum.optional().describe("Is Financial Institution under CRS?"),
+  isGuernseyFiFatca: z.enum(["Yes", "No"]).optional().describe("Is Guernsey Financial Institution under FATCA?"),
+  isGuernseyFiCrs: z.enum(["Yes", "No"]).optional().describe("Is Financial Institution under CRS?"),
 
   // SECTION 6: RELEVANT ACTIVITIES
-  relevantActivity: relevantActivityEnum.optional().describe("Primary relevant activity from the dropdown options"),
-  hasMultipleRelevantActivities: yesNoEnum.optional().describe("Does entity have multiple relevant activities?"),
+  relevantActivity: z.enum([
+    "Banking",
+    "Insurance",
+    "Fund management",
+    "Financing and leasing",
+    "Distribution and Service Centre",
+    "Headquarters",
+    "Shipping",
+    "Self-managed fund",
+    "Intellectual Property Holding Company",
+    "Pure Equity Holding Company",
+    "None of the above",
+  ]).optional().describe("Primary relevant activity from the dropdown options"),
+  hasMultipleRelevantActivities: z.enum(["Yes", "No"]).optional().describe("Does entity have multiple relevant activities?"),
+  hasIntellectualPropertyHolding: z.enum(["Yes", "No"]).optional().describe("Does the entity have any intellectual property holding?"),
+
+  // SECTION 6A: INTELLECTUAL PROPERTY
+  isHighRiskIpEntity: z.enum(["Yes", "No"]).optional().describe("Is the entity a High Risk IP Entity as defined in legislation?"),
+  wantsToRebutHighRiskStatus: z.enum(["Yes", "No"]).optional().describe("Does the entity want to rebut High Risk IP status?"),
+  highRiskRebuttalNarrative: z.string().optional().describe("Narrative explaining the rebuttal of high risk status"),
+  ipIncomeType: z.string().optional().describe("Type of IP income received"),
+
+  // SECTION 6B: ADEQUACY ASSESSMENT
+  hasAdequateExpenditure: z.enum(["Yes", "No", "N/A"]).optional().describe("Does the entity have adequate expenditure for substance?"),
+  hasAdequatePhysicalPresence: z.enum(["Yes", "No", "N/A"]).optional().describe("Does the entity have adequate physical presence?"),
+  adequacyExpenditureDetails: z.string().optional().describe("Details about adequacy of expenditure"),
+  adequacyPhysicalPresenceDetails: z.string().optional().describe("Details about adequacy of physical presence"),
 
   // SECTION 7: CIGA
   cigaPerformed: z.string().optional().describe("Description of Core Income Generating Activities performed"),
@@ -65,7 +93,7 @@ const aiExtractionSchema = z.object({
   totalQualifiedFte: z.number().optional().describe("Total Qualified FTE"),
 
   // SECTION 9: OUTSOURCING
-  hasCigaOutsourcing: yesNoNaEnum.optional().describe("Are any CIGA activities outsourced?"),
+  hasCigaOutsourcing: z.enum(["Yes", "No", "N/A"]).optional().describe("Are any CIGA activities outsourced?"),
   outsourcingDetails: z.string().optional().describe("Details of outsourcing arrangements"),
 
   // SECTION 10: BENEFICIAL OWNERSHIP
@@ -95,14 +123,14 @@ const aiExtractionSchema = z.object({
   })).optional(),
 
   // SECTION 11: DIRECTED AND MANAGED IN GUERNSEY
-  allBoardMeetingsInGuernsey: yesNoEnum.optional().describe("Were all board meetings held in Guernsey?"),
+  allBoardMeetingsInGuernsey: z.enum(["Yes", "No"]).optional().describe("Were all board meetings held in Guernsey?"),
   totalBoardMeetings: z.number().optional().describe("Total number of board meetings in the period"),
   boardMeetingsInGuernsey: z.number().optional().describe("Number of board meetings held in Guernsey"),
-  adequateMeetingFrequency: yesNoNaEnum.optional().describe("Is the meeting frequency adequate?"),
-  enoughDirectorsPresent: yesNoNaEnum.optional().describe("Were enough directors present at meetings?"),
-  directorsHaveExpertise: yesNoNaEnum.optional().describe("Do directors have necessary expertise?"),
-  strategicDecisionsMadeInGuernsey: yesNoNaEnum.optional().describe("Were strategic decisions made in Guernsey?"),
-  recordsMaintainedInGuernsey: yesNoNaEnum.optional().describe("Are records maintained in Guernsey?"),
+  adequateMeetingFrequency: z.enum(["Yes", "No", "N/A"]).optional().describe("Is the meeting frequency adequate?"),
+  enoughDirectorsPresent: z.enum(["Yes", "No", "N/A"]).optional().describe("Were enough directors present at meetings?"),
+  directorsHaveExpertise: z.enum(["Yes", "No", "N/A"]).optional().describe("Do directors have necessary expertise?"),
+  strategicDecisionsMadeInGuernsey: z.enum(["Yes", "No", "N/A"]).optional().describe("Were strategic decisions made in Guernsey?"),
+  recordsMaintainedInGuernsey: z.enum(["Yes", "No", "N/A"]).optional().describe("Are records maintained in Guernsey?"),
   boardMeetingLocation: z.string().optional().describe("Location where board meetings are held"),
   directors: z.array(z.object({
     name: z.string().optional(),
@@ -120,6 +148,16 @@ const aiExtractionSchema = z.object({
   preparedDate: z.string().optional().describe("Date prepared (YYYY-MM-DD)"),
   managerSignOff: z.string().optional().describe("Manager who signed off"),
   managerSignOffDate: z.string().optional().describe("Sign off date (YYYY-MM-DD)"),
+
+  // SECTION 13: COUNTRY BY COUNTRY REPORTING
+  isConstituentEntity: z.enum(["Yes", "No"]).optional().describe("Is the entity a Constituent Entity for CbCR purposes?"),
+
+  // SECTION 14: ADDITIONAL INFORMATION
+  hasPostBalanceSheetEvent: z.enum(["Yes", "No"]).optional().describe("Has there been a post balance sheet event?"),
+  postBalanceSheetEventDetails: z.string().optional().describe("Details of post balance sheet event"),
+  hasC42Association: z.enum(["Yes", "No"]).optional().describe("Does the entity have a C42 association (Statement of Practice C42)?"),
+  c42AssociatedCompanies: z.string().optional().describe("Names of C42 associated companies"),
+  contractInformation: z.string().optional().describe("Contract information (CSP standard)"),
 });
 
 export const substanceFormRouter = createTRPCRouter({
@@ -222,6 +260,8 @@ export const substanceFormRouter = createTRPCRouter({
         throw new Error("AI_GATEWAY_API_KEY not configured");
       }
 
+      console.log("[AI Extraction] Starting with", input.fileUrls.length, "files");
+
       // Get tax return for context
       const taxReturn = await ctx.db.query.taxReturns.findFirst({
         where: eq(taxReturns.id, input.taxReturnId),
@@ -262,26 +302,76 @@ export const substanceFormRouter = createTRPCRouter({
       });
 
       // Build file content for AI
-      const fileContents = await Promise.all(
-        input.fileUrls.map(async (url) => {
-          const response = await fetch(url);
-          const buffer = await response.arrayBuffer();
+      const supportedFileTypes = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"];
+      const excelTypes = [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+        "application/vnd.ms-excel", // .xls
+      ];
+
+      type FileContent = { type: "file"; data: string; mediaType: string };
+      type TextContent = { type: "text"; text: string };
+      const fileContents: FileContent[] = [];
+      const textContents: TextContent[] = [];
+
+      for (const url of input.fileUrls) {
+        const response = await fetch(url);
+        const mediaType = response.headers.get("content-type") || "application/pdf";
+        const buffer = await response.arrayBuffer();
+
+        // Handle Excel files - convert to CSV
+        if (excelTypes.some(t => mediaType.includes(t) || mediaType.includes("spreadsheet") || mediaType.includes("excel"))) {
+          console.log(`[AI Extraction] Converting Excel file to CSV: ${mediaType}`);
+          try {
+            const workbook = XLSX.read(buffer, { type: "array" });
+            const csvParts: string[] = [];
+
+            // Convert each sheet to CSV
+            for (const sheetName of workbook.SheetNames) {
+              const sheet = workbook.Sheets[sheetName];
+              if (sheet) {
+                const csv = XLSX.utils.sheet_to_csv(sheet);
+                csvParts.push(`=== Sheet: ${sheetName} ===\n${csv}`);
+              }
+            }
+
+            const fullCsv = csvParts.join("\n\n");
+            console.log(`[AI Extraction] Converted Excel to CSV: ${fullCsv.length} chars, ${workbook.SheetNames.length} sheets`);
+            textContents.push({
+              type: "text" as const,
+              text: `[Excel File Content]\n${fullCsv}`,
+            });
+          } catch (err) {
+            console.error(`[AI Extraction] Failed to convert Excel to CSV:`, err);
+          }
+          continue;
+        }
+
+        // Handle supported file types (PDF, images)
+        if (supportedFileTypes.some(t => mediaType.startsWith(t.split("/")[0]!) || mediaType === t)) {
           const base64 = Buffer.from(buffer).toString("base64");
-          const mediaType = response.headers.get("content-type") || "application/pdf";
-          return {
+          fileContents.push({
             type: "file" as const,
             data: base64,
             mediaType,
-          };
-        })
-      );
+          });
+          continue;
+        }
+
+        console.log(`[AI Extraction] Skipping unsupported file type: ${mediaType}`);
+      }
+
+      if (fileContents.length === 0 && textContents.length === 0) {
+        throw new Error("No supported files to extract from. Supported: PDF, images, Excel (.xlsx/.xls).");
+      }
 
       // Use Vercel AI Gateway with Gemini
       const gateway = createGateway({
         apiKey,
-        baseURL: "https://ai-gateway.vercel.sh/v1",
+        baseURL: "https://ai-gateway.vercel.sh/v3/ai",
       });
       const model = gateway("google/gemini-3-pro-preview");
+
+      console.log("[AI Extraction] Gateway configured, model: google/gemini-3-pro-preview");
 
       // Build CIGA options string for the prompt
       const cigaOptionsText = Object.entries(CIGA_BY_ACTIVITY)
@@ -302,6 +392,10 @@ SECTION 1: BACKGROUND
 SECTION 2: COMPANY INFORMATION
 - Company number, tax reference number
 - Registered address, principal place of business
+- Is entity incorporated in Guernsey? (Yes/No)
+- Economic classification code / Company Activity Code
+- Certificate type (Certificate 1, 2, or 3)
+- Entity activity from Directors Report
 
 SECTION 3: PARTNERSHIP INFORMATION (if applicable)
 - Partnership name and number
@@ -309,12 +403,27 @@ SECTION 3: PARTNERSHIP INFORMATION (if applicable)
 SECTION 4: FINANCIAL STATEMENTS
 - Are statements consolidated?
 - Accounts preparer name and qualification
+- Net book value (from Balance Sheet)
+- Total profit (from Profit & Loss Account)
 
 SECTION 5: FINANCIAL INSTITUTIONS
 - FATCA and CRS status
 
 SECTION 6: RELEVANT ACTIVITIES
 Choose ONE from: Banking, Insurance, Fund management, Financing and leasing, Distribution and Service Centre, Headquarters, Shipping, Self-managed fund, Intellectual Property Holding Company, Pure Equity Holding Company, None of the above
+- Does entity have any intellectual property holding? (Yes/No)
+
+SECTION 6A: INTELLECTUAL PROPERTY (if IP Holding Company)
+- Is the entity a High Risk IP Entity as defined in legislation? (Yes/No)
+- Does the entity want to rebut High Risk IP status? (Yes/No)
+- Rebuttal narrative if applicable
+- Type of IP income received
+
+SECTION 6B: ADEQUACY ASSESSMENT
+- Has adequate expenditure for substance? (Yes/No/N/A)
+- Has adequate physical presence? (Yes/No/N/A)
+- Details about expenditure adequacy
+- Details about physical presence adequacy
 
 SECTION 7: CIGA (Core Income Generating Activities)
 Based on the relevant activity, CIGA options are:
@@ -343,6 +452,16 @@ SECTION 12: DECLARATION
 - Prepared by, date
 - Manager sign off, date
 
+SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)
+- Is the entity a Constituent Entity for CbCR purposes? (Yes/No)
+
+SECTION 14: ADDITIONAL INFORMATION
+- Has there been a post balance sheet event? (Yes/No)
+- Post balance sheet event details
+- Does entity have C42 association (Statement of Practice C42)? (Yes/No)
+- Names of C42 associated companies
+- Contract information (CSP standard)
+
 === INSTRUCTIONS ===
 
 For dates, extract as ISO 8601 strings (YYYY-MM-DD).
@@ -351,22 +470,37 @@ For the relevant activity, pick the single most applicable option from the dropd
 Only extract information that is explicitly stated or can be clearly inferred.
 Do not make up or guess values - leave fields empty if information is not available.`;
 
-      const result = await generateObject({
-        model,
-        schema: aiExtractionSchema,
-        schemaName: "GuernseySubstanceForm",
-        schemaDescription: "Guernsey Economic Substance Register form data extracted from corporate documents",
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              ...fileContents,
-            ],
-          },
-        ],
-      });
+      console.log("[AI Extraction] Calling generateObject with", fileContents.length, "file(s) and", textContents.length, "text content(s)");
 
+      let result;
+      try {
+        // Build message content: prompt + file contents + text contents (CSV from Excel)
+        const messageContent: (TextContent | FileContent)[] = [
+          { type: "text" as const, text: prompt },
+          ...fileContents,
+          ...textContents,
+        ];
+
+        result = await generateObject({
+          model,
+          output: "object",
+          schema: aiExtractionSchema,
+          schemaName: "GuernseySubstanceForm",
+          schemaDescription: "Guernsey Economic Substance Register form data extracted from corporate documents",
+          messages: [
+            {
+              role: "user",
+              content: messageContent,
+            },
+          ],
+        });
+      } catch (error) {
+        console.error("[AI Extraction] generateObject failed:", error);
+        console.error("[AI Extraction] Error details:", JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        throw error;
+      }
+
+      console.log("[AI Extraction] Success! Extracted fields:", Object.keys(result.object).length);
       const extractedData = result.object;
 
       // Merge with existing data (AI data fills in gaps)

@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { AtSignIcon, ChevronLeftIcon } from "lucide-react";
+import { AtSignIcon, ChevronLeftIcon } from "@/lib/icons";
 import Image from "next/image";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
