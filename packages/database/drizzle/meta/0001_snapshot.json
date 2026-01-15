@@ -1,0 +1,2443 @@
+{
+  "id": "8d2483ba-e055-44d8-a554-46c5a233e389",
+  "prevId": "9dd68b16-b143-499c-879a-90132235e339",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.lts_account": {
+      "name": "lts_account",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "full_name": {
+          "name": "full_name",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "avatar_url": {
+          "name": "avatar_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone": {
+          "name": "phone",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_account_user_id_idx": {
+          "name": "lts_account_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "lts_account_user_id_unique": {
+          "name": "lts_account_user_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_global_admin": {
+      "name": "lts_global_admin",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_global_admin_account_idx": {
+          "name": "lts_global_admin_account_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_global_admin_account_id_lts_account_id_fk": {
+          "name": "lts_global_admin_account_id_lts_account_id_fk",
+          "tableFrom": "lts_global_admin",
+          "tableTo": "lts_account",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "lts_global_admin_created_by_lts_account_id_fk": {
+          "name": "lts_global_admin_created_by_lts_account_id_fk",
+          "tableFrom": "lts_global_admin",
+          "tableTo": "lts_account",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "lts_global_admin_account_id_unique": {
+          "name": "lts_global_admin_account_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "account_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_invoice": {
+      "name": "lts_invoice",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invoice_number": {
+          "name": "invoice_number",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "invoice_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "amount": {
+          "name": "amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "varchar(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'GBP'"
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "due_date": {
+          "name": "due_date",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paid_at": {
+          "name": "paid_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pdf_url": {
+          "name": "pdf_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_invoice_org_idx": {
+          "name": "lts_invoice_org_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_invoice_status_idx": {
+          "name": "lts_invoice_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_invoice_number_idx": {
+          "name": "lts_invoice_number_idx",
+          "columns": [
+            {
+              "expression": "invoice_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_invoice_org_id_lts_organisation_id_fk": {
+          "name": "lts_invoice_org_id_lts_organisation_id_fk",
+          "tableFrom": "lts_invoice",
+          "tableTo": "lts_organisation",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "lts_invoice_created_by_lts_account_id_fk": {
+          "name": "lts_invoice_created_by_lts_account_id_fk",
+          "tableFrom": "lts_invoice",
+          "tableTo": "lts_account",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_job": {
+      "name": "lts_job",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "job_number": {
+          "name": "job_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "job_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "ai_model": {
+          "name": "ai_model",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "credentials_snapshot": {
+          "name": "credentials_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ecs_task_arn": {
+          "name": "ecs_task_arn",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cloudwatch_log_group": {
+          "name": "cloudwatch_log_group",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cloudwatch_log_stream": {
+          "name": "cloudwatch_log_stream",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result_data": {
+          "name": "result_data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_job_task_idx": {
+          "name": "lts_job_task_idx",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_job_status_idx": {
+          "name": "lts_job_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_job_task_number_idx": {
+          "name": "lts_job_task_number_idx",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "job_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_job_task_id_lts_task_id_fk": {
+          "name": "lts_job_task_id_lts_task_id_fk",
+          "tableFrom": "lts_job",
+          "tableTo": "lts_task",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "lts_job_created_by_lts_account_id_fk": {
+          "name": "lts_job_created_by_lts_account_id_fk",
+          "tableFrom": "lts_job",
+          "tableTo": "lts_account",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_jurisdiction_setting": {
+      "name": "lts_jurisdiction_setting",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "jurisdiction_id": {
+          "name": "jurisdiction_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "portal_credentials_encrypted": {
+          "name": "portal_credentials_encrypted",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settings": {
+          "name": "settings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_jurisdiction_setting_jurisdiction_idx": {
+          "name": "lts_jurisdiction_setting_jurisdiction_idx",
+          "columns": [
+            {
+              "expression": "jurisdiction_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_jurisdiction_setting_org_idx": {
+          "name": "lts_jurisdiction_setting_org_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_jurisdiction_setting_unique_idx": {
+          "name": "lts_jurisdiction_setting_unique_idx",
+          "columns": [
+            {
+              "expression": "jurisdiction_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_jurisdiction_setting_jurisdiction_id_lts_jurisdiction_id_fk": {
+          "name": "lts_jurisdiction_setting_jurisdiction_id_lts_jurisdiction_id_fk",
+          "tableFrom": "lts_jurisdiction_setting",
+          "tableTo": "lts_jurisdiction",
+          "columnsFrom": [
+            "jurisdiction_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "lts_jurisdiction_setting_org_id_lts_organisation_id_fk": {
+          "name": "lts_jurisdiction_setting_org_id_lts_organisation_id_fk",
+          "tableFrom": "lts_jurisdiction_setting",
+          "tableTo": "lts_organisation",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_jurisdiction": {
+      "name": "lts_jurisdiction",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "code": {
+          "name": "code",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "country": {
+          "name": "country",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "portal_url": {
+          "name": "portal_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_jurisdiction_code_idx": {
+          "name": "lts_jurisdiction_code_idx",
+          "columns": [
+            {
+              "expression": "code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "lts_jurisdiction_code_unique": {
+          "name": "lts_jurisdiction_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_org_member_permission": {
+      "name": "lts_org_member_permission",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "org_member_id": {
+          "name": "org_member_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "permission": {
+          "name": "permission",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "lts_org_member_permission_member_idx": {
+          "name": "lts_org_member_permission_member_idx",
+          "columns": [
+            {
+              "expression": "org_member_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_org_member_permission_unique_idx": {
+          "name": "lts_org_member_permission_unique_idx",
+          "columns": [
+            {
+              "expression": "org_member_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "permission",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_org_member_permission_org_member_id_lts_org_member_id_fk": {
+          "name": "lts_org_member_permission_org_member_id_lts_org_member_id_fk",
+          "tableFrom": "lts_org_member_permission",
+          "tableTo": "lts_org_member",
+          "columnsFrom": [
+            "org_member_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_org_member": {
+      "name": "lts_org_member",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "org_member_role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'member'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_org_member_org_idx": {
+          "name": "lts_org_member_org_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_org_member_account_idx": {
+          "name": "lts_org_member_account_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_org_member_unique_idx": {
+          "name": "lts_org_member_unique_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_org_member_org_id_lts_organisation_id_fk": {
+          "name": "lts_org_member_org_id_lts_organisation_id_fk",
+          "tableFrom": "lts_org_member",
+          "tableTo": "lts_organisation",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "lts_org_member_account_id_lts_account_id_fk": {
+          "name": "lts_org_member_account_id_lts_account_id_fk",
+          "tableFrom": "lts_org_member",
+          "tableTo": "lts_account",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_org_setting": {
+      "name": "lts_org_setting",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "default_ai_model": {
+          "name": "default_ai_model",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "webhook_url": {
+          "name": "webhook_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "settings": {
+          "name": "settings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_org_setting_org_idx": {
+          "name": "lts_org_setting_org_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_org_setting_org_id_lts_organisation_id_fk": {
+          "name": "lts_org_setting_org_id_lts_organisation_id_fk",
+          "tableFrom": "lts_org_setting",
+          "tableTo": "lts_organisation",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "lts_org_setting_org_id_unique": {
+          "name": "lts_org_setting_org_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "org_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_organisation": {
+      "name": "lts_organisation",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "logo_url": {
+          "name": "logo_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_organisation_slug_idx": {
+          "name": "lts_organisation_slug_idx",
+          "columns": [
+            {
+              "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "lts_organisation_slug_unique": {
+          "name": "lts_organisation_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "slug"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_pending_invitation": {
+      "name": "lts_pending_invitation",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "email": {
+          "name": "email",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "invitation_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "token": {
+          "name": "token",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invited_by": {
+          "name": "invited_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "lts_pending_invitation_email_idx": {
+          "name": "lts_pending_invitation_email_idx",
+          "columns": [
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_pending_invitation_token_idx": {
+          "name": "lts_pending_invitation_token_idx",
+          "columns": [
+            {
+              "expression": "token",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_pending_invitation_invited_by_lts_account_id_fk": {
+          "name": "lts_pending_invitation_invited_by_lts_account_id_fk",
+          "tableFrom": "lts_pending_invitation",
+          "tableTo": "lts_account",
+          "columnsFrom": [
+            "invited_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "lts_pending_invitation_email_unique": {
+          "name": "lts_pending_invitation_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        },
+        "lts_pending_invitation_token_unique": {
+          "name": "lts_pending_invitation_token_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "token"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_substance_form": {
+      "name": "lts_substance_form",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tax_return_id": {
+          "name": "tax_return_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_name": {
+          "name": "entity_name",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "accounting_period_start": {
+          "name": "accounting_period_start",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "accounting_period_end": {
+          "name": "accounting_period_end",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_civ": {
+          "name": "is_civ",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "company_number": {
+          "name": "company_number",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tax_reference_number": {
+          "name": "tax_reference_number",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "registered_address": {
+          "name": "registered_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "principal_place_of_business": {
+          "name": "principal_place_of_business",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_incorporated_guernsey": {
+          "name": "is_incorporated_guernsey",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "economic_classification_code": {
+          "name": "economic_classification_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "certificate_type": {
+          "name": "certificate_type",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entity_activity": {
+          "name": "entity_activity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "partnership_name": {
+          "name": "partnership_name",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "partnership_number": {
+          "name": "partnership_number",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fin_stmt_consolidated": {
+          "name": "fin_stmt_consolidated",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "accounts_preparer_name": {
+          "name": "accounts_preparer_name",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "accounts_preparer_qual": {
+          "name": "accounts_preparer_qual",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "net_book_value": {
+          "name": "net_book_value",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_profit": {
+          "name": "total_profit",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_gsy_fi_fatca": {
+          "name": "is_gsy_fi_fatca",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_gsy_fi_crs": {
+          "name": "is_gsy_fi_crs",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "relevant_activity": {
+          "name": "relevant_activity",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "has_multiple_activities": {
+          "name": "has_multiple_activities",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "has_ip_holding": {
+          "name": "has_ip_holding",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_high_risk_ip": {
+          "name": "is_high_risk_ip",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "wants_rebut_high_risk": {
+          "name": "wants_rebut_high_risk",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "high_risk_rebuttal_narrative": {
+          "name": "high_risk_rebuttal_narrative",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip_income_type": {
+          "name": "ip_income_type",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "has_adequate_expenditure": {
+          "name": "has_adequate_expenditure",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "has_adequate_physical_presence": {
+          "name": "has_adequate_physical_presence",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "adequacy_expenditure_details": {
+          "name": "adequacy_expenditure_details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "adequacy_physical_presence_details": {
+          "name": "adequacy_physical_presence_details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ciga_performed": {
+          "name": "ciga_performed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ciga_details": {
+          "name": "ciga_details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "employees": {
+          "name": "employees",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_fte": {
+          "name": "total_fte",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_qualified_fte": {
+          "name": "total_qualified_fte",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "has_ciga_outsourcing": {
+          "name": "has_ciga_outsourcing",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "outsourcing_details": {
+          "name": "outsourcing_details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "immediate_parents": {
+          "name": "immediate_parents",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ultimate_parents": {
+          "name": "ultimate_parents",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ubos": {
+          "name": "ubos",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "all_meetings_in_gsy": {
+          "name": "all_meetings_in_gsy",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_board_meetings": {
+          "name": "total_board_meetings",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "board_meetings_in_gsy": {
+          "name": "board_meetings_in_gsy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "adequate_meeting_freq": {
+          "name": "adequate_meeting_freq",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enough_directors_present": {
+          "name": "enough_directors_present",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "directors_have_expertise": {
+          "name": "directors_have_expertise",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "strategic_decisions_gsy": {
+          "name": "strategic_decisions_gsy",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "records_maintained_gsy": {
+          "name": "records_maintained_gsy",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "board_meeting_location": {
+          "name": "board_meeting_location",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "directors": {
+          "name": "directors",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "board_meetings": {
+          "name": "board_meetings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prepared_by": {
+          "name": "prepared_by",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prepared_date": {
+          "name": "prepared_date",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "manager_sign_off": {
+          "name": "manager_sign_off",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "manager_sign_off_date": {
+          "name": "manager_sign_off_date",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_constituent_entity": {
+          "name": "is_constituent_entity",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "has_post_balance_event": {
+          "name": "has_post_balance_event",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "post_balance_event_details": {
+          "name": "post_balance_event_details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "has_c42_association": {
+          "name": "has_c42_association",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "c42_associated_companies": {
+          "name": "c42_associated_companies",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contract_information": {
+          "name": "contract_information",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_complete": {
+          "name": "is_complete",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "missing_fields": {
+          "name": "missing_fields",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ai_extracted_at": {
+          "name": "ai_extracted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_edited_at": {
+          "name": "last_edited_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_edited_by": {
+          "name": "last_edited_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_substance_form_tax_return_idx": {
+          "name": "lts_substance_form_tax_return_idx",
+          "columns": [
+            {
+              "expression": "tax_return_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_substance_form_complete_idx": {
+          "name": "lts_substance_form_complete_idx",
+          "columns": [
+            {
+              "expression": "is_complete",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_substance_form_tax_return_id_lts_tax_return_id_fk": {
+          "name": "lts_substance_form_tax_return_id_lts_tax_return_id_fk",
+          "tableFrom": "lts_substance_form",
+          "tableTo": "lts_tax_return",
+          "columnsFrom": [
+            "tax_return_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "lts_substance_form_last_edited_by_lts_account_id_fk": {
+          "name": "lts_substance_form_last_edited_by_lts_account_id_fk",
+          "tableFrom": "lts_substance_form",
+          "tableTo": "lts_account",
+          "columnsFrom": [
+            "last_edited_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "lts_substance_form_tax_return_id_unique": {
+          "name": "lts_substance_form_tax_return_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tax_return_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_task": {
+      "name": "lts_task",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "jurisdiction_id": {
+          "name": "jurisdiction_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax_return_id": {
+          "name": "tax_return_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "task_type": {
+          "name": "task_type",
+          "type": "task_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'tax_return'"
+        },
+        "status": {
+          "name": "status",
+          "type": "task_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "pdf_urls": {
+          "name": "pdf_urls",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_task_org_idx": {
+          "name": "lts_task_org_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_task_jurisdiction_idx": {
+          "name": "lts_task_jurisdiction_idx",
+          "columns": [
+            {
+              "expression": "jurisdiction_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_task_tax_return_idx": {
+          "name": "lts_task_tax_return_idx",
+          "columns": [
+            {
+              "expression": "tax_return_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_task_status_idx": {
+          "name": "lts_task_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_task_created_by_idx": {
+          "name": "lts_task_created_by_idx",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_task_org_id_lts_organisation_id_fk": {
+          "name": "lts_task_org_id_lts_organisation_id_fk",
+          "tableFrom": "lts_task",
+          "tableTo": "lts_organisation",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "lts_task_jurisdiction_id_lts_jurisdiction_id_fk": {
+          "name": "lts_task_jurisdiction_id_lts_jurisdiction_id_fk",
+          "tableFrom": "lts_task",
+          "tableTo": "lts_jurisdiction",
+          "columnsFrom": [
+            "jurisdiction_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "lts_task_tax_return_id_lts_tax_return_id_fk": {
+          "name": "lts_task_tax_return_id_lts_tax_return_id_fk",
+          "tableFrom": "lts_task",
+          "tableTo": "lts_tax_return",
+          "columnsFrom": [
+            "tax_return_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "lts_task_created_by_lts_account_id_fk": {
+          "name": "lts_task_created_by_lts_account_id_fk",
+          "tableFrom": "lts_task",
+          "tableTo": "lts_account",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_tax_return": {
+      "name": "lts_tax_return",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "jurisdiction_id": {
+          "name": "jurisdiction_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_name": {
+          "name": "entity_name",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax_year": {
+          "name": "tax_year",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "tax_return_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "link": {
+          "name": "link",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pdf_url": {
+          "name": "pdf_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "files": {
+          "name": "files",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "lts_tax_return_org_idx": {
+          "name": "lts_tax_return_org_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_tax_return_external_id_idx": {
+          "name": "lts_tax_return_external_id_idx",
+          "columns": [
+            {
+              "expression": "external_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_tax_return_org_id_lts_organisation_id_fk": {
+          "name": "lts_tax_return_org_id_lts_organisation_id_fk",
+          "tableFrom": "lts_tax_return",
+          "tableTo": "lts_organisation",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "lts_tax_return_jurisdiction_id_lts_jurisdiction_id_fk": {
+          "name": "lts_tax_return_jurisdiction_id_lts_jurisdiction_id_fk",
+          "tableFrom": "lts_tax_return",
+          "tableTo": "lts_jurisdiction",
+          "columnsFrom": [
+            "jurisdiction_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lts_tax_sync_job": {
+      "name": "lts_tax_sync_job",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "jurisdiction_id": {
+          "name": "jurisdiction_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "tax_sync_job_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "ecs_task_arn": {
+          "name": "ecs_task_arn",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cloudwatch_log_group": {
+          "name": "cloudwatch_log_group",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cloudwatch_log_stream": {
+          "name": "cloudwatch_log_stream",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "returns_found": {
+          "name": "returns_found",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "lts_tax_sync_job_org_idx": {
+          "name": "lts_tax_sync_job_org_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lts_tax_sync_job_status_idx": {
+          "name": "lts_tax_sync_job_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lts_tax_sync_job_org_id_lts_organisation_id_fk": {
+          "name": "lts_tax_sync_job_org_id_lts_organisation_id_fk",
+          "tableFrom": "lts_tax_sync_job",
+          "tableTo": "lts_organisation",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "lts_tax_sync_job_jurisdiction_id_lts_jurisdiction_id_fk": {
+          "name": "lts_tax_sync_job_jurisdiction_id_lts_jurisdiction_id_fk",
+          "tableFrom": "lts_tax_sync_job",
+          "tableTo": "lts_jurisdiction",
+          "columnsFrom": [
+            "jurisdiction_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "lts_tax_sync_job_created_by_lts_account_id_fk": {
+          "name": "lts_tax_sync_job_created_by_lts_account_id_fk",
+          "tableFrom": "lts_tax_sync_job",
+          "tableTo": "lts_account",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.invitation_status": {
+      "name": "invitation_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "accepted",
+        "expired",
+        "revoked"
+      ]
+    },
+    "public.invoice_status": {
+      "name": "invoice_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "sent",
+        "paid",
+        "overdue",
+        "cancelled"
+      ]
+    },
+    "public.job_status": {
+      "name": "job_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "queued",
+        "running",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "public.org_member_role": {
+      "name": "org_member_role",
+      "schema": "public",
+      "values": [
+        "owner",
+        "admin",
+        "member"
+      ]
+    },
+    "public.task_status": {
+      "name": "task_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "in_progress",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "public.task_type": {
+      "name": "task_type",
+      "schema": "public",
+      "values": [
+        "tax_return",
+        "validation",
+        "submission",
+        "amendment",
+        "inquiry"
+      ]
+    },
+    "public.tax_return_status": {
+      "name": "tax_return_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "in_progress",
+        "completed",
+        "failed",
+        "review_required"
+      ]
+    },
+    "public.tax_sync_job_status": {
+      "name": "tax_sync_job_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "running",
+        "completed",
+        "failed"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

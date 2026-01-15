@@ -181,6 +181,10 @@ ${field("Company Number", form.companyNumber)}
 ${field("Tax Reference Number", form.taxReferenceNumber)}
 ${field("Registered Address", form.registeredAddress)}
 ${field("Principal Place of Business", form.principalPlaceOfBusiness)}
+${field("Is Incorporated in Guernsey", form.isIncorporatedInGuernsey)}
+${field("Economic Classification Code", form.economicClassificationCode)}
+${field("Certificate Type", form.certificateType)}
+${field("Entity Activity", form.entityActivity)}
 `;
 }
 
@@ -198,6 +202,8 @@ function buildFinancialStatementsSection(form: SubstanceForm): string {
 ${field("Are Financial Statements Consolidated", form.areFinancialStatementsConsolidated)}
 ${field("Accounts Preparer Name", form.accountsPreparerName)}
 ${field("Accounts Preparer Qualification", form.accountsPreparerQualification)}
+${field("Net Book Value", form.netBookValue)}
+${field("Total Profit", form.totalProfit)}
 `;
 }
 
@@ -214,6 +220,20 @@ function buildRelevantActivitiesSection(form: SubstanceForm): string {
 ## SECTION 6: RELEVANT ACTIVITIES
 ${field("Relevant Activity", form.relevantActivity)}
 ${field("Has Multiple Relevant Activities", form.hasMultipleRelevantActivities)}
+${field("Has Intellectual Property Holding", form.hasIntellectualPropertyHolding)}
+
+### IP Holdings (if applicable):
+${field("Is High Risk IP Entity", form.isHighRiskIpEntity)}
+${field("Wants to Rebut High Risk Status", form.wantsToRebutHighRiskStatus)}
+${field("High Risk Rebuttal Narrative", form.highRiskRebuttalNarrative)}
+${field("IP Income Type", form.ipIncomeType)}
+
+### Adequacy Assessment:
+${field("Activity Gross Income", form.activityGrossIncome)}
+${field("Has Adequate Expenditure", form.hasAdequateExpenditure)}
+${field("Has Adequate Physical Presence", form.hasAdequatePhysicalPresence)}
+${field("Adequacy Expenditure Details", form.adequacyExpenditureDetails)}
+${field("Adequacy Physical Presence Details", form.adequacyPhysicalPresenceDetails)}
 `;
 }
 

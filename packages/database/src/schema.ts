@@ -6,6 +6,7 @@ import {
   timestamp,
   jsonb,
   integer,
+  real,
   boolean,
   index,
   uniqueIndex,
@@ -68,6 +69,21 @@ export const taxReturnStatusEnum = pgEnum("tax_return_status", [
   "completed",
   "failed",
   "review_required",
+]);
+
+export const invitationStatusEnum = pgEnum("invitation_status", [
+  "pending",
+  "accepted",
+  "expired",
+  "revoked",
+]);
+
+export const invoiceStatusEnum = pgEnum("invoice_status", [
+  "draft",
+  "sent",
+  "paid",
+  "overdue",
+  "cancelled",
 ]);
 
 // ============================================================================
@@ -221,7 +237,10 @@ export const jurisdictionSettings = createTable(
 );
 
 // ============================================================================
-// ORG MEMBERS - User membership in organisations
+// ORG MEMBERS - DEPRECATED: Members are now platform-wide, not org-specific
+// Tables kept for backwards compatibility but no longer used by application
+// All authenticated users have platform-wide access
+// Access is controlled by globalAdmins table for admin privileges
 // ============================================================================
 
 export const orgMembers = createTable(
@@ -234,7 +253,7 @@ export const orgMembers = createTable(
     accountId: uuid("account_id")
       .notNull()
       .references(() => accounts.id, { onDelete: "cascade" }),
-    role: orgMemberRoleEnum().notNull().default("member"), // owner/admin bypass permissions
+    role: orgMemberRoleEnum().notNull().default("member"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -249,10 +268,6 @@ export const orgMembers = createTable(
   ]
 );
 
-// ============================================================================
-// ORG MEMBER PERMISSIONS - Granular permissions (bypassed by admin/owner/global_admin)
-// ============================================================================
-
 export const orgMemberPermissions = createTable(
   "org_member_permission",
   (d) => ({
@@ -260,7 +275,7 @@ export const orgMemberPermissions = createTable(
     orgMemberId: uuid("org_member_id")
       .notNull()
       .references(() => orgMembers.id, { onDelete: "cascade" }),
-    permission: varchar({ length: 64 }).notNull(), // e.g., 'tasks:create', 'jobs:run'
+    permission: varchar({ length: 64 }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -268,6 +283,69 @@ export const orgMemberPermissions = createTable(
   (t) => [
     index("lts_org_member_permission_member_idx").on(t.orgMemberId),
     uniqueIndex("lts_org_member_permission_unique_idx").on(t.orgMemberId, t.permission),
+  ]
+);
+
+// ============================================================================
+// PENDING INVITATIONS - Platform-wide user invitations
+// ============================================================================
+
+export const pendingInvitations = createTable(
+  "pending_invitation",
+  (d) => ({
+    id: uuid().primaryKey().defaultRandom(),
+    email: varchar({ length: 256 }).notNull().unique(), // Platform-wide, one invite per email
+    status: invitationStatusEnum().notNull().default("pending"),
+    token: varchar({ length: 64 }).notNull().unique(),
+    invitedBy: uuid("invited_by")
+      .notNull()
+      .references(() => accounts.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  }),
+  (t) => [
+    index("lts_pending_invitation_email_idx").on(t.email),
+    uniqueIndex("lts_pending_invitation_token_idx").on(t.token),
+  ]
+);
+
+// ============================================================================
+// INVOICES - Billing invoices (global admin managed)
+// ============================================================================
+
+export const invoices = createTable(
+  "invoice",
+  (d) => ({
+    id: uuid().primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    invoiceNumber: varchar("invoice_number", { length: 64 }).notNull(),
+    status: invoiceStatusEnum().notNull().default("draft"),
+    amount: integer("amount").notNull(),
+    currency: varchar({ length: 3 }).notNull().default("GBP"),
+    description: text(),
+    dueDate: timestamp("due_date", { withTimezone: true }),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    pdfUrl: text("pdf_url"),
+    metadata: jsonb().$type<Record<string, unknown>>(),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => accounts.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
+      () => new Date()
+    ),
+  }),
+  (t) => [
+    index("lts_invoice_org_idx").on(t.orgId),
+    index("lts_invoice_status_idx").on(t.status),
+    uniqueIndex("lts_invoice_number_idx").on(t.invoiceNumber),
   ]
 );
 
@@ -450,6 +528,12 @@ export const substanceForms = createTable(
     registeredAddress: text("registered_address"),
     principalPlaceOfBusiness: text("principal_place_of_business"),
 
+    // Entity Structure
+    isIncorporatedInGuernsey: varchar("is_incorporated_guernsey", { length: 8 }), // Yes/No
+    economicClassificationCode: varchar("economic_classification_code", { length: 64 }), // Company Activity Code
+    certificateType: varchar("certificate_type", { length: 64 }), // Certificate 1, 2, or 3
+    entityActivity: text("entity_activity"), // From Directors Report
+
     // =========================================================================
     // SECTION 3: PARTNERSHIP INFORMATION
     // =========================================================================
@@ -462,6 +546,8 @@ export const substanceForms = createTable(
     areFinancialStatementsConsolidated: varchar("fin_stmt_consolidated", { length: 8 }),
     accountsPreparerName: varchar("accounts_preparer_name", { length: 256 }),
     accountsPreparerQualification: varchar("accounts_preparer_qual", { length: 128 }), // ACCA, ICAEW, etc.
+    netBookValue: varchar("net_book_value", { length: 64 }), // From Balance Sheet
+    totalProfit: varchar("total_profit", { length: 64 }), // From P&L Account
 
     // =========================================================================
     // SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
@@ -474,6 +560,24 @@ export const substanceForms = createTable(
     // =========================================================================
     relevantActivity: varchar("relevant_activity", { length: 128 }), // Single dropdown selection
     hasMultipleRelevantActivities: varchar("has_multiple_activities", { length: 8 }),
+    hasIntellectualPropertyHolding: varchar("has_ip_holding", { length: 8 }), // Yes/No - Does entity have IP?
+
+    // =========================================================================
+    // SECTION 6A: INTELLECTUAL PROPERTY (if IP Holding Company)
+    // =========================================================================
+    isHighRiskIpEntity: varchar("is_high_risk_ip", { length: 8 }), // Yes/No
+    wantsToRebutHighRiskStatus: varchar("wants_rebut_high_risk", { length: 8 }), // Yes/No
+    highRiskRebuttalNarrative: text("high_risk_rebuttal_narrative"), // Explanation for rebut
+    ipIncomeType: varchar("ip_income_type", { length: 128 }), // Type of IP income received
+
+    // =========================================================================
+    // SECTION 6B: ADEQUACY ASSESSMENT
+    // =========================================================================
+    activityGrossIncome: varchar("activity_gross_income", { length: 64 }), // Gross income for relevant activity
+    hasAdequateExpenditure: varchar("has_adequate_expenditure", { length: 8 }), // Yes/No/N/A
+    hasAdequatePhysicalPresence: varchar("has_adequate_physical_presence", { length: 8 }), // Yes/No/N/A
+    adequacyExpenditureDetails: text("adequacy_expenditure_details"),
+    adequacyPhysicalPresenceDetails: text("adequacy_physical_presence_details"),
 
     // =========================================================================
     // SECTION 7: CIGA
@@ -492,8 +596,8 @@ export const substanceForms = createTable(
       fteFraction?: number;
       qualifiedFteFraction?: number;
     }>>(),
-    totalFte: integer("total_fte"),
-    totalQualifiedFte: integer("total_qualified_fte"),
+    totalFte: real("total_fte"),
+    totalQualifiedFte: real("total_qualified_fte"),
 
     // =========================================================================
     // SECTION 9: OUTSOURCING
@@ -561,6 +665,20 @@ export const substanceForms = createTable(
     managerSignOffDate: varchar("manager_sign_off_date", { length: 16 }),
 
     // =========================================================================
+    // SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)
+    // =========================================================================
+    isConstituentEntity: varchar("is_constituent_entity", { length: 8 }), // Yes/No
+
+    // =========================================================================
+    // SECTION 14: ADDITIONAL INFORMATION
+    // =========================================================================
+    hasPostBalanceSheetEvent: varchar("has_post_balance_event", { length: 8 }), // Yes/No
+    postBalanceSheetEventDetails: text("post_balance_event_details"),
+    hasC42Association: varchar("has_c42_association", { length: 8 }), // Statement of Practice C42
+    c42AssociatedCompanies: text("c42_associated_companies"), // Names of associated companies
+    contractInformation: text("contract_information"), // CSP standard contract info
+
+    // =========================================================================
     // STATUS TRACKING
     // =========================================================================
     isComplete: boolean("is_complete").default(false),
@@ -591,9 +709,10 @@ export const accountsRelations = relations(accounts, ({ one, many }) => ({
     fields: [accounts.id],
     references: [globalAdmins.accountId],
   }),
-  orgMembers: many(orgMembers),
   createdTasks: many(tasks),
   createdJobs: many(jobs),
+  sentInvitations: many(pendingInvitations),
+  createdInvoices: many(invoices),
 }));
 
 export const globalAdminsRelations = relations(globalAdmins, ({ one }) => ({
@@ -612,10 +731,11 @@ export const organisationsRelations = relations(organisations, ({ one, many }) =
     fields: [organisations.id],
     references: [orgSettings.orgId],
   }),
-  members: many(orgMembers),
   tasks: many(tasks),
   taxReturns: many(taxReturns),
   jurisdictionSettings: many(jurisdictionSettings),
+  invoices: many(invoices),
+  taxSyncJobs: many(taxSyncJobs),
 }));
 
 export const jurisdictionsRelations = relations(jurisdictions, ({ many }) => ({
@@ -645,27 +765,29 @@ export const jurisdictionSettingsRelations = relations(
   })
 );
 
-export const orgMembersRelations = relations(orgMembers, ({ one, many }) => ({
-  organisation: one(organisations, {
-    fields: [orgMembers.orgId],
-    references: [organisations.id],
-  }),
-  account: one(accounts, {
-    fields: [orgMembers.accountId],
-    references: [accounts.id],
-  }),
-  permissions: many(orgMemberPermissions),
-}));
+// NOTE: orgMembersRelations and orgMemberPermissionsRelations removed
+// Members are now platform-wide, not org-specific
 
-export const orgMemberPermissionsRelations = relations(
-  orgMemberPermissions,
+export const pendingInvitationsRelations = relations(
+  pendingInvitations,
   ({ one }) => ({
-    orgMember: one(orgMembers, {
-      fields: [orgMemberPermissions.orgMemberId],
-      references: [orgMembers.id],
+    invitedByAccount: one(accounts, {
+      fields: [pendingInvitations.invitedBy],
+      references: [accounts.id],
     }),
   })
 );
+
+export const invoicesRelations = relations(invoices, ({ one }) => ({
+  organisation: one(organisations, {
+    fields: [invoices.orgId],
+    references: [organisations.id],
+  }),
+  createdByAccount: one(accounts, {
+    fields: [invoices.createdBy],
+    references: [accounts.id],
+  }),
+}));
 
 export const taxReturnsRelations = relations(taxReturns, ({ one, many }) => ({
   organisation: one(organisations, {
@@ -762,11 +884,13 @@ export type NewOrgSetting = typeof orgSettings.$inferInsert;
 export type JurisdictionSetting = typeof jurisdictionSettings.$inferSelect;
 export type NewJurisdictionSetting = typeof jurisdictionSettings.$inferInsert;
 
-export type OrgMember = typeof orgMembers.$inferSelect;
-export type NewOrgMember = typeof orgMembers.$inferInsert;
+// NOTE: OrgMember and OrgMemberPermission types removed - members are platform-wide
 
-export type OrgMemberPermission = typeof orgMemberPermissions.$inferSelect;
-export type NewOrgMemberPermission = typeof orgMemberPermissions.$inferInsert;
+export type PendingInvitation = typeof pendingInvitations.$inferSelect;
+export type NewPendingInvitation = typeof pendingInvitations.$inferInsert;
+
+export type Invoice = typeof invoices.$inferSelect;
+export type NewInvoice = typeof invoices.$inferInsert;
 
 export type TaxReturn = typeof taxReturns.$inferSelect;
 export type NewTaxReturn = typeof taxReturns.$inferInsert;
