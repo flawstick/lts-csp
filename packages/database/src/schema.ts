@@ -294,7 +294,13 @@ export const pendingInvitations = createTable(
   "pending_invitation",
   (d) => ({
     id: uuid().primaryKey().defaultRandom(),
-    email: varchar({ length: 256 }).notNull().unique(), // Platform-wide, one invite per email
+    // orgId is optional - null for platform-wide invites (by global admins)
+    orgId: uuid("org_id").references(() => organisations.id, {
+      onDelete: "cascade",
+    }),
+    email: varchar({ length: 256 }).notNull(),
+    // role is optional - null for platform-wide invites
+    role: orgMemberRoleEnum().default("member"),
     status: invitationStatusEnum().notNull().default("pending"),
     token: varchar({ length: 64 }).notNull().unique(),
     invitedBy: uuid("invited_by")
@@ -309,6 +315,7 @@ export const pendingInvitations = createTable(
   (t) => [
     index("lts_pending_invitation_email_idx").on(t.email),
     uniqueIndex("lts_pending_invitation_token_idx").on(t.token),
+    index("lts_pending_invitation_org_idx").on(t.orgId),
   ]
 );
 
@@ -771,6 +778,10 @@ export const jurisdictionSettingsRelations = relations(
 export const pendingInvitationsRelations = relations(
   pendingInvitations,
   ({ one }) => ({
+    organisation: one(organisations, {
+      fields: [pendingInvitations.orgId],
+      references: [organisations.id],
+    }),
     invitedByAccount: one(accounts, {
       fields: [pendingInvitations.invitedBy],
       references: [accounts.id],

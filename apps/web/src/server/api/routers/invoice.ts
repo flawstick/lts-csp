@@ -137,7 +137,7 @@ export const invoiceRouter = createTRPCRouter({
         dueDate: z.date().optional(),
         status: z.enum(["draft", "sent", "paid", "overdue", "cancelled"]).default("draft"),
         pdfUrl: z.string().url().optional(),
-        metadata: z.record(z.unknown()).optional(),
+        metadata: z.record(z.string(), z.unknown()).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -191,7 +191,7 @@ export const invoiceRouter = createTRPCRouter({
         dueDate: z.date().optional(),
         status: z.enum(["draft", "sent", "paid", "overdue", "cancelled"]).optional(),
         pdfUrl: z.string().url().optional(),
-        metadata: z.record(z.unknown()).optional(),
+        metadata: z.record(z.string(), z.unknown()).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
