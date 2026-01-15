@@ -43,6 +43,7 @@ import {
   Clock,
   Pause,
   Trash2,
+  RefreshCw,
 } from "@/lib/icons"
 import {
   DropdownMenu,
@@ -105,6 +106,7 @@ export default function TaskDetailPage() {
   const chatMessagesRef = useRef<ChatMessage[]>([])
   const stepsRef = useRef<StepEvent[]>([])
   const activeJobIdRef = useRef<string | null>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
 
   const { data: task, isLoading, refetch } = api.taxReturn.getTask.useQuery(
     { taskId },
@@ -851,14 +853,30 @@ export default function TaskDetailPage() {
                     <Monitor className="h-4 w-4 text-muted-foreground" />
                     <span className="text-sm font-medium">Guernsey Tax Portal</span>
                     {liveUrl && (
-                      <a
-                        href={liveUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                          onClick={() => {
+                            if (iframeRef.current) {
+                              iframeRef.current.src = liveUrl
+                            }
+                          }}
+                          title="Reload browser"
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                        </Button>
+                        <a
+                          href={liveUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                          title="Open in new tab"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </>
                     )}
                     {/* Jobs Dropdown */}
                     {allJobs.length > 0 && (
@@ -1009,6 +1027,7 @@ export default function TaskDetailPage() {
                 <div className="flex-1 bg-muted/50 relative min-h-0">
                                 {liveUrl ? (
                                   <iframe
+                                    ref={iframeRef}
                                     src={liveUrl}
                                     className="w-full h-full border-0"
                                     allow="clipboard-write"
