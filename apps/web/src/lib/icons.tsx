@@ -116,6 +116,7 @@ export const Square = createIcon(StopIcon) // Use stop as fallback for square
 export const Monitor = createIcon(ComputerIcon)
 export const ExternalLink = createIcon(Link01Icon)
 export const Send = createIcon(MailSend01Icon)
+export const Mail = createIcon(MailSend01Icon) // Alias for Send
 export const Clock = createIcon(Clock01Icon)
 export const Maximize2 = createIcon(Maximize01Icon)
 export const Minimize2 = createIcon(Minimize01Icon)

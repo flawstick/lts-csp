@@ -2,7 +2,7 @@ import { db } from "@repo/database"
 import { eq } from "drizzle-orm"
 import { accounts, globalAdmins, pendingInvitations } from "@repo/database"
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { createClient, createAdminClient } from "@/lib/supabase/server"
 import { generateSecureToken } from "@/lib/email"
 import { Resend } from "resend"
 
@@ -42,6 +42,8 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { email } = body
 
+    console.log("Invite request:", { accountId: account.id, isGlobalAdmin, email })
+
     if (!email) {
       return NextResponse.json({ error: "Email is required" }, { status: 400 })
     }
@@ -57,8 +59,9 @@ export async function POST(request: Request) {
       where: eq(accounts.fullName, "placeholder"), // Just to check - we actually need to check by email
     })
 
-    // Check via Supabase auth
-    const { data: authData } = await supabase.auth.admin.listUsers()
+    // Check via Supabase auth using admin client
+    const adminClient = createAdminClient()
+    const { data: authData } = await adminClient.auth.admin.listUsers()
     const existingUser = authData?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase())
 
     if (existingUser) {
@@ -84,7 +87,7 @@ export async function POST(request: Request) {
     }
 
     // Generate secure token and expiry (7 days)
-    const token = generateSecureToken(48)
+    const token = generateSecureToken(32) // 32 bytes = 64 hex chars (matches DB limit)
     const expiresAt = new Date()
     expiresAt.setDate(expiresAt.getDate() + 7)
 
@@ -118,8 +121,10 @@ export async function POST(request: Request) {
         day: "numeric",
       })
 
+      const fromEmail = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev"
+
       await resend.emails.send({
-        from: "LTS Tax <noreply@ltstax.com>",
+        from: fromEmail,
         to: [email],
         subject: "You've been invited to join LTS Tax",
         html: `

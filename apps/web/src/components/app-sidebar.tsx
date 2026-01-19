@@ -48,14 +48,16 @@ const data = {
       url: "/org/settings",
       icon: Building2,
     },
+  ],
+  settings: [
     {
       title: "Members",
-      url: "/org/members",
+      url: "/members",
       icon: Users,
     },
     {
       title: "Billing",
-      url: "/org/billing",
+      url: "/billing",
       icon: CreditCard,
     },
   ],
@@ -93,6 +95,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarContent>
         <NavMain label="Platform" items={data.platform} />
         <NavOrg label="Organisation" items={data.organisation} />
+        <NavMain label="Settings" items={data.settings} />
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={userData} />
