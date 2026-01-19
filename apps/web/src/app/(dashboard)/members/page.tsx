@@ -24,6 +24,13 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -67,6 +74,7 @@ export default function PlatformMembersPage() {
   const [isInviting, setIsInviting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resendingId, setResendingId] = useState<string | null>(null)
+  const [updatingRoleId, setUpdatingRoleId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchData()
@@ -147,6 +155,33 @@ export default function PlatformMembersPage() {
       alert("Failed to resend invitation")
     } finally {
       setResendingId(null)
+    }
+  }
+
+  async function handleRoleChange(memberId: string, newRole: "admin" | "member") {
+    setUpdatingRoleId(memberId)
+    try {
+      const res = await fetch(`/api/members/${memberId}/role`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: newRole }),
+      })
+
+      const data = await res.json()
+
+      if (res.ok) {
+        // Update local state optimistically
+        setMembers(prev =>
+          prev.map(m => m.id === memberId ? { ...m, role: newRole } : m)
+        )
+      } else {
+        alert(data.error || "Failed to update role")
+      }
+    } catch (error) {
+      console.error("Failed to update role:", error)
+      alert("Failed to update role")
+    } finally {
+      setUpdatingRoleId(null)
     }
   }
 
@@ -336,19 +371,43 @@ export default function PlatformMembersPage() {
                         {member.fullName || <span className="text-muted-foreground">Not set</span>}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={member.role === "admin" ? "default" : "outline"}>
-                          {member.role === "admin" ? (
-                            <>
-                              <Shield className="mr-1 h-3 w-3" />
-                              Admin
-                            </>
-                          ) : (
-                            <>
-                              <User className="mr-1 h-3 w-3" />
-                              Member
-                            </>
-                          )}
-                        </Badge>
+                        <Select
+                          value={member.role}
+                          onValueChange={(value) => handleRoleChange(member.id, value as "admin" | "member")}
+                          disabled={updatingRoleId === member.id}
+                        >
+                          <SelectTrigger className="w-[140px]">
+                            <SelectValue>
+                              <div className="flex items-center">
+                                {member.role === "admin" ? (
+                                  <>
+                                    <Shield className="mr-2 h-4 w-4" />
+                                    Admin
+                                  </>
+                                ) : (
+                                  <>
+                                    <User className="mr-2 h-4 w-4" />
+                                    Member
+                                  </>
+                                )}
+                              </div>
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="admin">
+                              <div className="flex items-center">
+                                <Shield className="mr-2 h-4 w-4" />
+                                Admin
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="member">
+                              <div className="flex items-center">
+                                <User className="mr-2 h-4 w-4" />
+                                Member
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
                         {new Date(member.createdAt).toLocaleDateString()}
