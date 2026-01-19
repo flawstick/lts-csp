@@ -34,7 +34,16 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { UserPlus, Mail, Clock, CheckCircle, XCircle, Send, Loader2 } from "@/lib/icons"
+import { UserPlus, Mail, Clock, CheckCircle, XCircle, Send, Loader2, Shield, User } from "@/lib/icons"
+
+interface Member {
+  id: string
+  email: string
+  fullName: string | null
+  avatarUrl: string | null
+  role: "admin" | "member"
+  createdAt: string
+}
 
 interface PendingInvitation {
   id: string
@@ -50,6 +59,7 @@ interface PendingInvitation {
 }
 
 export default function PlatformMembersPage() {
+  const [members, setMembers] = useState<Member[]>([])
   const [invitations, setInvitations] = useState<PendingInvitation[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [inviteOpen, setInviteOpen] = useState(false)
@@ -59,21 +69,29 @@ export default function PlatformMembersPage() {
   const [resendingId, setResendingId] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchInvitations()
+    fetchData()
   }, [])
 
-  async function fetchInvitations() {
+  async function fetchData() {
     setIsLoading(true)
     try {
-      const res = await fetch("/api/members/invite")
-      if (res.ok) {
-        const data = await res.json()
-        setInvitations(data)
-      } else if (res.status === 403) {
+      // Fetch members
+      const membersRes = await fetch("/api/members")
+      if (membersRes.ok) {
+        const membersData = await membersRes.json()
+        setMembers(membersData)
+      }
+
+      // Fetch invitations
+      const invitesRes = await fetch("/api/members/invite")
+      if (invitesRes.ok) {
+        const invitesData = await invitesRes.json()
+        setInvitations(invitesData)
+      } else if (invitesRes.status === 403) {
         setError("Only global admins can manage platform members")
       }
     } catch (error) {
-      console.error("Failed to fetch invitations:", error)
+      console.error("Failed to fetch data:", error)
     } finally {
       setIsLoading(false)
     }
@@ -95,7 +113,7 @@ export default function PlatformMembersPage() {
       if (res.ok) {
         setInviteOpen(false)
         setInviteEmail("")
-        fetchInvitations()
+        fetchData()
       } else {
         setError(data.error || "Failed to send invitation")
       }
@@ -120,7 +138,7 @@ export default function PlatformMembersPage() {
 
       if (res.ok) {
         alert(`Invitation resent to ${email}`)
-        fetchInvitations()
+        fetchData()
       } else {
         alert(data.error || "Failed to resend invitation")
       }
@@ -281,6 +299,67 @@ export default function PlatformMembersPage() {
             </DialogContent>
           </Dialog>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Platform Members</CardTitle>
+            <CardDescription>
+              {members.length} member{members.length !== 1 ? "s" : ""} on the platform
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {members.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <User className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <p className="text-muted-foreground">No members yet</p>
+                <p className="text-sm text-muted-foreground">
+                  Invite users to get started
+                </p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Joined</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {members.map((member) => (
+                    <TableRow key={member.id}>
+                      <TableCell className="font-medium">
+                        {member.email}
+                      </TableCell>
+                      <TableCell>
+                        {member.fullName || <span className="text-muted-foreground">Not set</span>}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={member.role === "admin" ? "default" : "outline"}>
+                          {member.role === "admin" ? (
+                            <>
+                              <Shield className="mr-1 h-3 w-3" />
+                              Admin
+                            </>
+                          ) : (
+                            <>
+                              <User className="mr-1 h-3 w-3" />
+                              Member
+                            </>
+                          )}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {new Date(member.createdAt).toLocaleDateString()}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

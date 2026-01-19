@@ -15,6 +15,13 @@
       "when": 1768459541430,
       "tag": "0001_oval_umar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1768839788474,
+      "tag": "0002_loving_gamora",
+      "breakpoints": true
     }
   ]
 }

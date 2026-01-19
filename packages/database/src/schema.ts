@@ -237,56 +237,6 @@ export const jurisdictionSettings = createTable(
 );
 
 // ============================================================================
-// ORG MEMBERS - DEPRECATED: Members are now platform-wide, not org-specific
-// Tables kept for backwards compatibility but no longer used by application
-// All authenticated users have platform-wide access
-// Access is controlled by globalAdmins table for admin privileges
-// ============================================================================
-
-export const orgMembers = createTable(
-  "org_member",
-  (d) => ({
-    id: uuid().primaryKey().defaultRandom(),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organisations.id, { onDelete: "cascade" }),
-    accountId: uuid("account_id")
-      .notNull()
-      .references(() => accounts.id, { onDelete: "cascade" }),
-    role: orgMemberRoleEnum().notNull().default("member"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
-    ),
-  }),
-  (t) => [
-    index("lts_org_member_org_idx").on(t.orgId),
-    index("lts_org_member_account_idx").on(t.accountId),
-    uniqueIndex("lts_org_member_unique_idx").on(t.orgId, t.accountId),
-  ]
-);
-
-export const orgMemberPermissions = createTable(
-  "org_member_permission",
-  (d) => ({
-    id: uuid().primaryKey().defaultRandom(),
-    orgMemberId: uuid("org_member_id")
-      .notNull()
-      .references(() => orgMembers.id, { onDelete: "cascade" }),
-    permission: varchar({ length: 64 }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-  }),
-  (t) => [
-    index("lts_org_member_permission_member_idx").on(t.orgMemberId),
-    uniqueIndex("lts_org_member_permission_unique_idx").on(t.orgMemberId, t.permission),
-  ]
-);
-
-// ============================================================================
 // PENDING INVITATIONS - Platform-wide user invitations
 // ============================================================================
 
