@@ -56,36 +56,23 @@ export async function updateSession(request: NextRequest) {
 
   // If user is logged in, check if they're authorized (skip for API routes)
   if (user && !isPublicRoute && !isWaitingRoute && !pathname.startsWith("/api/")) {
-    // Check if user has an account and is authorized
+    // Check if user has an account
     const { data: account } = await supabase
       .from("lts_account")
       .select("id")
       .eq("user_id", user.id)
       .single();
 
-    if (account) {
-      // Check if user is a global admin
-      const { data: globalAdmin } = await supabase
-        .from("lts_global_admin")
-        .select("id")
-        .eq("account_id", account.id)
-        .single();
-
-      // If not a global admin, redirect to waiting page
-      if (!globalAdmin) {
-        const url = request.nextUrl.clone();
-        url.pathname = "/waiting-for-invite";
-        return NextResponse.redirect(url);
-      }
-    } else {
+    if (!account) {
       // No account record yet, redirect to waiting page
       const url = request.nextUrl.clone();
       url.pathname = "/waiting-for-invite";
       return NextResponse.redirect(url);
     }
+    // If user has an account, they're authorized (either global admin or accepted invitation)
   }
 
-  // If user is on waiting page but is actually authorized, redirect to home
+  // If user is on waiting page but has an account, redirect to home
   if (user && pathname === "/waiting-for-invite") {
     const { data: account } = await supabase
       .from("lts_account")
@@ -94,17 +81,9 @@ export async function updateSession(request: NextRequest) {
       .single();
 
     if (account) {
-      const { data: globalAdmin } = await supabase
-        .from("lts_global_admin")
-        .select("id")
-        .eq("account_id", account.id)
-        .single();
-
-      if (globalAdmin) {
-        const url = request.nextUrl.clone();
-        url.pathname = "/";
-        return NextResponse.redirect(url);
-      }
+      const url = request.nextUrl.clone();
+      url.pathname = "/";
+      return NextResponse.redirect(url);
     }
   }
 
