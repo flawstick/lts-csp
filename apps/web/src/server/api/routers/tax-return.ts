@@ -390,9 +390,12 @@ export const taxReturnRouter = createTRPCRouter({
     }),
 
   startSyncJob: publicProcedure
-    .mutation(async ({ ctx }) => {
+    .input(z.object({ orgId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
       // Get org and jurisdiction
-      const org = await ctx.db.query.organisations.findFirst();
+      const org = await ctx.db.query.organisations.findFirst({
+        where: eq(organisations.id, input.orgId),
+      });
       const jurisdiction = await ctx.db.query.jurisdictions.findFirst({
         where: eq(jurisdictions.name, "Guernsey"),
       });
@@ -417,6 +420,7 @@ export const taxReturnRouter = createTRPCRouter({
       // Launch ECS task (auth handled by container via MYGOV_USERNAME/MYGOV_PASSWORD env vars)
       const result = await launchTaxSync({
         jobId: job.id,
+        orgId: org.id,
       });
 
       // Extract log stream from task ARN (task ID is at the end)

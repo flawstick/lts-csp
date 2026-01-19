@@ -107,6 +107,7 @@ export async function getTaskStatus(taskArn: string) {
 
 export interface LaunchTaxSyncParams {
   jobId: string;
+  orgId: string;
 }
 
 export async function launchTaxSync(params: LaunchTaxSyncParams) {
@@ -130,6 +131,7 @@ export async function launchTaxSync(params: LaunchTaxSyncParams) {
           name: containerName,
           environment: [
             { name: "TAX_SYNC_JOB_ID", value: params.jobId },
+            { name: "ORG_ID", value: params.orgId },
             { name: "DATABASE_URL", value: env.DATABASE_URL },
           ],
         },

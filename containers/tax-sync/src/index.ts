@@ -97,13 +97,20 @@ async function main() {
 
     // Update database
     if (allReturns.length > 0) {
-      const org = await db.query.organisations.findFirst();
+      const orgId = process.env.ORG_ID;
+      if (!orgId) {
+        throw new Error("ORG_ID environment variable is required");
+      }
+
+      const org = await db.query.organisations.findFirst({
+        where: eq(schema.organisations.id, orgId)
+      });
       const jurisdiction = await db.query.jurisdictions.findFirst({
         where: eq(schema.jurisdictions.name, "Guernsey")
       });
 
       if (!org || !jurisdiction) {
-        throw new Error("No Organisation or Guernsey Jurisdiction found");
+        throw new Error("Organisation or Guernsey Jurisdiction not found");
       }
 
       for (const ret of allReturns) {

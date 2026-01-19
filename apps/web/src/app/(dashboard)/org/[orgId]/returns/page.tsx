@@ -140,7 +140,7 @@ export default function ReturnsPage() {
   }, [activeJob, activeJobId])
 
   const handleStartSync = () => {
-    startSyncMutation.mutate()
+    startSyncMutation.mutate({ orgId })
   }
 
   const handleDeleteSelected = () => {
