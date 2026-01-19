@@ -63,10 +63,12 @@ import { Loader2, Play, ExternalLink, Monitor, AlertCircle, CheckCircle2, XCircl
 import Link from "next/link"
 import { api } from "@/trpc/react"
 import { useState, useEffect } from "react"
+import { useOrgStore } from "@/lib/org-context"
 
 type StatusFilter = "pending" | "in_progress" | "completed" | "failed" | "cancelled" | undefined
 
 export default function TasksPage() {
+  const { currentOrg } = useOrgStore()
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(undefined)
   const [searchQuery, setSearchQuery] = useState("")
@@ -74,7 +76,7 @@ export default function TasksPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null)
-  
+
   const pageSize = 20
 
   // Debounce search input
@@ -91,12 +93,15 @@ export default function TasksPage() {
     setPage(1)
     setSelected(new Set())
   }, [statusFilter])
-  
+
   const { data, isLoading, refetch } = api.taxReturn.listTasks.useQuery({
+    orgId: currentOrg?.id, // Filter by current org
     page,
     pageSize,
     status: statusFilter,
     search: debouncedSearch || undefined,
+  }, {
+    enabled: !!currentOrg, // Only run if we have an org selected
   })
 
   const deleteTasksMutation = api.taxReturn.deleteTasks.useMutation({

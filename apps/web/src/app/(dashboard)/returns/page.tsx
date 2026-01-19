@@ -49,10 +49,12 @@ import {
 import { Loader2, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, History, Play, Terminal, CheckCircle2, XCircle, Search, X, MoreHorizontal, Trash, FileText } from "@/lib/icons"
 import Link from "next/link"
 import { api } from "@/trpc/react"
+import { useOrgStore } from "@/lib/org-context"
 
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | undefined
 
 export default function ReturnsPage() {
+  const { currentOrg } = useOrgStore()
   const searchParams = useSearchParams()
   const initialStatus = searchParams.get("status") as StatusFilter
 
@@ -62,7 +64,7 @@ export default function ReturnsPage() {
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [logsDialogOpen, setLogsDialogOpen] = React.useState(false)
   const [activeJobId, setActiveJobId] = React.useState<string | null>(null)
-  
+
   // Selection State
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
 
@@ -87,12 +89,16 @@ export default function ReturnsPage() {
 
   const { data, isLoading, refetch } = api.taxReturn.list.useQuery(
     {
+      orgId: currentOrg?.id, // Filter by current org
       page,
       pageSize,
       status: statusFilter,
       search: debouncedSearch || undefined,
     },
-    { refetchOnWindowFocus: false }
+    {
+      refetchOnWindowFocus: false,
+      enabled: !!currentOrg, // Only run query if we have an org selected
+    }
   )
 
   const deleteMutation = api.taxReturn.delete.useMutation({

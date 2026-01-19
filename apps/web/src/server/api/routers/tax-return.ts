@@ -162,6 +162,7 @@ export const taxReturnRouter = createTRPCRouter({
   list: publicProcedure
     .input(
       z.object({
+        orgId: z.string().uuid().optional(), // Optional for backwards compatibility, but should be provided
         page: z.number().min(1).default(1),
         pageSize: z.number().min(1).max(100).default(20),
         status: z.enum(["pending", "in_progress", "review_required", "completed", "failed"]).optional(),
@@ -169,11 +170,17 @@ export const taxReturnRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
-      const { page, pageSize, status, search } = input;
+      const { orgId, page, pageSize, status, search } = input;
       const offset = (page - 1) * pageSize;
 
       // Build where conditions
       const conditions = [];
+
+      // Filter by orgId if provided
+      if (orgId) {
+        conditions.push(eq(taxReturns.orgId, orgId));
+      }
+
       if (status) {
         conditions.push(eq(taxReturns.status, status));
       }
@@ -511,6 +518,7 @@ export const taxReturnRouter = createTRPCRouter({
   listTasks: publicProcedure
     .input(
       z.object({
+        orgId: z.string().uuid().optional(), // Filter by org
         page: z.number().min(1).default(1),
         pageSize: z.number().min(1).max(100).default(20),
         status: z.enum(["pending", "in_progress", "completed", "failed", "cancelled"]).optional(),
@@ -518,10 +526,16 @@ export const taxReturnRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
-      const { page, pageSize, status, search } = input;
+      const { orgId, page, pageSize, status, search } = input;
       const offset = (page - 1) * pageSize;
 
       const conditions = [];
+
+      // Filter by orgId if provided
+      if (orgId) {
+        conditions.push(eq(tasks.orgId, orgId));
+      }
+
       if (status) {
         conditions.push(eq(tasks.status, status));
       }
