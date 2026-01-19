@@ -83,6 +83,9 @@ import {
   Folder01Icon,
   ArrowTurnForwardIcon,
   SidebarLeftIcon,
+  ViewIcon,
+  ViewOffSlashIcon,
+  Key01Icon,
 } from "@hugeicons/core-free-icons"
 
 // Create wrapped icon components
@@ -170,6 +173,9 @@ export const XIcon = createIcon(Cancel01Icon)
 export const CheckIcon = createIcon(CheckmarkCircle01Icon)
 export const Folder = createIcon(Folder01Icon)
 export const Forward = createIcon(ArrowTurnForwardIcon)
+export const Eye = createIcon(ViewIcon)
+export const EyeOff = createIcon(ViewOffSlashIcon)
+export const Key = createIcon(Key01Icon)
 // Note: CircleIcon is exported as Circle above
 
 // Also export the raw HugeiconsIcon for direct usage

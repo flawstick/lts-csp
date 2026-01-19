@@ -8,6 +8,7 @@ import {
   SquareTerminal,
   FileText,
   Users,
+  Settings,
 } from "@/lib/icons"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
@@ -63,14 +64,36 @@ const data = {
   ],
 }
 
+interface Organisation {
+  id: string
+  name: string
+  slug: string
+}
+
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [user, setUser] = React.useState<User | null>(null)
+  const [organisations, setOrganisations] = React.useState<Organisation[]>([])
+  const [isGlobalAdmin, setIsGlobalAdmin] = React.useState(false)
   const supabase = createClient()
 
   React.useEffect(() => {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       setUser(user)
+
+      if (user) {
+        // Check if global admin and fetch organizations
+        try {
+          const res = await fetch("/api/organisations")
+          if (res.ok) {
+            const orgs = await res.json()
+            setOrganisations(orgs)
+            setIsGlobalAdmin(true)
+          }
+        } catch (error) {
+          console.error("Failed to fetch organizations:", error)
+        }
+      }
     }
     getUser()
 
@@ -87,6 +110,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     avatar: user?.user_metadata?.avatar_url || user?.user_metadata?.picture || "",
   }
 
+  const clientOrgItems = organisations.map(org => ({
+    title: org.name,
+    url: `/client-orgs/${org.slug}/settings`,
+    icon: Building2,
+  }))
+
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
@@ -94,6 +123,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <NavMain label="Platform" items={data.platform} />
+        {isGlobalAdmin && organisations.length > 0 && (
+          <NavOrg label="Client Organizations" items={clientOrgItems} />
+        )}
         <NavOrg label="Organisation" items={data.organisation} />
         <NavMain label="Settings" items={data.settings} />
       </SidebarContent>
