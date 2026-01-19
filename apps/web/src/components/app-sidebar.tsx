@@ -115,7 +115,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         ...basePlatformItems,
         {
           title: `${currentOrg.name} Settings`,
-          url: "/org/settings",
+          url: `/org/${currentOrg.id}/settings`,
           icon: Settings,
         },
       ]
