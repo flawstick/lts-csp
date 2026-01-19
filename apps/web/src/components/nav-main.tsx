@@ -40,7 +40,13 @@ export function NavMain({
               asChild
               tooltip={item.title}
               // Only apply isActive prop on the client after mount to prevent hydration errors
-              {...(mounted && { isActive: pathname === item.url || (item.url !== "/" && pathname.startsWith(item.url)) })}
+              {...(mounted && {
+                isActive: pathname === item.url || (
+                  item.url !== "/" &&
+                  !item.url.match(/^\/org\/[^/]+\/?$/) && // Don't use prefix matching for org root
+                  pathname.startsWith(item.url)
+                )
+              })}
             >
               <Link href={item.url}>
                 {item.icon && <item.icon />}
