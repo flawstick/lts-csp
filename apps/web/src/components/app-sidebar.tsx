@@ -17,6 +17,7 @@ import { NavMain } from "@/components/nav-main"
 import { NavOrg } from "@/components/nav-org"
 import { NavUser } from "@/components/nav-user"
 import { TeamSwitcher } from "@/components/team-switcher"
+import { useOrgStore } from "@/lib/org-context"
 import {
   Sidebar,
   SidebarContent,
@@ -25,44 +26,41 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar"
 
-const data = {
-  platform: [
-    {
-      title: "Dashboard",
-      url: "/",
-      icon: SquareTerminal,
-    },
-    {
-      title: "Returns",
-      url: "/returns",
-      icon: FileText,
-    },
-    {
-      title: "Tasks",
-      url: "/tasks",
-      icon: Bot,
-    },
-  ],
-  organisation: [
-    {
-      title: "Settings",
-      url: "/org/settings",
-      icon: Building2,
-    },
-  ],
-  settings: [
-    {
-      title: "Members",
-      url: "/members",
-      icon: Users,
-    },
-    {
-      title: "Billing",
-      url: "/billing",
-      icon: CreditCard,
-    },
-  ],
-}
+const basePlatformItems = [
+  {
+    title: "Dashboard",
+    url: "/",
+    icon: SquareTerminal,
+  },
+  {
+    title: "Returns",
+    url: "/returns",
+    icon: FileText,
+  },
+  {
+    title: "Tasks",
+    url: "/tasks",
+    icon: Bot,
+  },
+]
+
+const baseSettingsItems = [
+  {
+    title: "Organizations",
+    url: "/settings",
+    icon: Building2,
+  },
+  {
+    title: "Members",
+    url: "/members",
+    icon: Users,
+  },
+  {
+    title: "Billing",
+    url: "/billing",
+    icon: CreditCard,
+  },
+]
 
 interface Organisation {
   id: string
@@ -71,6 +69,7 @@ interface Organisation {
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const { currentOrg } = useOrgStore()
   const [user, setUser] = React.useState<User | null>(null)
   const [organisations, setOrganisations] = React.useState<Organisation[]>([])
   const [isGlobalAdmin, setIsGlobalAdmin] = React.useState(false)
@@ -110,11 +109,36 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     avatar: user?.user_metadata?.avatar_url || user?.user_metadata?.picture || "",
   }
 
-  const clientOrgItems = organisations.map(org => ({
-    title: org.name,
-    url: `/client-orgs/${org.slug}/settings`,
-    icon: Building2,
-  }))
+  // Build platform items - add org settings if there's a current org
+  const platformItems = currentOrg
+    ? [
+        ...basePlatformItems,
+        {
+          title: `${currentOrg.name} Settings`,
+          url: "/org/settings",
+          icon: Settings,
+        },
+      ]
+    : basePlatformItems
+
+  // Build settings items dynamically - add client orgs submenu if admin
+  const settingsItems = isGlobalAdmin && organisations.length > 0
+    ? [
+        {
+          title: "Organizations",
+          url: "/settings",
+          icon: Building2,
+          items: [
+            { title: "Manage Organizations", url: "/settings" },
+            ...organisations.map(org => ({
+              title: org.name,
+              url: `/client-orgs/${org.slug}/settings`,
+            })),
+          ],
+        },
+        ...baseSettingsItems.slice(1), // Members and Billing
+      ]
+    : baseSettingsItems
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -122,12 +146,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <TeamSwitcher />
       </SidebarHeader>
       <SidebarContent>
-        <NavMain label="Platform" items={data.platform} />
-        {isGlobalAdmin && organisations.length > 0 && (
-          <NavOrg label="Client Organizations" items={clientOrgItems} />
-        )}
-        <NavOrg label="Organisation" items={data.organisation} />
-        <NavMain label="Settings" items={data.settings} />
+        <NavMain label="Platform" items={platformItems} />
+        <NavMain label="Settings" items={settingsItems} />
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={userData} />
