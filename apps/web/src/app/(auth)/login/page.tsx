@@ -7,11 +7,15 @@ import { AtSignIcon, ChevronLeftIcon } from "@/lib/icons";
 import Image from "next/image";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [step, setStep] = useState<"email" | "otp">("email");
+  const router = useRouter();
 
   const supabase = createClient();
 
@@ -23,14 +27,35 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        shouldCreateUser: true,
       },
     });
 
     if (error) {
       setMessage(error.message);
     } else {
-      setMessage("Check your email for the login link!");
+      setMessage("Check your email for the 6-digit code!");
+      setStep("otp");
+    }
+    setLoading(false);
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
+
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token: otp,
+      type: "email",
+    });
+
+    if (error) {
+      setMessage(error.message);
+    } else {
+      router.push("/");
+      router.refresh();
     }
     setLoading(false);
   };
@@ -88,28 +113,62 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <form className="space-y-2" onSubmit={handleEmailSignIn}>
-            <p className="text-muted-foreground text-start text-xs">
-              Enter your email address to sign in or create an account
-            </p>
-            <div className="relative h-max">
+          {step === "email" ? (
+            <form className="space-y-2" onSubmit={handleEmailSignIn}>
+              <p className="text-muted-foreground text-start text-xs">
+                Enter your email address to sign in or create an account
+              </p>
+              <div className="relative h-max">
+                <Input
+                  placeholder="your.email@example.com"
+                  className="peer ps-9"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+                <div className="text-muted-foreground pointer-events-none absolute inset-y-0 start-0 flex items-center justify-center ps-3 peer-disabled:opacity-50">
+                  <AtSignIcon className="size-4" aria-hidden="true" />
+                </div>
+              </div>
+
+              <Button type="submit" className="w-full" disabled={loading}>
+                <span>{loading ? "Sending code..." : "Continue With Email"}</span>
+              </Button>
+            </form>
+          ) : (
+            <form className="space-y-2" onSubmit={handleVerifyOtp}>
+              <p className="text-muted-foreground text-start text-xs">
+                Enter the 6-digit code sent to {email}
+              </p>
               <Input
-                placeholder="your.email@example.com"
-                className="peer ps-9"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                placeholder="123456"
+                className="text-center text-2xl tracking-widest"
+                type="text"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                maxLength={6}
                 required
               />
-              <div className="text-muted-foreground pointer-events-none absolute inset-y-0 start-0 flex items-center justify-center ps-3 peer-disabled:opacity-50">
-                <AtSignIcon className="size-4" aria-hidden="true" />
-              </div>
-            </div>
 
-            <Button type="submit" className="w-full" disabled={loading}>
-              <span>{loading ? "Loading..." : "Continue With Email"}</span>
-            </Button>
-          </form>
+              <Button type="submit" className="w-full" disabled={loading || otp.length !== 6}>
+                <span>{loading ? "Verifying..." : "Verify Code"}</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  setStep("email");
+                  setOtp("");
+                  setMessage("");
+                }}
+              >
+                Use different email
+              </Button>
+            </form>
+          )}
 
           {message && (
             <p className="text-sm text-center text-muted-foreground">

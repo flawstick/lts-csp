@@ -4,8 +4,9 @@ Custom branded email templates for LTS Tax passwordless authentication.
 
 ## Templates Included
 
-1. **supabase-magic-link.html** - Magic link login email (primary authentication method)
-2. **supabase-confirm-signup.html** - Email confirmation for new signups
+1. **supabase-otp.html** - OTP (6-digit code) login email (primary authentication method)
+2. **supabase-magic-link.html** - Magic link login email (deprecated)
+3. **supabase-confirm-signup.html** - Email confirmation for new signups
 
 ## How to Configure in Supabase
 
@@ -16,11 +17,13 @@ Custom branded email templates for LTS Tax passwordless authentication.
 
 ### Step 2: Update Templates
 
-#### Magic Link Template
-1. Select **Magic Link** from the left sidebar
-2. Copy the content from `supabase-magic-link.html`
+#### OTP Template (Recommended)
+1. Select **Magic Link** from the left sidebar (Supabase uses the same template for OTP)
+2. Copy the content from `supabase-otp.html`
 3. Paste it into the **Email template body** field in Supabase
 4. Click **Save**
+
+**Note:** When using `signInWithOtp` in your code, Supabase will automatically send a 6-digit code and use this template. The `{{ .Token }}` variable will contain the OTP code.
 
 #### Confirm Signup Template
 1. Select **Confirm Signup** from the left sidebar

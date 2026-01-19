@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+      <h1 style="color: white; margin: 0; font-size: 28px;">LTS Tax</h1>
+    </div>
+
+    <div style="background: #ffffff; padding: 40px 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
+      <h2 style="color: #1f2937; margin-top: 0; text-align: center;">Your Login Code</h2>
+
+      <p style="color: #4b5563; text-align: center;">
+        Use the code below to sign in to LTS Tax:
+      </p>
+
+      <div style="background: #f9fafb; border: 2px dashed #d1d5db; border-radius: 8px; padding: 20px; margin: 30px 0; text-align: center;">
+        <p style="font-size: 36px; font-weight: bold; letter-spacing: 8px; margin: 0; color: #1f2937; font-family: monospace;">
+          {{ .Token }}
+        </p>
+      </div>
+
+      <p style="color: #6b7280; font-size: 14px; text-align: center; margin-top: 30px;">
+        This code will expire in 10 minutes.
+      </p>
+
+      <p style="color: #9ca3af; font-size: 12px; margin-top: 30px; text-align: center;">
+        If you didn't request this code, you can safely ignore this email.
+      </p>
+    </div>
+
+    <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+      <p>&copy; {{ .Year }} LTS Tax. All rights reserved.</p>
+    </div>
+  </body>
+</html>
