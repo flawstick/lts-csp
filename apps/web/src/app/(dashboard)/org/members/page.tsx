@@ -206,7 +206,7 @@ export default function OrgMembersPage() {
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="/org/settings">Organisation</BreadcrumbLink>
+                  <BreadcrumbLink href="/org/settings">{currentOrg?.name}</BreadcrumbLink>
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>

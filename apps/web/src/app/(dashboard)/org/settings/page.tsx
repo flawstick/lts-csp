@@ -215,7 +215,7 @@ export default function OrgSettingsPage() {
               </BreadcrumbItem>
               <BreadcrumbSeparator className="hidden md:block" />
               <BreadcrumbItem>
-                <BreadcrumbPage>Organisation Settings</BreadcrumbPage>
+                <BreadcrumbPage>{currentOrg?.name} Settings</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
@@ -226,7 +226,7 @@ export default function OrgSettingsPage() {
             {/* Header */}
             <div className="flex items-start justify-between">
               <div>
-                <h1 className="text-xl font-semibold">Organisation Settings</h1>
+                <h1 className="text-xl font-semibold">{currentOrg?.name} Settings</h1>
                 <p className="text-muted-foreground text-sm">
                   Manage your organisation profile
                 </p>
