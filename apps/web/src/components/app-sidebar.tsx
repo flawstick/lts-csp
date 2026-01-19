@@ -26,20 +26,20 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar"
 
-const basePlatformItems = [
+const getBasePlatformItems = (orgId: string | undefined) => [
   {
     title: "Dashboard",
-    url: "/",
+    url: orgId ? `/org/${orgId}` : "/",
     icon: SquareTerminal,
   },
   {
     title: "Returns",
-    url: "/returns",
+    url: orgId ? `/org/${orgId}/returns` : "/returns",
     icon: FileText,
   },
   {
     title: "Tasks",
-    url: "/tasks",
+    url: orgId ? `/org/${orgId}/tasks` : "/tasks",
     icon: Bot,
   },
 ]
@@ -112,14 +112,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   // Build platform items - add org settings if there's a current org
   const platformItems = currentOrg
     ? [
-        ...basePlatformItems,
+        ...getBasePlatformItems(currentOrg.id),
         {
           title: `${currentOrg.name} Settings`,
           url: `/org/${currentOrg.id}/settings`,
           icon: Settings,
         },
       ]
-    : basePlatformItems
+    : getBasePlatformItems(undefined)
 
   // Build settings items dynamically - add client orgs submenu if admin
   const settingsItems = isGlobalAdmin && organisations.length > 0

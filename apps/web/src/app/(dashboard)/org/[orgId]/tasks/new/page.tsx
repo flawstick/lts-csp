@@ -23,8 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useState, useEffect, useCallback } from "react"
-import { useRouter } from "next/navigation"
-import { useOrgStore } from "@/lib/org-context"
+import { useRouter, useParams } from "next/navigation"
 import { Upload, X, FileText, Loader2, Rocket } from "@/lib/icons"
 import type { Jurisdiction } from "@repo/database"
 
@@ -36,7 +35,8 @@ interface UploadedFile {
 
 export default function NewTaskPage() {
   const router = useRouter()
-  const { currentOrg } = useOrgStore()
+  const params = useParams()
+  const orgId = params?.orgId as string
   const [jurisdictions, setJurisdictions] = useState<Jurisdiction[]>([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -112,8 +112,8 @@ export default function NewTaskPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!currentOrg) {
-      alert("Please select an organisation")
+    if (!orgId) {
+      alert("Invalid organization")
       return
     }
 
@@ -137,7 +137,7 @@ export default function NewTaskPage() {
           name: name.trim(),
           description: description.trim() || null,
           taskType,
-          orgId: currentOrg.id,
+          orgId,
           jurisdictionId,
           pdfUrls: uploadedFiles.map((f) => f.url),
           launchEcs: launchImmediately,
@@ -147,7 +147,7 @@ export default function NewTaskPage() {
       const data = await res.json()
 
       if (data.success) {
-        router.push(`/tasks?taskId=${data.task.id}`)
+        router.push(`/org/${orgId}/tasks?taskId=${data.task.id}`)
       } else {
         alert(`Failed to create task: ${data.error}`)
       }
@@ -172,7 +172,7 @@ export default function NewTaskPage() {
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="/tasks">Tasks</BreadcrumbLink>
+                  <BreadcrumbLink href={`/org/${orgId}/tasks`}>Tasks</BreadcrumbLink>
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
@@ -336,12 +336,12 @@ export default function NewTaskPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => router.push("/tasks")}
+                    onClick={() => router.push(`/org/${orgId}/tasks`)}
                     disabled={loading}
                   >
                     Cancel
                   </Button>
-                  <Button type="submit" disabled={loading || !currentOrg}>
+                  <Button type="submit" disabled={loading || !orgId}>
                     {loading ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />

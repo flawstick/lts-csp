@@ -33,8 +33,11 @@ import { Loader2, ChevronLeft, ChevronRight, Terminal, ArrowLeft, Clock, CheckCi
 import Link from "next/link"
 import { api } from "@/trpc/react"
 import { formatDistanceToNow } from "date-fns"
+import { useParams } from "next/navigation"
 
 export default function SyncJobsPage() {
+  const params = useParams()
+  const orgId = params?.orgId as string
   const [page, setPage] = React.useState(1)
   const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null)
   const pageSize = 20
@@ -114,7 +117,7 @@ export default function SyncJobsPage() {
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="/returns">Tax Returns</BreadcrumbLink>
+                  <BreadcrumbLink href={`/org/${orgId}/returns`}>Tax Returns</BreadcrumbLink>
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
@@ -130,7 +133,7 @@ export default function SyncJobsPage() {
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="sm" asChild className="-ml-2">
-                  <Link href="/returns">
+                  <Link href={`/org/${orgId}/returns`}>
                     <ArrowLeft className="h-4 w-4" />
                   </Link>
                 </Button>

@@ -63,12 +63,13 @@ import { Loader2, Play, ExternalLink, Monitor, AlertCircle, CheckCircle2, XCircl
 import Link from "next/link"
 import { api } from "@/trpc/react"
 import { useState, useEffect } from "react"
-import { useOrgStore } from "@/lib/org-context"
+import { useParams } from "next/navigation"
 
 type StatusFilter = "pending" | "in_progress" | "completed" | "failed" | "cancelled" | undefined
 
 export default function TasksPage() {
-  const { currentOrg } = useOrgStore()
+  const params = useParams()
+  const orgId = params?.orgId as string
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(undefined)
   const [searchQuery, setSearchQuery] = useState("")
@@ -95,13 +96,13 @@ export default function TasksPage() {
   }, [statusFilter])
 
   const { data, isLoading, refetch } = api.taxReturn.listTasks.useQuery({
-    orgId: currentOrg?.id, // Filter by current org
+    orgId, // Filter by org from URL
     page,
     pageSize,
     status: statusFilter,
     search: debouncedSearch || undefined,
   }, {
-    enabled: !!currentOrg, // Only run if we have an org selected
+    enabled: !!orgId, // Only run if we have an orgId
   })
 
   const deleteTasksMutation = api.taxReturn.deleteTasks.useMutation({
@@ -296,7 +297,7 @@ export default function TasksPage() {
                           <Terminal className="h-12 w-12 mb-4 opacity-20" />
                           <p>No tasks found.</p>
                           <Button variant="link" asChild className="mt-2">
-                            <Link href="/returns">Go to Returns to create a task</Link>
+                            <Link href={`/org/${orgId}/returns`}>Go to Returns to create a task</Link>
                           </Button>
                         </div>
                       </TableCell>

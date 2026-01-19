@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useSearchParams } from "next/navigation"
+import { useSearchParams, useParams } from "next/navigation"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -54,7 +54,8 @@ import { useOrgStore } from "@/lib/org-context"
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | undefined
 
 export default function ReturnsPage() {
-  const { currentOrg } = useOrgStore()
+  const params = useParams()
+  const orgId = params?.orgId as string
   const searchParams = useSearchParams()
   const initialStatus = searchParams.get("status") as StatusFilter
 
@@ -89,7 +90,7 @@ export default function ReturnsPage() {
 
   const { data, isLoading, refetch } = api.taxReturn.list.useQuery(
     {
-      orgId: currentOrg?.id, // Filter by current org
+      orgId, // Filter by org from URL
       page,
       pageSize,
       status: statusFilter,
@@ -97,7 +98,7 @@ export default function ReturnsPage() {
     },
     {
       refetchOnWindowFocus: false,
-      enabled: !!currentOrg, // Only run query if we have an org selected
+      enabled: !!orgId, // Only run query if we have an orgId
     }
   )
 
@@ -247,13 +248,13 @@ export default function ReturnsPage() {
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" asChild>
-                <Link href="/returns/sync-jobs">
+                <Link href={`/org/${orgId}/returns/sync-jobs`}>
                   <History className="mr-2 h-4 w-4" />
                   Sync Jobs
                 </Link>
               </Button>
               <Button variant="outline" asChild>
-                <Link href="/returns/scrape">
+                <Link href={`/org/${orgId}/returns/scrape`}>
                   <RefreshCw className="mr-2 h-4 w-4" />
                   Manual Sync
                 </Link>

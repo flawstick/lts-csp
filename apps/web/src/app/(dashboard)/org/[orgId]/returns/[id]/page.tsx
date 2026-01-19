@@ -48,6 +48,7 @@ type SectionId = typeof FORM_SECTIONS[number]["id"]
 export default function ReturnDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const orgId = params?.orgId as string
   const id = params.id as string
 
   const [isUploading, setIsUploading] = useState(false)
@@ -211,7 +212,7 @@ export default function ReturnDetailPage() {
       <div className="flex flex-col items-center justify-center min-h-screen gap-4">
         <AlertCircle className="h-12 w-12 text-destructive" />
         <h2 className="text-xl font-semibold">Tax Return Not Found</h2>
-        <Button variant="outline" onClick={() => router.push("/returns")}>
+        <Button variant="outline" onClick={() => router.push(`/org/${orgId}/returns`)}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Returns
         </Button>
@@ -251,7 +252,7 @@ export default function ReturnDetailPage() {
           <Breadcrumb>
             <BreadcrumbList>
               <BreadcrumbItem className="hidden md:block">
-                <BreadcrumbLink href="/returns">Tax Returns</BreadcrumbLink>
+                <BreadcrumbLink href={`/org/${orgId}/returns`}>Tax Returns</BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator className="hidden md:block" />
               <BreadcrumbItem>

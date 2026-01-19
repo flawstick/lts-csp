@@ -86,6 +86,7 @@ interface ChatMessage {
 export default function TaskDetailPage() {
   const params = useParams()
   const taskId = params.taskId as string
+  const orgId = params.orgId as string
 
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   const [liveUrl, setLiveUrl] = useState<string | null>(null)
@@ -804,7 +805,7 @@ export default function TaskDetailPage() {
         <AlertCircle className="h-12 w-12 text-muted-foreground" />
         <p className="text-lg text-muted-foreground">Task not found</p>
         <Button asChild>
-          <Link href="/tasks">
+          <Link href={`/org/${orgId}/tasks`}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Tasks
           </Link>
@@ -822,7 +823,7 @@ export default function TaskDetailPage() {
             <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="/tasks">Tasks</BreadcrumbLink>
+                  <BreadcrumbLink href={`/org/${orgId}/tasks`}>Tasks</BreadcrumbLink>
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
