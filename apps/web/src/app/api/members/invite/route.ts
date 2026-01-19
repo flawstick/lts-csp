@@ -127,6 +127,12 @@ export async function POST(request: Request) {
         from: fromEmail,
         to: [email],
         subject: "You've been invited to join LTS Tax",
+        headers: {
+          'X-Entity-Ref-ID': invitation.id,
+        },
+        tags: [
+          { name: 'category', value: 'invitation' }
+        ],
         html: `
           <!DOCTYPE html>
           <html>
