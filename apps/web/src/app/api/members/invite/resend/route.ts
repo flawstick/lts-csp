@@ -115,6 +115,13 @@ export async function POST(request: Request) {
                   </a>
                 </div>
 
+                <div style="background: #f9fafb; border: 2px dashed #d1d5db; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
+                  <p style="margin: 0 0 10px 0; color: #6b7280; font-size: 14px;">Or copy your invitation token:</p>
+                  <p style="font-size: 16px; font-weight: bold; letter-spacing: 2px; margin: 0; color: #1f2937; font-family: monospace; word-break: break-all;">
+                    ${invitation.token}
+                  </p>
+                </div>
+
                 <p style="color: #9ca3af; font-size: 12px; margin-top: 30px;">
                   If you didn't expect this invitation, you can safely ignore this email.
                   <br><br>
