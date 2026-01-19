@@ -127,6 +127,12 @@ export async function POST(request: Request) {
                   <br><br>
                   This invitation link will expire on ${expiryDate}.
                 </p>
+
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+                  <p style="color: #6b7280; font-size: 13px; margin: 0;">
+                    Questions? Reply to this email or contact us at <a href="mailto:hello@email.aionarete.com" style="color: #667eea; text-decoration: none;">hello@email.aionarete.com</a>
+                  </p>
+                </div>
               </div>
 
               <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">

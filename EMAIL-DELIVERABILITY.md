@@ -1,18 +1,58 @@
 # Email Deliverability Setup for LTS Tax
 
-Your emails are going to spam because you're missing proper email authentication records (SPF, DKIM, DMARC). Here's how to fix it.
+Your emails are going to spam due to domain mismatch and email best practices. Here's how to fix it.
+
+## Current Issues
+
+1. ✅ **DKIM/SPF Records** - Already configured and verified
+2. ⚠️ **Domain Mismatch** - Email from `email.aionarete.com` but URLs point to `lts-tax.vercel.app`
+3. ✅ **"noreply" Address** - Changed to `hello@email.aionarete.com`
 
 ## Current Setup
 
 - **Domain:** `email.aionarete.com`
+- **App Domain:** `lts-tax.vercel.app`
 - **Email Service:** Resend
-- **From Address:** `noreply@email.aionarete.com`
+- **From Address:** `hello@email.aionarete.com` (updated)
 
-## Step 1: Verify Domain in Resend
+## ⚠️ CRITICAL: Fix Domain Mismatch (Do This First!)
 
-1. Go to https://resend.com/domains
-2. Find `email.aionarete.com` in your domains list
-3. Check the verification status
+**Problem:** Your emails come from `email.aionarete.com` but link to `lts-tax.vercel.app`. This is a major red flag for spam filters.
+
+**Solution Options (choose one):**
+
+### Option 1: Get ltstax.com Domain (Recommended)
+1. Buy `ltstax.com` domain (~$12/year)
+2. Add it to Resend: https://resend.com/domains
+3. Set up DNS records (SPF, DKIM, DMARC)
+4. Update environment variables:
+   ```
+   NEXT_PUBLIC_APP_URL="https://ltstax.com"
+   RESEND_FROM_EMAIL="LTS Tax <hello@ltstax.com>"
+   ```
+5. Point `ltstax.com` to Vercel in DNS
+6. Add domain in Vercel project settings
+
+**Why this is best:** Professional, consistent branding, better deliverability.
+
+### Option 2: Use email.aionarete.com for App URL
+Update your app to use `email.aionarete.com` as the main domain:
+```
+NEXT_PUBLIC_APP_URL="https://email.aionarete.com"
+```
+Then set up Vercel to serve from this domain.
+
+**Why not ideal:** Domain doesn't match brand "LTS Tax"
+
+### Option 3: Quick Fix - Change App Domain in Vercel
+1. Go to Vercel project settings → Domains
+2. Add custom domain (you own)
+3. Update DNS to point to Vercel
+4. Match email domain to app domain
+
+## Step 1: Verify Domain in Resend (Already Done ✓)
+
+Your DKIM and SPF records are already verified - great!
 
 ## Step 2: Add DNS Records
 
