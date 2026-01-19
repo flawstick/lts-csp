@@ -1,16 +1,8 @@
 import { db } from "@repo/database"
-import { eq, and } from "drizzle-orm"
-import { orgMembers, accounts, organisations, globalAdmins } from "@repo/database"
+import { eq } from "drizzle-orm"
+import { accounts, organisations } from "@repo/database"
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { canEditOrgSettings, type OrgRole } from "@/lib/permissions"
-
-async function checkGlobalAdmin(accountId: string): Promise<boolean> {
-  const admin = await db.query.globalAdmins.findFirst({
-    where: eq(globalAdmins.accountId, accountId),
-  })
-  return !!admin
-}
 
 export async function GET(
   request: Request,
@@ -53,32 +45,13 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Get account by user ID
+    // Get account - all platform users can access orgs
     const account = await db.query.accounts.findFirst({
       where: eq(accounts.userId, user.id),
     })
 
     if (!account) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 })
-    }
-
-    // Check if user is a member with permission
-    const membership = await db.query.orgMembers.findFirst({
-      where: and(
-        eq(orgMembers.orgId, orgId),
-        eq(orgMembers.accountId, account.id)
-      ),
-    })
-
-    const isGlobalAdmin = await checkGlobalAdmin(account.id)
-
-    if (!membership && !isGlobalAdmin) {
-      return NextResponse.json({ error: "Not a member of this organisation" }, { status: 403 })
-    }
-
-    // Only admins, owners, or global admins can edit org settings
-    if (!isGlobalAdmin && !canEditOrgSettings(membership?.role as OrgRole)) {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
     const body = await request.json()

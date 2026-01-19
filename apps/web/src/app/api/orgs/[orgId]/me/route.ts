@@ -1,6 +1,6 @@
 import { db } from "@repo/database"
-import { eq, and } from "drizzle-orm"
-import { orgMembers, accounts, globalAdmins } from "@repo/database"
+import { eq } from "drizzle-orm"
+import { accounts, globalAdmins } from "@repo/database"
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 
@@ -32,22 +32,10 @@ export async function GET(
     })
     const isGlobalAdmin = !!globalAdmin
 
-    // Get membership
-    const membership = await db.query.orgMembers.findFirst({
-      where: and(
-        eq(orgMembers.orgId, orgId),
-        eq(orgMembers.accountId, account.id)
-      ),
-    })
-
-    // Global admins can access even if not a member
-    if (!membership && !isGlobalAdmin) {
-      return NextResponse.json({ error: "Not a member of this organisation" }, { status: 403 })
-    }
-
+    // All platform users have access to orgs
     return NextResponse.json({
-      role: membership?.role ?? "owner", // Global admins get owner-level access
-      memberId: membership?.id,
+      role: isGlobalAdmin ? "admin" : "member",
+      memberId: account.id,
       isGlobalAdmin,
     })
   } catch (error) {

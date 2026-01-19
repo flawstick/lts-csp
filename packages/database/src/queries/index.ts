@@ -3,7 +3,6 @@ import { db } from "../index";
 import {
   accounts,
   organisations,
-  orgMembers,
   jurisdictions,
   tasks,
   jobs,
@@ -28,21 +27,6 @@ export const accountQueries = {
 
   getById: (id: string) =>
     db.query.accounts.findFirst({ where: eq(accounts.id, id) }),
-};
-
-// Org member queries
-export const orgMemberQueries = {
-  getByAccountId: (accountId: string) =>
-    db.query.orgMembers.findMany({
-      where: eq(orgMembers.accountId, accountId),
-      with: { organisation: true },
-    }),
-
-  getByOrgId: (orgId: string) =>
-    db.query.orgMembers.findMany({
-      where: eq(orgMembers.orgId, orgId),
-      with: { account: true },
-    }),
 };
 
 // Jurisdiction queries

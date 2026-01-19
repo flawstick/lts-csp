@@ -1,10 +1,9 @@
 import { db } from "@repo/database"
-import { eq, and } from "drizzle-orm"
-import { orgMembers, accounts, organisations, globalAdmins } from "@repo/database"
+import { eq } from "drizzle-orm"
+import { accounts, organisations, globalAdmins } from "@repo/database"
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { put, del } from "@vercel/blob"
-import { canEditOrgSettings, type OrgRole } from "@/lib/permissions"
 
 const ALLOWED_IMAGE_TYPES = [
   "image/jpeg",
@@ -34,31 +33,13 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Get account
+    // Get account - all platform users can access orgs
     const account = await db.query.accounts.findFirst({
       where: eq(accounts.userId, user.id),
     })
 
     if (!account) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 })
-    }
-
-    // Check permissions
-    const membership = await db.query.orgMembers.findFirst({
-      where: and(
-        eq(orgMembers.orgId, orgId),
-        eq(orgMembers.accountId, account.id)
-      ),
-    })
-
-    const isGlobalAdmin = await checkGlobalAdmin(account.id)
-
-    if (!membership && !isGlobalAdmin) {
-      return NextResponse.json({ error: "Not a member" }, { status: 403 })
-    }
-
-    if (!isGlobalAdmin && !canEditOrgSettings(membership?.role as OrgRole)) {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
     // Get the org to check for existing logo
@@ -140,31 +121,13 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Get account
+    // Get account - all platform users can access orgs
     const account = await db.query.accounts.findFirst({
       where: eq(accounts.userId, user.id),
     })
 
     if (!account) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 })
-    }
-
-    // Check permissions
-    const membership = await db.query.orgMembers.findFirst({
-      where: and(
-        eq(orgMembers.orgId, orgId),
-        eq(orgMembers.accountId, account.id)
-      ),
-    })
-
-    const isGlobalAdmin = await checkGlobalAdmin(account.id)
-
-    if (!membership && !isGlobalAdmin) {
-      return NextResponse.json({ error: "Not a member" }, { status: 403 })
-    }
-
-    if (!isGlobalAdmin && !canEditOrgSettings(membership?.role as OrgRole)) {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
     // Get the org
