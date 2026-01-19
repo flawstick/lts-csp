@@ -125,6 +125,7 @@ export const XCircle = createIcon(CancelCircleIcon)
 export const Search = createIcon(Search01Icon)
 export const Settings = createIcon(Settings01Icon)
 export const Pencil = createIcon(PencilEdit01Icon)
+export const Edit = createIcon(PencilEdit01Icon) // Alias for Pencil
 export const Plus = createIcon(PlusSignIcon)
 export const MoreHorizontal = createIcon(MoreHorizontalIcon)
 export const Sparkles = createIcon(SparklesIcon)
