@@ -732,7 +732,6 @@ export default function TaskDetailPage() {
         <header className="flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur sticky top-0 z-10">
             <div className="flex items-center gap-2 px-4 flex-1">
               <SidebarTrigger className="-ml-1" />
-              <Separator orientation="vertical" className="mr-2 h-4" />
               <div className="flex items-center gap-2">
                 <Skeleton className="h-4 w-16" />
                 <Separator orientation="vertical" className="h-4" />
