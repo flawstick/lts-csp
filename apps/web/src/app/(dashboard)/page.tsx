@@ -28,7 +28,7 @@ export default async function DashboardRedirect() {
   })
 
   if (orgs.length > 0) {
-    redirect(`/org/${orgs[0].id}`)
+    redirect(`/org/${orgs[0]!.id}`)
   }
 
   // No orgs found - redirect to a no-orgs page or error

@@ -1135,7 +1135,7 @@ export default function TaskDetailPage() {
                             <AlertCircle className="h-4 w-4 inline mr-2" />
                             Substance form incomplete
                             <Button variant="link" size="sm" asChild className="text-yellow-600 p-0 h-auto ml-1">
-                              <Link href={`/returns/${task.taxReturn.id}`}>
+                              <Link href={`/org/${orgId}/returns/${task.taxReturn.id}`}>
                                 Complete form
                               </Link>
                             </Button>

@@ -373,7 +373,7 @@ export default function ReturnsPage() {
                         </TableCell>
                         <TableCell className="font-medium">
                           <Link
-                            href={`/returns/${item.id}`}
+                            href={`/org/${params.orgId}/returns/${item.id}`}
                             className="hover:underline hover:text-primary transition-colors"
                           >
                             {item.entityName}
@@ -391,7 +391,7 @@ export default function ReturnsPage() {
                           <div className="flex items-center justify-end gap-2">
                             {item.status !== "completed" && (
                               <Button size="sm" asChild>
-                                <Link href={`/returns/${item.id}`}>
+                                <Link href={`/org/${params.orgId}/returns/${item.id}`}>
                                   Process
                                 </Link>
                               </Button>
@@ -406,7 +406,7 @@ export default function ReturnsPage() {
                               <DropdownMenuContent align="end">
                                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
                                 <DropdownMenuItem asChild>
-                                  <Link href={`/returns/${item.id}`}>
+                                  <Link href={`/org/${params.orgId}/returns/${item.id}`}>
                                     <FileText className="mr-2 h-4 w-4" />
                                     View Details
                                   </Link>

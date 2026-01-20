@@ -72,7 +72,7 @@ type TaxReturn = {
   jurisdiction: { code: string } | null
 }
 
-const columns: ColumnDef<TaxReturn>[] = [
+const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
   {
     id: "select",
     header: ({ table }) => (
@@ -104,7 +104,7 @@ const columns: ColumnDef<TaxReturn>[] = [
     header: "Entity",
     cell: ({ row }) => (
       <Link
-        href={`/returns/${row.original.id}`}
+        href={`/org/${orgId}/returns/${row.original.id}`}
         className="font-medium hover:underline hover:text-primary transition-colors"
       >
         {row.original.entityName}
@@ -194,7 +194,7 @@ const columns: ColumnDef<TaxReturn>[] = [
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-32">
           <DropdownMenuItem asChild>
-            <Link href={`/returns/${row.original.id}`}>View Details</Link>
+            <Link href={`/org/${orgId}/returns/${row.original.id}`}>View Details</Link>
           </DropdownMenuItem>
           {row.original.link && (
             <DropdownMenuItem asChild>
@@ -256,6 +256,8 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
       completed: returns.filter(r => r.status === "completed").length,
     }
   }, [data])
+
+  const columns = React.useMemo(() => createColumns(orgId), [orgId])
 
   const table = useReactTable({
     data: filteredData,
@@ -350,7 +352,7 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
             </DropdownMenuContent>
           </DropdownMenu>
           <Button variant="outline" size="sm" asChild>
-            <Link href="/returns">
+            <Link href={`/org/${orgId}/returns`}>
               View All
             </Link>
           </Button>

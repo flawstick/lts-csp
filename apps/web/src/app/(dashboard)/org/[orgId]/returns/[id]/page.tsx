@@ -293,7 +293,7 @@ export default function ReturnDetailPage() {
                 )}
                 {taxReturn.tasks && taxReturn.tasks.length > 0 ? (
                   <Button size="sm" className="cursor-pointer" asChild>
-                    <Link href={`/tasks/${taxReturn.tasks[0]?.id}`}>
+                    <Link href={`/org/${orgId}/tasks/${taxReturn.tasks[0]?.id}`}>
                       <Play className="h-4 w-4 mr-2" />
                       View Task
                     </Link>
@@ -307,7 +307,7 @@ export default function ReturnDetailPage() {
                       try {
                         const task = await createTaskMutation.mutateAsync({ taxReturnId: id })
                         if (task) {
-                          router.push(`/tasks/${task.id}`)
+                          router.push(`/org/${orgId}/tasks/${task.id}`)
                         }
                       } catch (err) {
                         console.error("Failed to create task:", err)
@@ -413,7 +413,7 @@ export default function ReturnDetailPage() {
                           className="bg-orange-600 hover:bg-orange-700"
                           asChild
                         >
-                          <Link href={`/tasks/${taxReturn.tasks[0]?.id}`}>
+                          <Link href={`/org/${orgId}/tasks/${taxReturn.tasks[0]?.id}`}>
                             <Play className="h-4 w-4 mr-2" />
                             Open Task
                           </Link>
@@ -428,7 +428,7 @@ export default function ReturnDetailPage() {
                           try {
                             const task = await createTaskMutation.mutateAsync({ taxReturnId: id })
                             if (task) {
-                              router.push(`/tasks/${task.id}`)
+                              router.push(`/org/${orgId}/tasks/${task.id}`)
                             }
                           } catch (err) {
                             console.error("Failed to create task:", err)

@@ -318,8 +318,8 @@ export default function TasksPage() {
                         <TableCell>{new Date(task.createdAt).toLocaleDateString()}</TableCell>
                         <TableCell>
                           {task.taxReturn ? (
-                            <Link 
-                              href={`/returns/${task.taxReturn.id}`}
+                            <Link
+                              href={`/org/${orgId}/returns/${task.taxReturn.id}`}
                               className="flex items-center gap-1 hover:underline text-primary"
                             >
                               {task.taxReturn.entityName}
@@ -342,7 +342,7 @@ export default function TasksPage() {
                               <DropdownMenuContent align="end">
                                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
                                 <DropdownMenuItem asChild>
-                                  <Link href={`/tasks/${task.id}`}>
+                                  <Link href={`/org/${orgId}/tasks/${task.id}`}>
                                     <Monitor className="mr-2 h-4 w-4" />
                                     Open Task
                                   </Link>
@@ -404,7 +404,7 @@ export default function TasksPage() {
                                       </div>
                                       <div className="pt-2 mt-2 border-t flex justify-end">
                                         <Button variant="secondary" size="sm" asChild>
-                                          <Link href={`/returns/${task.taxReturn.id}`}>
+                                          <Link href={`/org/${orgId}/returns/${task.taxReturn.id}`}>
                                             View Return
                                           </Link>
                                         </Button>
@@ -429,7 +429,7 @@ export default function TasksPage() {
                                     </div>
                                     <div className="pt-2 flex justify-end">
                                       <Button variant="secondary" size="sm" asChild>
-                                        <Link href={`/tasks/${task.id}/substance-form`}>
+                                        <Link href={`/org/${orgId}/tasks/${task.id}/substance-form`}>
                                           View Form
                                         </Link>
                                       </Button>
@@ -447,7 +447,7 @@ export default function TasksPage() {
                               <DialogFooter className="gap-2 sm:gap-0">
                                 {task.status === "in_progress" && (
                                   <Button className="w-full sm:w-auto" asChild>
-                                    <Link href={`/tasks/${task.id}`}>
+                                    <Link href={`/org/${orgId}/tasks/${task.id}`}>
                                       <Monitor className="h-4 w-4 mr-2" />
                                       View Live Stream
                                     </Link>
@@ -466,7 +466,7 @@ export default function TasksPage() {
                                       </Button>
                                     ) : (
                                       <Button className="w-full sm:w-auto" asChild>
-                                        <Link href={`/tasks/${task.id}`}>
+                                        <Link href={`/org/${orgId}/tasks/${task.id}`}>
                                           <Play className="h-4 w-4 mr-2" />
                                           Open & Start
                                         </Link>
