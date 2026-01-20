@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { db, globalAdmins, invitations, accounts } from "@repo/database"
+import { db, globalAdmins, pendingInvitations, accounts } from "@repo/database"
 import { eq } from "drizzle-orm"
 
 async function checkGlobalAdmin(accountId: string): Promise<boolean> {
@@ -34,14 +34,14 @@ export async function DELETE(
     // Check if user is a global admin
     const isAdmin = await checkGlobalAdmin(currentAccount.id)
     if (!isAdmin) {
-      return NextResponse.json({ error: "Only admins can revoke invitations" }, { status: 403 })
+      return NextResponse.json({ error: "Only admins can revoke pendingInvitations" }, { status: 403 })
     }
 
     const { invitationId } = await params
 
     // Get the invitation
-    const invitation = await db.query.invitations.findFirst({
-      where: eq(invitations.id, invitationId),
+    const invitation = await db.query.pendingInvitations.findFirst({
+      where: eq(pendingInvitations.id, invitationId),
     })
 
     if (!invitation) {
@@ -49,7 +49,7 @@ export async function DELETE(
     }
 
     // Delete the invitation
-    await db.delete(invitations).where(eq(invitations.id, invitationId))
+    await db.delete(pendingInvitations).where(eq(pendingInvitations.id, invitationId))
 
     return NextResponse.json({ success: true, message: "Invitation revoked successfully" })
   } catch (error) {
