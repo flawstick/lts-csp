@@ -1,48 +1,36 @@
-"use client"
+import { redirect } from "next/navigation"
+import { db } from "@repo/database"
+import { createClient } from "@/lib/supabase/server"
+import { eq } from "drizzle-orm"
+import { accounts } from "@repo/database"
 
-import { useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+export default async function DashboardRedirect() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
 
-export default function DashboardRedirect() {
-  const router = useRouter()
+  if (!user) {
+    redirect("/login")
+  }
 
-  useEffect(() => {
-    async function redirectToFirstOrg() {
-      try {
-        const res = await fetch("/api/orgs")
-        if (res.ok) {
-          const orgs = await res.json()
-          if (orgs && orgs.length > 0) {
-            router.replace(`/org/${orgs[0].id}`)
-          } else {
-            // No orgs found, stay on this page or show error
-            console.error("No organizations found")
-          }
-        }
-      } catch (error) {
-        console.error("Failed to redirect:", error)
-      }
-    }
+  // Check if user has an account
+  const account = await db.query.accounts.findFirst({
+    where: eq(accounts.userId, user.id),
+  })
 
-    redirectToFirstOrg()
-  }, [router])
+  if (!account) {
+    redirect("/waiting-for-invite")
+  }
 
-  return (
-    <>
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur sticky top-0 z-10 px-4">
-        <SidebarTrigger className="-ml-1" />
-        <Skeleton className="h-4 w-32" />
-      </header>
-      <div className="flex flex-1 flex-col p-6">
-        <div className="mx-auto w-full max-w-2xl space-y-6">
-          <Skeleton className="h-7 w-48" />
-          <Separator />
-          <Skeleton className="h-32 w-full" />
-        </div>
-      </div>
-    </>
-  )
+  // Get the first org
+  const orgs = await db.query.organisations.findMany({
+    orderBy: (o, { asc }) => [asc(o.name)],
+    limit: 1,
+  })
+
+  if (orgs.length > 0) {
+    redirect(`/org/${orgs[0].id}`)
+  }
+
+  // No orgs found - redirect to a no-orgs page or error
+  redirect("/waiting-for-invite")
 }

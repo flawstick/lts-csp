@@ -7,7 +7,7 @@ export async function GET() {
       orderBy: (o, { asc }) => [asc(o.name)],
     })
 
-    return NextResponse.json({ orgs })
+    return NextResponse.json(orgs)
   } catch (error) {
     console.error("Failed to fetch orgs:", error)
     return NextResponse.json({ error: "Failed to fetch organisations" }, { status: 500 })
