@@ -38,21 +38,21 @@ export const useOrgStore = create<OrgState>()(
         try {
           const res = await fetch("/api/orgs")
           if (res.ok) {
-            const data = await res.json()
+            const orgs = await res.json()
             const { currentOrg } = get()
-            set({ orgs: data.orgs })
+            set({ orgs })
 
             // If no current org, set the first one
-            if (!currentOrg && data.orgs.length > 0) {
-              set({ currentOrg: data.orgs[0] })
+            if (!currentOrg && orgs.length > 0) {
+              set({ currentOrg: orgs[0] })
             }
             // If current org exists, update it with fresh data from server
             else if (currentOrg) {
-              const updated = data.orgs.find((o: Organisation) => o.id === currentOrg.id)
+              const updated = orgs.find((o: Organisation) => o.id === currentOrg.id)
               if (updated) {
                 set({ currentOrg: updated })
-              } else if (data.orgs.length > 0) {
-                set({ currentOrg: data.orgs[0] })
+              } else if (orgs.length > 0) {
+                set({ currentOrg: orgs[0] })
               }
             }
           }
