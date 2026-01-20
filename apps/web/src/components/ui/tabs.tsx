@@ -1,66 +1,323 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import * as TabsPrimitive from "@radix-ui/react-tabs"
+import * as React from "react";
+import { useState, useEffect, useRef, createContext, useContext } from "react";
+import { motion } from "framer-motion";
+import * as TabsPrimitive from "@radix-ui/react-tabs";
+import { cn } from "@/lib/utils";
 
-import { cn } from "@/lib/utils"
-
-function Tabs({
-  className,
-  ...props
-}: React.ComponentProps<typeof TabsPrimitive.Root>) {
-  return (
-    <TabsPrimitive.Root
-      data-slot="tabs"
-      className={cn("flex flex-col gap-2", className)}
-      {...props}
-    />
-  )
+interface TabsContextValue {
+  activeTab: string;
+  setActiveTab: (value: string) => void;
+  registerTab: (value: string) => void;
+  tabs: string[];
 }
 
-function TabsList({
-  className,
-  ...props
-}: React.ComponentProps<typeof TabsPrimitive.List>) {
-  return (
-    <TabsPrimitive.List
-      data-slot="tabs-list"
-      className={cn(
-        "bg-muted text-muted-foreground inline-flex h-9 w-fit items-center justify-center rounded-lg p-[3px]",
-        className
-      )}
-      {...props}
-    />
-  )
+const TabsContext = createContext<TabsContextValue | null>(null);
+
+function useTabsContext() {
+  const context = useContext(TabsContext);
+  if (!context) {
+    throw new Error("Tabs components must be used within a Tabs provider");
+  }
+  return context;
 }
 
-function TabsTrigger({
-  className,
-  ...props
-}: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
-  return (
-    <TabsPrimitive.Trigger
-      data-slot="tabs-trigger"
-      className={cn(
-        "data-[state=active]:bg-background dark:data-[state=active]:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 text-foreground dark:text-muted-foreground inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:ring-[3px] focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:shadow-sm [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        className
-      )}
-      {...props}
-    />
-  )
+interface TabsProps
+  extends React.ComponentPropsWithoutRef<typeof TabsPrimitive.Root> {
+  defaultValue?: string;
+  value?: string;
+  onValueChange?: (value: string) => void;
 }
 
-function TabsContent({
-  className,
-  ...props
-}: React.ComponentProps<typeof TabsPrimitive.Content>) {
+const Tabs = React.forwardRef<
+  React.ElementRef<typeof TabsPrimitive.Root>,
+  TabsProps
+>(
+  (
+    { className, defaultValue, value, onValueChange, children, ...props },
+    ref,
+  ) => {
+    const [internalValue, setInternalValue] = useState(defaultValue || "");
+    const [tabs, setTabs] = useState<string[]>([]);
+
+    const activeTab = value !== undefined ? value : internalValue;
+
+    const setActiveTab = (newValue: string) => {
+      if (value === undefined) {
+        setInternalValue(newValue);
+      }
+      onValueChange?.(newValue);
+    };
+
+    const registerTab = (tabValue: string) => {
+      setTabs((prev) => {
+        if (!prev.includes(tabValue)) {
+          return [...prev, tabValue];
+        }
+        return prev;
+      });
+    };
+
+    return (
+      <TabsContext.Provider
+        value={{ activeTab, setActiveTab, registerTab, tabs }}
+      >
+        <TabsPrimitive.Root
+          ref={ref}
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className={cn("w-full", className)}
+          {...props}
+        >
+          {children}
+        </TabsPrimitive.Root>
+      </TabsContext.Provider>
+    );
+  },
+);
+Tabs.displayName = "Tabs";
+
+interface TabsListProps
+  extends React.ComponentPropsWithoutRef<typeof TabsPrimitive.List> {}
+
+const TabsList = React.forwardRef<
+  React.ElementRef<typeof TabsPrimitive.List>,
+  TabsListProps
+>(({ className, children, ...props }, ref) => {
+  const { activeTab } = useTabsContext();
+  const navRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+
+  const [indicatorStyles, setIndicatorStyles] = useState<{
+    left: number;
+    width: number;
+  }>({
+    left: 0,
+    width: 0,
+  });
+  const [lineStyles, setLineStyles] = useState<{
+    left: number;
+    width: number;
+  }>({
+    left: 0,
+    width: 0,
+  });
+  const [indicatorVisible, setIndicatorVisible] = useState(false);
+  const [justActivated, setJustActivated] = useState(false);
+  const [justRendered, setJustRendered] = useState(true);
+
+  useEffect(() => {
+    setJustRendered(false);
+  }, []);
+
+  useEffect(() => {
+    const activeElement = itemRefs.current.get(activeTab);
+    if (activeElement && navRef.current) {
+      const navRect = navRef.current.getBoundingClientRect();
+      const itemRect = activeElement.getBoundingClientRect();
+      setLineStyles({
+        left: itemRect.left - navRect.left + 8,
+        width: itemRect.width - 16,
+      });
+    }
+  }, [activeTab]);
+
+  function updateIndicator(element: HTMLButtonElement) {
+    if (element && navRef.current) {
+      const navRect = navRef.current.getBoundingClientRect();
+      const itemRect = element.getBoundingClientRect();
+      setIndicatorStyles({
+        left: itemRect.left - navRect.left,
+        width: itemRect.width,
+      });
+    }
+  }
+
+  useEffect(() => {
+    const activeElement = itemRefs.current.get(activeTab);
+    if (activeElement && navRef.current) {
+      updateIndicator(activeElement);
+      setIndicatorVisible(false);
+      setJustActivated(true);
+    } else {
+      setIndicatorVisible(false);
+      setJustActivated(false);
+      setIndicatorStyles({ left: 0, width: 0 });
+    }
+  }, [activeTab]);
+
+  function handleItemMouseEnter(element: HTMLButtonElement) {
+    if (!indicatorVisible) {
+      updateIndicator(element);
+      setIndicatorVisible(true);
+      setJustActivated(true);
+    } else {
+      updateIndicator(element);
+      setJustActivated(false);
+    }
+  }
+
+  function handleNavMouseLeave() {
+    setIndicatorVisible(false);
+    setJustActivated(false);
+  }
+
+  const registerRef = (value: string, element: HTMLButtonElement | null) => {
+    if (element) {
+      itemRefs.current.set(value, element);
+    } else {
+      itemRefs.current.delete(value);
+    }
+  };
+
   return (
-    <TabsPrimitive.Content
-      data-slot="tabs-content"
-      className={cn("flex-1 outline-none", className)}
-      {...props}
-    />
-  )
+    <div className={cn("relative border-b border-border", className)}>
+      <div ref={navRef} className="relative" onMouseLeave={handleNavMouseLeave}>
+        <motion.div
+          className="absolute top-0 z-0 h-full rounded-lg bg-black/[0.04] dark:bg-white/[0.06] shadow-sm ring-1 ring-black/[0.03] dark:ring-white/[0.03]"
+          initial={{
+            left: indicatorStyles.left,
+            width: indicatorStyles.width,
+            opacity: indicatorVisible ? 1 : 0,
+          }}
+          animate={{
+            left: indicatorStyles.left,
+            width: indicatorStyles.width,
+            opacity: indicatorVisible ? 1 : 0,
+          }}
+          transition={
+            justActivated
+              ? {
+                  left: { duration: 0 },
+                  width: { duration: 0 },
+                  opacity: {
+                    duration: justRendered ? 0 : 0.2,
+                    ease: "easeInOut",
+                  },
+                }
+              : {
+                  left: { type: "spring", stiffness: 300, damping: 30 },
+                  width: { type: "spring", stiffness: 300, damping: 30 },
+                  opacity: { duration: 0.3, ease: "easeInOut" },
+                }
+          }
+        />
+        <TabsPrimitive.List
+          ref={ref}
+          className="relative z-0 mb-2 flex"
+          {...props}
+        >
+          {React.Children.map(children, (child) => {
+            if (React.isValidElement(child) && child.type === TabsTrigger) {
+              return React.cloneElement(
+                child as React.ReactElement<TabsTriggerProps>,
+                {
+                  _onMouseEnter: handleItemMouseEnter,
+                  _registerRef: registerRef,
+                },
+              );
+            }
+            return child;
+          })}
+        </TabsPrimitive.List>
+      </div>
+      <motion.div
+        animate={{
+          width: lineStyles.width,
+          left: lineStyles.left,
+        }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        className="absolute bottom-0 h-0.5 rounded-lg bg-primary"
+      />
+    </div>
+  );
+});
+TabsList.displayName = "TabsList";
+
+interface TabsTriggerProps
+  extends React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger> {
+  _onMouseEnter?: (element: HTMLButtonElement) => void;
+  _registerRef?: (value: string, element: HTMLButtonElement | null) => void;
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent }
+const TabsTrigger = React.forwardRef<
+  React.ElementRef<typeof TabsPrimitive.Trigger>,
+  TabsTriggerProps
+>(
+  (
+    { className, value, _onMouseEnter, _registerRef, children, ...props },
+    ref,
+  ) => {
+    const { activeTab, registerTab } = useTabsContext();
+    const buttonRef = useRef<HTMLButtonElement>(null);
+
+    useEffect(() => {
+      if (value) {
+        registerTab(value);
+      }
+    }, [value, registerTab]);
+
+    useEffect(() => {
+      if (_registerRef && value) {
+        _registerRef(value, buttonRef.current);
+      }
+      return () => {
+        if (_registerRef && value) {
+          _registerRef(value, null);
+        }
+      };
+    }, [_registerRef, value]);
+
+    const handleMouseEnter = () => {
+      if (_onMouseEnter && buttonRef.current) {
+        _onMouseEnter(buttonRef.current);
+      }
+    };
+
+    return (
+      <TabsPrimitive.Trigger
+        ref={(el) => {
+          (
+            buttonRef as React.MutableRefObject<HTMLButtonElement | null>
+          ).current = el;
+          if (typeof ref === "function") {
+            ref(el);
+          } else if (ref) {
+            ref.current = el;
+          }
+        }}
+        value={value}
+        onMouseEnter={handleMouseEnter}
+        className={cn(
+          "inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted-foreground transition-colors duration-300 hover:text-foreground",
+          "ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+          "disabled:pointer-events-none disabled:opacity-50",
+          activeTab === value && "text-foreground",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </TabsPrimitive.Trigger>
+    );
+  },
+);
+TabsTrigger.displayName = "TabsTrigger";
+
+const TabsContent = React.forwardRef<
+  React.ElementRef<typeof TabsPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
+>(({ className, ...props }, ref) => (
+  <TabsPrimitive.Content
+    ref={ref}
+    className={cn(
+      "mt-4 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      className,
+    )}
+    {...props}
+  />
+));
+TabsContent.displayName = "TabsContent";
+
+export { Tabs, TabsList, TabsTrigger, TabsContent };

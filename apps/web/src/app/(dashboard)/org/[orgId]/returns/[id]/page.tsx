@@ -34,6 +34,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { FIELD_LABELS, FORM_SECTIONS, type SubstanceFormData } from "@/lib/schemas/substance-form"
 import { SubstanceFormEditor } from "@/components/substance-form-editor"
 import Link from "next/link"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 
 type FileInfo = {
   url: string
@@ -246,9 +247,6 @@ export default function ReturnDetailPage() {
     <>
       <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur sticky top-0 z-10 px-4">
           <SidebarTrigger className="-ml-1" />
-          <Button variant="ghost" size="icon" onClick={() => router.back()} className="mr-2">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
           <Breadcrumb>
             <BreadcrumbList>
               <BreadcrumbItem className="hidden md:block">
@@ -264,7 +262,13 @@ export default function ReturnDetailPage() {
 
         <div className="flex-1 overflow-auto p-6">
           <div className="max-w-5xl mx-auto space-y-8">
-            
+
+            {/* Back Button */}
+            <Button variant="ghost" size="sm" onClick={() => router.back()} className="w-fit">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back
+            </Button>
+
             {/* Header Section */}
             <div className="flex items-start justify-between">
               <div className="space-y-1.5">
@@ -339,43 +343,17 @@ export default function ReturnDetailPage() {
             )}
 
             {/* Main Content Tabs */}
-            <div className="space-y-6">
-              <div className="flex items-center border-b">
-                <button
-                  onClick={() => setActiveTab("form")}
-                  className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === "form" 
-                      ? "border-primary text-foreground" 
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  Substance Form
-                </button>
-                <button
-                  onClick={() => setActiveTab("files")}
-                  className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === "files"
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  Files & Documents
-                </button>
-                <button
-                  onClick={() => setActiveTab("automation")}
-                  className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
-                    activeTab === "automation"
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  }`}
-                >
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "form" | "files" | "automation")} defaultValue="form">
+              <TabsList>
+                <TabsTrigger value="form">Substance Form</TabsTrigger>
+                <TabsTrigger value="files">Files & Documents</TabsTrigger>
+                <TabsTrigger value="automation">
                   <Bot className="h-4 w-4" />
                   Automation
-                </button>
-              </div>
+                </TabsTrigger>
+              </TabsList>
 
-              {activeTab === "automation" ? (
-                /* Automation Tab */
+              <TabsContent value="automation">
                 <div className="space-y-6">
                   <div className="rounded-lg border bg-card p-12 text-center">
                     <div className="mx-auto w-16 h-16 rounded-full bg-orange-500/10 flex items-center justify-center mb-4">
@@ -454,7 +432,9 @@ export default function ReturnDetailPage() {
                     )}
                   </div>
                 </div>
-              ) : activeTab === "files" ? (
+              </TabsContent>
+
+              <TabsContent value="files">
                 <div className="space-y-6">
                   <div className="rounded-lg border bg-card shadow-sm">
                     <div className="p-4 border-b flex items-center justify-between bg-muted/20">
@@ -571,7 +551,9 @@ export default function ReturnDetailPage() {
                     </div>
                   )}
                 </div>
-              ) : (
+              </TabsContent>
+
+              <TabsContent value="form">
                 <div className="space-y-6">
                   {!substanceForm ? (
                     <div className="rounded-lg border bg-card p-12 text-center">
@@ -687,8 +669,8 @@ export default function ReturnDetailPage() {
                     </>
                   )}
                 </div>
-              )}
-            </div>
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
 
