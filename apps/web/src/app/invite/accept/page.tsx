@@ -55,24 +55,30 @@ function AcceptInvitationContent() {
       return;
     }
 
+    // Fetch invitation details
     fetch(`/api/invite/accept?token=${token}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.error) {
           setError(data.error);
+          setLoading(false);
         } else {
           setInvitation(data);
+          // Auto-accept if invitation is valid
+          if (!data.isExpired && !data.isAccepted && !data.isRevoked) {
+            autoAccept();
+          } else {
+            setLoading(false);
+          }
         }
       })
       .catch(() => {
         setError("Failed to load invitation details");
-      })
-      .finally(() => {
         setLoading(false);
       });
   }, [token]);
 
-  const handleAccept = async () => {
+  const autoAccept = async () => {
     if (!token) return;
 
     setAccepting(true);
@@ -93,6 +99,7 @@ function AcceptInvitationContent() {
           return;
         }
         setError(data.error ?? "Failed to accept invitation");
+        setLoading(false);
         return;
       }
 
@@ -102,6 +109,7 @@ function AcceptInvitationContent() {
       }, 2000);
     } catch {
       setError("Failed to accept invitation");
+      setLoading(false);
     } finally {
       setAccepting(false);
     }
@@ -217,30 +225,18 @@ function AcceptInvitationContent() {
                 LTS Tax is an AI-powered tax compliance platform that helps automate ESR returns and other tax filings.
               </p>
 
-              {error && (
+              {error ? (
                 <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg">
                   {error}
                 </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-6 space-y-3">
+                  <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
+                  <p className="text-sm text-muted-foreground">
+                    Processing your invitation...
+                  </p>
+                </div>
               )}
-
-              <Button
-                onClick={handleAccept}
-                disabled={accepting}
-                className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
-              >
-                {accepting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Accepting...
-                  </>
-                ) : (
-                  "Accept Invitation"
-                )}
-              </Button>
-
-              <p className="text-xs text-center text-muted-foreground">
-                By accepting, you agree to join LTS Tax and follow our terms of service
-              </p>
             </>
           )}
         </CardContent>
