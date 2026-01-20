@@ -1,86 +1,39 @@
-"use client"
-
 import { Mail, Clock } from "@/lib/icons"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { createClient } from "@/lib/supabase/client"
-import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { createClient } from "@/lib/supabase/server"
+import { redirect } from "next/navigation"
+import { db } from "@repo/database"
+import { eq, and } from "drizzle-orm"
+import { pendingInvitations } from "@repo/database"
+import { AcceptInviteButton } from "./accept-invite-button"
+import { SignOutButton } from "./sign-out-button"
 
-export default function WaitingForInvitePage() {
-  const [email, setEmail] = useState("")
-  const [token, setToken] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
-  const router = useRouter()
-  const supabase = createClient()
+export default async function WaitingForInvitePage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
 
-  useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push("/login")
-      } else {
-        setEmail(user.email || "")
-      }
-    }
-    getUser()
-  }, [router, supabase])
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.push("/login")
+  if (!user) {
+    redirect("/login")
   }
 
-  const handleAcceptInvite = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
+  const email = user.email || ""
 
-    try {
-      const res = await fetch("/api/invite/accept", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      })
+  // Check for pending invitation for this email
+  let invitationToken: string | null = null
+  if (email) {
+    const invitation = await db.query.pendingInvitations.findFirst({
+      where: and(
+        eq(pendingInvitations.email, email),
+        eq(pendingInvitations.status, "pending")
+      ),
+    })
 
-      const data = await res.json()
-
-      if (res.ok) {
-        setSuccess(true)
-        setTimeout(() => {
-          router.push("/")
-          router.refresh()
-        }, 1500)
-      } else {
-        setError(data.error || "Failed to accept invitation")
+    if (invitation) {
+      const isExpired = new Date() > invitation.expiresAt
+      if (!isExpired) {
+        invitationToken = invitation.token
       }
-    } catch (err) {
-      setError("Failed to accept invitation")
-    } finally {
-      setLoading(false)
     }
-  }
-
-  if (success) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-purple-50 to-blue-50 p-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="pt-6 text-center">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-              <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <h2 className="text-2xl font-semibold mb-2">Welcome to LTS Tax!</h2>
-            <p className="text-muted-foreground">Redirecting you to the dashboard...</p>
-          </CardContent>
-        </Card>
-      </div>
-    )
   }
 
   return (
@@ -108,33 +61,29 @@ export default function WaitingForInvitePage() {
             </div>
           </div>
 
-          <div className="space-y-2 text-sm text-muted-foreground">
-            <p>
-              You need to be invited by a platform administrator to access LTS Tax.
-            </p>
-            <p>
-              Once you receive an invitation email, you can enter the invite token below or click the link in the email.
-            </p>
-          </div>
+          {invitationToken ? (
+            <>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p className="text-green-600 font-medium">
+                  Great news! You have a pending invitation.
+                </p>
+                <p>
+                  Click the button below to accept your invitation and get started.
+                </p>
+              </div>
 
-          <form onSubmit={handleAcceptInvite} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="token">Invitation Token</Label>
-              <Input
-                id="token"
-                placeholder="Enter your invitation token"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                required
-              />
-              {error && (
-                <p className="text-sm text-destructive">{error}</p>
-              )}
+              <AcceptInviteButton token={invitationToken} />
+            </>
+          ) : (
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>
+                You need to be invited by a platform administrator to access LTS Tax.
+              </p>
+              <p>
+                Once you receive an invitation email, click the link in the email to accept.
+              </p>
             </div>
-            <Button type="submit" className="w-full" disabled={loading || !token}>
-              {loading ? "Accepting..." : "Accept Invitation"}
-            </Button>
-          </form>
+          )}
 
           <div className="relative">
             <div className="absolute inset-0 flex items-center">
@@ -145,9 +94,7 @@ export default function WaitingForInvitePage() {
             </div>
           </div>
 
-          <Button type="button" variant="outline" className="w-full" onClick={handleSignOut}>
-            Sign Out
-          </Button>
+          <SignOutButton />
         </CardContent>
       </Card>
     </div>
