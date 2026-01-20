@@ -34,6 +34,7 @@ import Link from "next/link"
 import { api } from "@/trpc/react"
 import { formatDistanceToNow } from "date-fns"
 import { useParams } from "next/navigation"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export default function SyncJobsPage() {
   const params = useParams()
@@ -170,25 +171,32 @@ export default function SyncJobsPage() {
               )}
             </CardHeader>
             <CardContent>
-              {isLoading ? (
-                <div className="flex items-center justify-center h-48">
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                </div>
-              ) : (
-                <>
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Jurisdiction</TableHead>
-                          <TableHead>Returns Found</TableHead>
-                          <TableHead>Started</TableHead>
-                          <TableHead>Duration</TableHead>
-                          <TableHead className="text-right">Logs</TableHead>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Jurisdiction</TableHead>
+                      <TableHead>Returns Found</TableHead>
+                      <TableHead>Started</TableHead>
+                      <TableHead>Duration</TableHead>
+                      <TableHead className="text-right">Logs</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading ? (
+                      Array.from({ length: 8 }).map((_, i) => (
+                        <TableRow key={i}>
+                          <TableCell><Skeleton className="h-5 w-20" /></TableCell>
+                          <TableCell><Skeleton className="h-5 w-12" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-8" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-12" /></TableCell>
+                          <TableCell className="text-right"><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
                         </TableRow>
-                      </TableHeader>
-                      <TableBody>
+                      ))
+                    ) : (
+                      <>
                         {data?.jobs.map((job) => {
                           const duration = job.startedAt && job.completedAt
                             ? Math.round((new Date(job.completedAt).getTime() - new Date(job.startedAt).getTime()) / 1000)
@@ -239,11 +247,13 @@ export default function SyncJobsPage() {
                             </TableCell>
                           </TableRow>
                         )}
-                      </TableBody>
-                    </Table>
-                  </div>
+                      </>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
 
-                  {data && data.totalPages > 1 && (
+              {data && data.totalPages > 1 && (
                     <div className="flex items-center justify-between mt-4">
                       <p className="text-sm text-muted-foreground">
                         Page {data.page} of {data.totalPages}
@@ -270,8 +280,6 @@ export default function SyncJobsPage() {
                       </div>
                     </div>
                   )}
-                </>
-              )}
             </CardContent>
           </Card>
         </div>

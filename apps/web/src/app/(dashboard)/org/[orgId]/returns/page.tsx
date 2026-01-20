@@ -49,6 +49,7 @@ import {
 import { Loader2, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, History, Play, Terminal, CheckCircle2, XCircle, Search, X, MoreHorizontal, Trash, FileText } from "@/lib/icons"
 import Link from "next/link"
 import { api } from "@/trpc/react"
+import { Skeleton } from "@/components/ui/skeleton"
 
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | undefined
 
@@ -348,11 +349,17 @@ export default function ReturnsPage() {
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="h-24 text-center">
-                        <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
-                      </TableCell>
-                    </TableRow>
+                    Array.from({ length: 10 }).map((_, i) => (
+                      <TableRow key={i}>
+                        <TableCell><Skeleton className="h-4 w-4 mx-auto" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                        <TableCell><Skeleton className="h-5 w-12" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-10" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                        <TableCell><Skeleton className="h-5 w-20" /></TableCell>
+                        <TableCell className="text-right"><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
+                      </TableRow>
+                    ))
                   ) : data?.returns.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
