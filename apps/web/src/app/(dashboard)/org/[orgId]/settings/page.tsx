@@ -188,7 +188,6 @@ export default function OrgSettingsPage() {
       <>
         <header className="flex h-14 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
           <Skeleton className="h-4 w-32" />
         </header>
         <div className="flex flex-1 flex-col p-6">

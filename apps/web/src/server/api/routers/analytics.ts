@@ -1,6 +1,7 @@
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
 import { taxReturns, jurisdictions, tasks } from "@repo/database";
 import { count, desc, eq, ne, and, gte } from "drizzle-orm";
+import { z } from "zod";
 
 export const analyticsRouter = createTRPCRouter({
   getStats: publicProcedure.query(async ({ ctx }) => {
@@ -67,60 +68,86 @@ export const analyticsRouter = createTRPCRouter({
       return stats;
   }),
 
-  getDashboardStats: publicProcedure.query(async ({ ctx }) => {
-    // Get returns stats
-    const [totalReturns] = await ctx.db
-      .select({ count: count(taxReturns.id) })
-      .from(taxReturns);
+  getDashboardStats: publicProcedure
+    .input(z.object({
+      orgId: z.string().uuid().optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const { orgId } = input;
 
-    const [pendingReturns] = await ctx.db
-      .select({ count: count(taxReturns.id) })
-      .from(taxReturns)
-      .where(eq(taxReturns.status, "pending"));
+      // Get returns stats
+      const [totalReturns] = await ctx.db
+        .select({ count: count(taxReturns.id) })
+        .from(taxReturns)
+        .where(orgId ? eq(taxReturns.orgId, orgId) : undefined);
 
-    const [completedReturns] = await ctx.db
-      .select({ count: count(taxReturns.id) })
-      .from(taxReturns)
-      .where(eq(taxReturns.status, "completed"));
+      const [pendingReturns] = await ctx.db
+        .select({ count: count(taxReturns.id) })
+        .from(taxReturns)
+        .where(orgId
+          ? and(eq(taxReturns.orgId, orgId), eq(taxReturns.status, "pending"))
+          : eq(taxReturns.status, "pending")
+        );
 
-    // Get tasks stats
-    const [totalTasks] = await ctx.db
-      .select({ count: count(tasks.id) })
-      .from(tasks);
+      const [completedReturns] = await ctx.db
+        .select({ count: count(taxReturns.id) })
+        .from(taxReturns)
+        .where(orgId
+          ? and(eq(taxReturns.orgId, orgId), eq(taxReturns.status, "completed"))
+          : eq(taxReturns.status, "completed")
+        );
 
-    const [pendingTasks] = await ctx.db
-      .select({ count: count(tasks.id) })
-      .from(tasks)
-      .where(eq(tasks.status, "pending"));
+      // Get tasks stats
+      const [totalTasks] = await ctx.db
+        .select({ count: count(tasks.id) })
+        .from(tasks)
+        .where(orgId ? eq(tasks.orgId, orgId) : undefined);
 
-    const [runningTasks] = await ctx.db
-      .select({ count: count(tasks.id) })
-      .from(tasks)
-      .where(eq(tasks.status, "in_progress"));
+      const [pendingTasks] = await ctx.db
+        .select({ count: count(tasks.id) })
+        .from(tasks)
+        .where(orgId
+          ? and(eq(tasks.orgId, orgId), eq(tasks.status, "pending"))
+          : eq(tasks.status, "pending")
+        );
 
-    const [completedTasks] = await ctx.db
-      .select({ count: count(tasks.id) })
-      .from(tasks)
-      .where(eq(tasks.status, "completed"));
+      const [runningTasks] = await ctx.db
+        .select({ count: count(tasks.id) })
+        .from(tasks)
+        .where(orgId
+          ? and(eq(tasks.orgId, orgId), eq(tasks.status, "in_progress"))
+          : eq(tasks.status, "in_progress")
+        );
 
-    const [failedTasks] = await ctx.db
-      .select({ count: count(tasks.id) })
-      .from(tasks)
-      .where(eq(tasks.status, "failed"));
+      const [completedTasks] = await ctx.db
+        .select({ count: count(tasks.id) })
+        .from(tasks)
+        .where(orgId
+          ? and(eq(tasks.orgId, orgId), eq(tasks.status, "completed"))
+          : eq(tasks.status, "completed")
+        );
 
-    return {
-      returns: {
-        total: totalReturns?.count ?? 0,
-        pending: pendingReturns?.count ?? 0,
-        completed: completedReturns?.count ?? 0,
-      },
-      tasks: {
-        total: totalTasks?.count ?? 0,
-        pending: pendingTasks?.count ?? 0,
-        running: runningTasks?.count ?? 0,
-        completed: completedTasks?.count ?? 0,
-        failed: failedTasks?.count ?? 0,
-      },
-    };
-  }),
+      const [failedTasks] = await ctx.db
+        .select({ count: count(tasks.id) })
+        .from(tasks)
+        .where(orgId
+          ? and(eq(tasks.orgId, orgId), eq(tasks.status, "failed"))
+          : eq(tasks.status, "failed")
+        );
+
+      return {
+        returns: {
+          total: totalReturns?.count ?? 0,
+          pending: pendingReturns?.count ?? 0,
+          completed: completedReturns?.count ?? 0,
+        },
+        tasks: {
+          total: totalTasks?.count ?? 0,
+          pending: pendingTasks?.count ?? 0,
+          running: runningTasks?.count ?? 0,
+          completed: completedTasks?.count ?? 0,
+          failed: failedTasks?.count ?? 0,
+        },
+      };
+    }),
 });

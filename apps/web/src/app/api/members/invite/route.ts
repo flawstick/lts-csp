@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     const isGlobalAdmin = await checkGlobalAdmin(account.id)
 
     if (!isGlobalAdmin) {
-      return NextResponse.json({ error: "Only global admins can invite users" }, { status: 403 })
+      return NextResponse.json({ error: "Only admins can invite users" }, { status: 403 })
     }
 
     const body = await request.json()
@@ -231,7 +231,7 @@ export async function GET() {
     const isGlobalAdmin = await checkGlobalAdmin(account.id)
 
     if (!isGlobalAdmin) {
-      return NextResponse.json({ error: "Only global admins can view invitations" }, { status: 403 })
+      return NextResponse.json({ error: "Only admins can view invitations" }, { status: 403 })
     }
 
     const invitations = await db.query.pendingInvitations.findMany({

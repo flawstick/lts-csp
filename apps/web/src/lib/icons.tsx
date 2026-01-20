@@ -86,6 +86,7 @@ import {
   ViewIcon,
   ViewOffSlashIcon,
   Key01Icon,
+  UserRemove01Icon,
 } from "@hugeicons/core-free-icons"
 
 // Create wrapped icon components
@@ -176,6 +177,7 @@ export const Forward = createIcon(ArrowTurnForwardIcon)
 export const Eye = createIcon(ViewIcon)
 export const EyeOff = createIcon(ViewOffSlashIcon)
 export const Key = createIcon(Key01Icon)
+export const UserMinus = createIcon(UserRemove01Icon)
 // Note: CircleIcon is exported as Circle above
 
 // Also export the raw HugeiconsIcon for direct usage

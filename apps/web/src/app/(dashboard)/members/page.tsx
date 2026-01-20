@@ -39,9 +39,19 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { UserPlus, Mail, Clock, CheckCircle, XCircle, Send, Loader2, Shield, User } from "@/lib/icons"
+import { UserPlus, Mail, Clock, CheckCircle, XCircle, Send, Loader2, Shield, User, Trash2, UserMinus } from "@/lib/icons"
 
 interface Member {
   id: string
@@ -75,6 +85,11 @@ export default function PlatformMembersPage() {
   const [error, setError] = useState<string | null>(null)
   const [resendingId, setResendingId] = useState<string | null>(null)
   const [updatingRoleId, setUpdatingRoleId] = useState<string | null>(null)
+  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
+  const [revokingInvitationId, setRevokingInvitationId] = useState<string | null>(null)
+  const [memberToRemove, setMemberToRemove] = useState<{ id: string; email: string } | null>(null)
+  const [invitationToRevoke, setInvitationToRevoke] = useState<{ id: string; email: string } | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   useEffect(() => {
     fetchData()
@@ -121,6 +136,7 @@ export default function PlatformMembersPage() {
       if (res.ok) {
         setInviteOpen(false)
         setInviteEmail("")
+        setSuccessMessage(`Invitation sent to ${inviteEmail}`)
         fetchData()
       } else {
         setError(data.error || "Failed to send invitation")
@@ -145,14 +161,14 @@ export default function PlatformMembersPage() {
       const data = await res.json()
 
       if (res.ok) {
-        alert(`Invitation resent to ${email}`)
+        setSuccessMessage(`Invitation resent to ${email}`)
         fetchData()
       } else {
-        alert(data.error || "Failed to resend invitation")
+        setError(data.error || "Failed to resend invitation")
       }
     } catch (error) {
       console.error("Failed to resend:", error)
-      alert("Failed to resend invitation")
+      setError("Failed to resend invitation")
     } finally {
       setResendingId(null)
     }
@@ -175,13 +191,65 @@ export default function PlatformMembersPage() {
           prev.map(m => m.id === memberId ? { ...m, role: newRole } : m)
         )
       } else {
-        alert(data.error || "Failed to update role")
+        setError(data.error || "Failed to update role")
       }
     } catch (error) {
       console.error("Failed to update role:", error)
-      alert("Failed to update role")
+      setError("Failed to update role")
     } finally {
       setUpdatingRoleId(null)
+    }
+  }
+
+  async function confirmRemoveMember() {
+    if (!memberToRemove) return
+
+    setRemovingMemberId(memberToRemove.id)
+    try {
+      const res = await fetch(`/api/members/${memberToRemove.id}`, {
+        method: "DELETE",
+      })
+
+      const data = await res.json()
+
+      if (res.ok) {
+        setMembers(prev => prev.filter(m => m.id !== memberToRemove.id))
+        setSuccessMessage(`Successfully removed ${memberToRemove.email}`)
+      } else {
+        setError(data.error || "Failed to remove member")
+      }
+    } catch (error) {
+      console.error("Failed to remove member:", error)
+      setError("Failed to remove member")
+    } finally {
+      setRemovingMemberId(null)
+      setMemberToRemove(null)
+    }
+  }
+
+  async function confirmRevokeInvitation() {
+    if (!invitationToRevoke) return
+
+    setRevokingInvitationId(invitationToRevoke.id)
+    try {
+      const res = await fetch(`/api/members/invite/${invitationToRevoke.id}`, {
+        method: "DELETE",
+      })
+
+      const data = await res.json()
+
+      if (res.ok) {
+        setInvitations(prev => prev.filter(i => i.id !== invitationToRevoke.id))
+        setSuccessMessage(`Successfully revoked invitation for ${invitationToRevoke.email}`)
+      } else {
+        setError(data.error || "Failed to revoke invitation")
+      }
+    } catch (error) {
+      console.error("Failed to revoke invitation:", error)
+      setError("Failed to revoke invitation")
+    } finally {
+      setRevokingInvitationId(null)
+      setInvitationToRevoke(null)
     }
   }
 
@@ -221,7 +289,6 @@ export default function PlatformMembersPage() {
         <header className="flex h-16 shrink-0 items-center gap-2">
           <div className="flex items-center gap-2 px-4">
             <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 h-4" />
             <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem className="hidden md:block">
@@ -253,7 +320,6 @@ export default function PlatformMembersPage() {
         <header className="flex h-16 shrink-0 items-center gap-2">
           <div className="flex items-center gap-2 px-4">
             <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 h-4" />
             <Skeleton className="h-4 w-48" />
           </div>
         </header>
@@ -269,7 +335,6 @@ export default function PlatformMembersPage() {
       <header className="flex h-16 shrink-0 items-center gap-2">
         <div className="flex items-center gap-2 px-4">
           <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
           <Breadcrumb>
             <BreadcrumbList>
               <BreadcrumbItem className="hidden md:block">
@@ -359,6 +424,7 @@ export default function PlatformMembersPage() {
                     <TableHead>Name</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Joined</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -411,6 +477,27 @@ export default function PlatformMembersPage() {
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
                         {new Date(member.createdAt).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setMemberToRemove({ id: member.id, email: member.email })}
+                          disabled={removingMemberId === member.id}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                          {removingMemberId === member.id ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Removing...
+                            </>
+                          ) : (
+                            <>
+                              <UserMinus className="mr-2 h-4 w-4" />
+                              Remove
+                            </>
+                          )}
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -467,24 +554,45 @@ export default function PlatformMembersPage() {
                         {new Date(invitation.expiresAt).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleResend(invitation.id, invitation.email)}
-                          disabled={resendingId === invitation.id}
-                        >
-                          {resendingId === invitation.id ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Sending...
-                            </>
-                          ) : (
-                            <>
-                              <Send className="mr-2 h-4 w-4" />
-                              Resend
-                            </>
-                          )}
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleResend(invitation.id, invitation.email)}
+                            disabled={resendingId === invitation.id}
+                          >
+                            {resendingId === invitation.id ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Sending...
+                              </>
+                            ) : (
+                              <>
+                                <Send className="mr-2 h-4 w-4" />
+                                Resend
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setInvitationToRevoke({ id: invitation.id, email: invitation.email })}
+                            disabled={revokingInvitationId === invitation.id}
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          >
+                            {revokingInvitationId === invitation.id ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Revoking...
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="mr-2 h-4 w-4" />
+                                Revoke
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -519,6 +627,78 @@ export default function PlatformMembersPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Remove Member Confirmation Dialog */}
+      <AlertDialog open={!!memberToRemove} onOpenChange={(open) => !open && setMemberToRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Member</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove <strong>{memberToRemove?.email}</strong> from the platform? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmRemoveMember}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Revoke Invitation Confirmation Dialog */}
+      <AlertDialog open={!!invitationToRevoke} onOpenChange={(open) => !open && setInvitationToRevoke(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke Invitation</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to revoke the invitation for <strong>{invitationToRevoke?.email}</strong>?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmRevokeInvitation}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Revoke
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Success Message Dialog */}
+      <AlertDialog open={!!successMessage} onOpenChange={(open) => !open && setSuccessMessage(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Success</AlertDialogTitle>
+            <AlertDialogDescription>
+              {successMessage}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setSuccessMessage(null)}>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Error Message Dialog */}
+      <AlertDialog open={!!error && !inviteOpen} onOpenChange={(open) => !open && setError(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Error</AlertDialogTitle>
+            <AlertDialogDescription>
+              {error}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setError(null)}>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

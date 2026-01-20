@@ -29,7 +29,7 @@ export async function PATCH(
 
     if (!currentAccount || !currentAccount.globalAdmin) {
       return NextResponse.json(
-        { error: "Only global admins can update member roles" },
+        { error: "Only admins can update member roles" },
         { status: 403 }
       );
     }

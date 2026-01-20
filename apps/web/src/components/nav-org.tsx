@@ -41,7 +41,7 @@ export function NavOrg({
               tooltip={item.title}
               {...(mounted && { isActive: pathname === item.url || pathname.startsWith(item.url) })}
             >
-              <Link href={item.url}>
+              <Link href={item.url} prefetch={true}>
                 {item.icon && <item.icon />}
                 <span>{item.title}</span>
               </Link>

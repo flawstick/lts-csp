@@ -16,8 +16,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/trpc/react"
 
-export function SectionCards() {
-  const { data: stats, isLoading } = api.analytics.getDashboardStats.useQuery()
+interface SectionCardsProps {
+  orgId: string
+}
+
+export function SectionCards({ orgId }: SectionCardsProps) {
+  const { data: stats, isLoading } = api.analytics.getDashboardStats.useQuery({ orgId })
 
   return (
     <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
@@ -28,25 +32,25 @@ export function SectionCards() {
         </CardHeader>
         <CardFooter className="grid grid-cols-2 gap-2 -mt-2">
           <Button variant="default" size="sm" className="justify-start" asChild>
-            <Link href="/returns?status=pending">
+            <Link href={`/org/${orgId}/returns?status=pending`} prefetch={true}>
               <Clock className="mr-2 h-3 w-3" />
               Process Returns
             </Link>
           </Button>
           <Button variant="outline" size="sm" className="justify-start" asChild>
-            <Link href="/returns/scrape">
+            <Link href={`/org/${orgId}/returns/sync-jobs`} prefetch={true}>
               <RefreshCw className="mr-2 h-3 w-3" />
               Sync
             </Link>
           </Button>
           <Button variant="outline" size="sm" className="justify-start" asChild>
-            <Link href="/returns">
+            <Link href={`/org/${orgId}/returns`} prefetch={true}>
               <FileText className="mr-2 h-3 w-3" />
               Returns
             </Link>
           </Button>
           <Button variant="outline" size="sm" className="justify-start" asChild>
-            <Link href="/org/settings">
+            <Link href={`/org/${orgId}/settings`} prefetch={true}>
               <Settings className="mr-2 h-3 w-3" />
               Settings
             </Link>

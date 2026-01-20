@@ -49,7 +49,6 @@ import {
 import { Loader2, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, History, Play, Terminal, CheckCircle2, XCircle, Search, X, MoreHorizontal, Trash, FileText } from "@/lib/icons"
 import Link from "next/link"
 import { api } from "@/trpc/react"
-import { useOrgStore } from "@/lib/org-context"
 
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | undefined
 

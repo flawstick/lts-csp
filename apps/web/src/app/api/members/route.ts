@@ -32,7 +32,7 @@ export async function GET() {
     const isGlobalAdmin = await checkGlobalAdmin(account.id)
 
     if (!isGlobalAdmin) {
-      return NextResponse.json({ error: "Only global admins can view members" }, { status: 403 })
+      return NextResponse.json({ error: "Only admins can view members" }, { status: 403 })
     }
 
     // Get all accounts with their global admin status

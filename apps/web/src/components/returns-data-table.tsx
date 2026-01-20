@@ -214,9 +214,13 @@ const columns: ColumnDef<TaxReturn>[] = [
 
 type FilterValue = "all" | "pending" | "review" | "completed"
 
-export function ReturnsDataTable() {
+interface ReturnsDataTableProps {
+  orgId: string
+}
+
+export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
   const { data, isLoading } = api.taxReturn.list.useQuery(
-    { page: 1, pageSize: 50 },
+    { orgId, page: 1, pageSize: 50 },
     { refetchOnWindowFocus: false }
   )
 

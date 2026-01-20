@@ -2,7 +2,8 @@
 
 import * as React from "react"
 import { ChevronsUpDown, Building2 } from "@/lib/icons"
-import { useOrgStore } from "@/lib/org-context"
+import { useOrgFromUrl } from "@/lib/org-context"
+import { useRouter, usePathname } from "next/navigation"
 
 import {
   DropdownMenu,
@@ -20,11 +21,9 @@ import {
 
 export function TeamSwitcher() {
   const { isMobile } = useSidebar()
-  const { orgs, currentOrg, setCurrentOrg, fetchOrgs, isLoading } = useOrgStore()
-
-  React.useEffect(() => {
-    fetchOrgs()
-  }, [fetchOrgs])
+  const { orgs, currentOrg, isLoading } = useOrgFromUrl()
+  const router = useRouter()
+  const pathname = usePathname()
 
   if (isLoading) {
     return (
@@ -85,7 +84,18 @@ export function TeamSwitcher() {
             {orgs.map((org) => (
               <DropdownMenuItem
                 key={org.id}
-                onClick={() => setCurrentOrg(org)}
+                onClick={() => {
+                  // Navigate to the same page but with the new org ID
+                  // The URL change will trigger useOrgFromUrl to update the current org
+                  if (pathname.startsWith('/org/')) {
+                    // Replace the orgId in the current path
+                    const newPath = pathname.replace(/^\/org\/[^/]+/, `/org/${org.id}`)
+                    router.push(newPath)
+                  } else {
+                    // If not on an org page, navigate to the org dashboard
+                    router.push(`/org/${org.id}`)
+                  }
+                }}
                 className="gap-2 p-2"
               >
                 {org.logoUrl ? (

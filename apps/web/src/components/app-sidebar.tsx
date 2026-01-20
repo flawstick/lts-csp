@@ -17,7 +17,7 @@ import { NavMain } from "@/components/nav-main"
 import { NavOrg } from "@/components/nav-org"
 import { NavUser } from "@/components/nav-user"
 import { TeamSwitcher } from "@/components/team-switcher"
-import { useOrgStore } from "@/lib/org-context"
+import { useOrgFromUrl } from "@/lib/org-context"
 import {
   Sidebar,
   SidebarContent,
@@ -69,7 +69,7 @@ interface Organisation {
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const { currentOrg } = useOrgStore()
+  const { currentOrg } = useOrgFromUrl()
   const [user, setUser] = React.useState<User | null>(null)
   const [organisations, setOrganisations] = React.useState<Organisation[]>([])
   const [isGlobalAdmin, setIsGlobalAdmin] = React.useState(false)

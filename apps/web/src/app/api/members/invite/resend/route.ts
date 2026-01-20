@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     const isGlobalAdmin = await checkGlobalAdmin(account.id)
 
     if (!isGlobalAdmin) {
-      return NextResponse.json({ error: "Only global admins can resend invitations" }, { status: 403 })
+      return NextResponse.json({ error: "Only admins can resend invitations" }, { status: 403 })
     }
 
     const body = await request.json()
