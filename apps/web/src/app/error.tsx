@@ -105,7 +105,7 @@ export default function Error({
         <div className="flex flex-col gap-3 sm:flex-row">
           <Button
             onClick={reset}
-            variant="default"
+            variant="outline"
             className="flex-1"
             disabled={isSending}
           >
@@ -113,7 +113,7 @@ export default function Error({
           </Button>
           <Button
             onClick={handleSendLogs}
-            variant="outline"
+            variant="default"
             className="flex-1"
             disabled={isSending || emailSent}
           >
