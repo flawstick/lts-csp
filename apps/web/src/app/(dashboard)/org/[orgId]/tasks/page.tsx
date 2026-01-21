@@ -8,9 +8,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -59,6 +57,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Loader2, Play, ExternalLink, Monitor, AlertCircle, CheckCircle2, XCircle, Terminal, Search, X, MoreHorizontal, Trash, ChevronLeft, ChevronRight, Ban, RotateCcw } from "@/lib/icons"
 import Link from "next/link"
 import { api } from "@/trpc/react"
@@ -77,6 +76,7 @@ export default function TasksPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null)
+  const [isRefetching, setIsRefetching] = useState(false)
 
   const pageSize = 20
 
@@ -111,6 +111,12 @@ export default function TasksPage() {
       refetch()
     }
   })
+
+  const handleRefetch = async () => {
+    setIsRefetching(true)
+    await refetch()
+    setTimeout(() => setIsRefetching(false), 500)
+  }
 
   const handleDeleteSelected = () => {
     setTaskToDelete(null)
@@ -200,9 +206,6 @@ export default function TasksPage() {
                 Monitor and manage automated processing tasks.
               </p>
             </div>
-            <Button variant="outline" size="icon" onClick={() => refetch()}>
-              <RotateCcw className="h-4 w-4" />
-            </Button>
           </div>
 
           <div className="flex flex-col gap-4">
@@ -224,29 +227,46 @@ export default function TasksPage() {
                     </button>
                   )}
                 </div>
-                <div className="h-6 w-px bg-border" />
-                <Select
-                  value={statusFilter ?? "all"}
-                  onValueChange={(value) => setStatusFilter(value === "all" ? undefined : value as StatusFilter)}
-                >
-                  <SelectTrigger className="w-[180px] border-none shadow-none focus:ring-0 bg-muted">
-                    <SelectValue placeholder="All statuses" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All statuses</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="in_progress">Running</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="failed">Failed</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center gap-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 bg-muted hover:bg-muted/80"
+                        onClick={handleRefetch}
+                        disabled={isRefetching}
+                      >
+                        <RotateCcw className={`h-4 w-4 ${isRefetching ? "animate-spin" : ""}`} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Refresh tasks</p>
+                    </TooltipContent>
+                  </Tooltip>
+                  <Select
+                    value={statusFilter ?? "all"}
+                    onValueChange={(value) => setStatusFilter(value === "all" ? undefined : value as StatusFilter)}
+                  >
+                    <SelectTrigger className="w-[180px] border-none shadow-none focus:ring-0 bg-muted">
+                      <SelectValue placeholder="All statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="in_progress">Running</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="failed">Failed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 {selected.size > 0 && (
                   <>
                      <div className="h-6 w-px bg-border" />
-                     <Button 
-                        variant="destructive" 
-                        size="sm" 
+                     <Button
+                        variant="destructive"
+                        size="sm"
                         className="mr-1"
                         onClick={handleDeleteSelected}
                      >

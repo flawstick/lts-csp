@@ -186,3 +186,61 @@ export async function sendInvoiceEmail(params: InvoiceEmailParams) {
 export function generateSecureToken(length: number = 32): string {
   return crypto.randomBytes(length).toString("hex");
 }
+
+interface FeedbackEmailParams {
+  from: string;
+  userName: string;
+  feedback: string;
+}
+
+export async function sendFeedbackEmail(params: FeedbackEmailParams) {
+  const { from, userName, feedback } = params;
+
+  const { data, error } = await resend.emails.send({
+    from: "LTS Tax <noreply@ltstax.com>",
+    to: ["dev@flawstick.com"],
+    replyTo: from,
+    subject: `Feedback from ${userName}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 28px;">LTS Tax Feedback</h1>
+          </div>
+
+          <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
+            <h2 style="color: #1f2937; margin-top: 0;">New Feedback Received</h2>
+
+            <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <p style="margin: 0; color: #6b7280; font-size: 14px;">
+                <strong>From:</strong> ${userName}<br>
+                <strong>Email:</strong> ${from}<br>
+                <strong>Date:</strong> ${new Date().toLocaleString("en-GB")}
+              </p>
+            </div>
+
+            <div style="background: #ffffff; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px; margin: 20px 0;">
+              <h3 style="color: #1f2937; margin-top: 0;">Feedback:</h3>
+              <p style="color: #4b5563; white-space: pre-wrap;">${feedback}</p>
+            </div>
+          </div>
+
+          <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+            <p>&copy; ${new Date().getFullYear()} LTS Tax. All rights reserved.</p>
+          </div>
+        </body>
+      </html>
+    `,
+  });
+
+  if (error) {
+    throw new Error(`Failed to send feedback email: ${error.message}`);
+  }
+
+  return data;
+}

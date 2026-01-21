@@ -89,12 +89,12 @@ If prompted for CSP or secret credentials:
 3. Tax Year: ${taxReturn.taxYear}
 
 ## IMPORTANT INSTRUCTIONS
-- Fill in ALL fields as specified below
-- If a field is not applicable, select "N/A" or leave blank as appropriate
-- Use exact values provided - do not modify or interpret the data
-- If you cannot find a field or encounter an error, STOP and report the issue
-- After completing each section, verify the data before moving to the next
-- SKIP/IGNORE any questions about "economic classifications" - do not attempt to answer them
+
+**CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "Certificate 1" (this is always the correct option).
+
+**COMPLETION:** Double-check all fields before moving to the next section. Do not leave any fields empty - fill them with the data provided below or mark as N/A if truly not applicable.
+
+**IF STUCK:** If you cannot complete a field or encounter an error you cannot resolve, pause the task and report the issue for user intervention.
 ${overrideSaved ? `
 ## OVERRIDE MODE ENABLED
 - Re-enter ALL fields even if they appear to be already filled in
@@ -140,6 +140,12 @@ ${overrideSaved ? `
 
   // Section 12: Declaration
   sections.push(buildDeclarationSection(substanceForm));
+
+  // Section 13: Country by Country Reporting
+  sections.push(buildCbcrSection(substanceForm));
+
+  // Section 14: Additional Information
+  sections.push(buildAdditionalInfoSection(substanceForm));
 
   // Missing fields warning
   if (substanceForm.missingFields && substanceForm.missingFields.length > 0) {
@@ -337,6 +343,24 @@ ${field("Prepared By", form.preparedBy)}
 ${field("Prepared Date", form.preparedDate)}
 ${field("Manager Sign Off", form.managerSignOff)}
 ${field("Manager Sign Off Date", form.managerSignOffDate)}
+`;
+}
+
+function buildCbcrSection(form: SubstanceForm): string {
+  return `
+## SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)
+${field("Is Constituent Entity", form.isConstituentEntity)}
+`;
+}
+
+function buildAdditionalInfoSection(form: SubstanceForm): string {
+  return `
+## SECTION 14: ADDITIONAL INFORMATION
+${field("Has Post Balance Sheet Event", form.hasPostBalanceSheetEvent)}
+${field("Post Balance Sheet Event Details", form.postBalanceSheetEventDetails)}
+${field("Has C42 Association", form.hasC42Association)}
+${field("C42 Associated Companies", form.c42AssociatedCompanies)}
+${field("Contract Information (CSP)", form.contractInformation)}
 `;
 }
 

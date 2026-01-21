@@ -178,6 +178,7 @@ export const Eye = createIcon(ViewIcon)
 export const EyeOff = createIcon(ViewOffSlashIcon)
 export const Key = createIcon(Key01Icon)
 export const UserMinus = createIcon(UserRemove01Icon)
+export const MessageSquare = createIcon(MailSend01Icon) // Use mail icon for feedback
 // Note: CircleIcon is exported as Circle above
 
 // Also export the raw HugeiconsIcon for direct usage

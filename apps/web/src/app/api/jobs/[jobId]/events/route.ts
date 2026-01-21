@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { getSub, CHANNELS, type JobEvent } from "@repo/redis";
 
 export const runtime = "nodejs";
@@ -24,8 +24,17 @@ export async function GET(
         encoder.encode(`data: ${JSON.stringify({ type: "connected", jobId })}\n\n`)
       );
 
+      // Send keepalive comments every 15 seconds to prevent connection timeout
+      const keepaliveInterval = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(`: keepalive\n\n`));
+        } catch {
+          clearInterval(keepaliveInterval);
+        }
+      }, 15000);
+
       // Subscribe to job events
-      sub.subscribe(CHANNELS.JOB_EVENTS);
+      void sub.subscribe(CHANNELS.JOB_EVENTS);
 
       const messageHandler = (_channel: string, message: string) => {
         try {
@@ -46,8 +55,9 @@ export async function GET(
 
       // Cleanup on close
       request.signal.addEventListener("abort", () => {
+        clearInterval(keepaliveInterval);
         sub.off("message", messageHandler);
-        sub.unsubscribe(CHANNELS.JOB_EVENTS);
+        void sub.unsubscribe(CHANNELS.JOB_EVENTS);
       });
     },
   });
@@ -56,7 +66,8 @@ export async function GET(
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no", // Disable buffering for nginx/proxies
     },
   });
 }

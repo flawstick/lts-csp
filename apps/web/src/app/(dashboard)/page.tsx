@@ -3,6 +3,7 @@ import { db } from "@repo/database"
 import { createClient } from "@/lib/supabase/server"
 import { eq } from "drizzle-orm"
 import { accounts } from "@repo/database"
+import { OrgRedirect } from "@/components/org-redirect"
 
 export default async function DashboardRedirect() {
   const supabase = await createClient()
@@ -21,16 +22,15 @@ export default async function DashboardRedirect() {
     redirect("/waiting-for-invite")
   }
 
-  // Get the first org
+  // Get all orgs (not just the first one)
   const orgs = await db.query.organisations.findMany({
     orderBy: (o, { asc }) => [asc(o.name)],
-    limit: 1,
   })
 
-  if (orgs.length > 0) {
-    redirect(`/org/${orgs[0]!.id}`)
+  if (orgs.length === 0) {
+    redirect("/waiting-for-invite")
   }
 
-  // No orgs found - redirect to a no-orgs page or error
-  redirect("/waiting-for-invite")
+  // Let the client component handle the redirect based on localStorage
+  return <OrgRedirect orgs={orgs} />
 }

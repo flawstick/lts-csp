@@ -150,7 +150,7 @@ async function main() {
     const taskResponse = await client.createTask({
       task: prompt,
       sessionId: session.id,
-      llm: "claude-sonnet-4-20250514",
+      llm: "browser-use-llm",
       maxSteps: 100,
       highlightElements: true,
       vision: "auto",
@@ -323,7 +323,7 @@ ${prompt}
               const continueTask = await client.createTask({
                 task: continuePrompt,
                 sessionId: session.id,
-                llm: "claude-sonnet-4-20250514",
+                llm: "browser-use-llm",
                 maxSteps: 100,
                 highlightElements: true,
                 vision: "auto",

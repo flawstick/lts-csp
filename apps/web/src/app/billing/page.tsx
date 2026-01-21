@@ -395,7 +395,7 @@ export default function BillingPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger className="w-[180px] border-none shadow-none focus:ring-0">
+                <SelectTrigger className="w-[180px] border-none shadow-none focus:ring-0 bg-muted">
                   <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
                 <SelectContent>

@@ -172,10 +172,10 @@ const TabsList = React.forwardRef<
   };
 
   return (
-    <div className={cn("relative border-b border-border", className)}>
+    <div className={cn("border-border relative border-b", className)}>
       <div ref={navRef} className="relative" onMouseLeave={handleNavMouseLeave}>
         <motion.div
-          className="absolute top-0 z-0 h-full rounded-lg bg-black/[0.04] dark:bg-white/[0.06] shadow-sm ring-1 ring-black/[0.03] dark:ring-white/[0.03]"
+          className="absolute top-0 z-0 h-full rounded-lg bg-black/[0.04] ring-1 ring-black/[0.03] dark:bg-white/[0.06] dark:ring-white/[0.03]"
           initial={{
             left: indicatorStyles.left,
             width: indicatorStyles.width,
@@ -228,7 +228,7 @@ const TabsList = React.forwardRef<
           left: lineStyles.left,
         }}
         transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        className="absolute bottom-0 h-0.5 rounded-lg bg-primary"
+        className="bg-primary absolute bottom-0 h-0.5 rounded-lg"
       />
     </div>
   );
@@ -290,9 +290,9 @@ const TabsTrigger = React.forwardRef<
         value={value}
         onMouseEnter={handleMouseEnter}
         className={cn(
-          "inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted-foreground transition-colors duration-300 hover:text-foreground",
-          "ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-          "disabled:pointer-events-none disabled:opacity-50",
+          "text-muted-foreground hover:text-foreground inline-flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors duration-300",
+          "ring-offset-background focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
+          "cursor-pointer disabled:pointer-events-none disabled:opacity-50",
           activeTab === value && "text-foreground",
           className,
         )}
@@ -312,7 +312,7 @@ const TabsContent = React.forwardRef<
   <TabsPrimitive.Content
     ref={ref}
     className={cn(
-      "mt-4 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      "ring-offset-background focus-visible:ring-ring mt-4 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
       className,
     )}
     {...props}
