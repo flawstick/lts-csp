@@ -90,7 +90,7 @@ If prompted for CSP or secret credentials:
 
 ## IMPORTANT INSTRUCTIONS
 
-**CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "Certificate 1" (this is always the correct option).
+**CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "Certificate 3" (this is always the correct option).
 
 **TURNOVER FIELD:** The "Turnover / Gross Income" field in Section 6 may be labeled simply as "Turnover" on the portal. Look for a field asking for gross income or turnover amount in the Adequacy Assessment area.
 
