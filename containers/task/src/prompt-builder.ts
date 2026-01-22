@@ -92,6 +92,8 @@ If prompted for CSP or secret credentials:
 
 **CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "Certificate 1" (this is always the correct option).
 
+**TURNOVER FIELD:** The "Turnover / Gross Income" field in Section 6 may be labeled simply as "Turnover" on the portal. Look for a field asking for gross income or turnover amount in the Adequacy Assessment area.
+
 **COMPLETION:** Double-check all fields before moving to the next section. Do not leave any fields empty - fill them with the data provided below or mark as N/A if truly not applicable.
 
 **IF STUCK:** If you cannot complete a field or encounter an error you cannot resolve, pause the task and report the issue for user intervention.
@@ -235,7 +237,7 @@ ${field("High Risk Rebuttal Narrative", form.highRiskRebuttalNarrative)}
 ${field("IP Income Type", form.ipIncomeType)}
 
 ### Adequacy Assessment:
-${field("Activity Gross Income", form.activityGrossIncome)}
+${field("Turnover", form.activityGrossIncome)}
 ${field("Has Adequate Expenditure", form.hasAdequateExpenditure)}
 ${field("Has Adequate Physical Presence", form.hasAdequatePhysicalPresence)}
 ${field("Adequacy Expenditure Details", form.adequacyExpenditureDetails)}
