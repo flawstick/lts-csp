@@ -163,9 +163,11 @@ ${substanceForm.missingFields.map(f => `- ${f}`).join('\n')}
 ## COMPLETION
 After filling all sections:
 1. Review the entire form for accuracy
-2. If everything looks correct, click Submit/Save
-3. Report the confirmation number or any success message
-4. If there are validation errors, report them exactly as shown
+2. Navigate to the final submission page/screen
+3. **STOP BEFORE CLICKING SUBMIT** - Do NOT click the final submit button
+4. You should be exactly ONE CLICK away from submission - the submit button should be visible and ready
+5. Report that the form is ready for manual submission and describe what button/action remains
+6. If there are validation errors, report them exactly as shown
 `);
 
   return sections.join('\n');
