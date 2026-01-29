@@ -42,10 +42,12 @@ const aiExtractionSchema = z.object({
   accountsPreparerQualification: z.string().optional().describe("Qualification of preparer (ACCA, ICAEW, etc.)"),
   netBookValue: z.string().optional().describe("Net book value from Balance Sheet"),
   totalProfit: z.string().optional().describe("Total profit from Profit & Loss Account"),
+  profitAllocation: z.enum(["Investment", "Business"]).optional().describe("Profit before tax allocation - Investment or Business"),
 
   // SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
   isGuernseyFiFatca: z.enum(["Yes", "No"]).optional().describe("Is Guernsey Financial Institution under FATCA?"),
   isGuernseyFiCrs: z.enum(["Yes", "No"]).optional().describe("Is Financial Institution under CRS?"),
+  isRegisteredOnIgor: z.enum(["Yes", "No"]).optional().describe("Is registered on IGOR (Information Gateway Online Reporter) for FATCA/CRS reporting?"),
 
   // SECTION 6: RELEVANT ACTIVITIES
   relevantActivity: z.enum([
@@ -203,7 +205,10 @@ export const substanceFormRouter = createTRPCRouter({
           // Calculate accounting period from tax year
           accountingPeriodStart: `${taxReturn.taxYear}-01-01`,
           accountingPeriodEnd: `${taxReturn.taxYear}-12-31`,
-          missingFields: getMissingFields({}),
+          // Set defaults
+          preparedBy: "LTS Tax Limited",
+          profitAllocation: "Investment",
+          missingFields: getMissingFields({ preparedBy: "LTS Tax Limited" }),
         })
         .returning();
 
@@ -502,6 +507,24 @@ Do not make up or guess values - leave fields empty if information is not availa
 
       console.log("[AI Extraction] Success! Extracted fields:", Object.keys(result.object).length);
       const extractedData = result.object;
+
+      // Apply defaults for fields that should have default values
+      // Default preparedBy to "LTS Tax Limited" if not extracted
+      if (!extractedData.preparedBy) {
+        extractedData.preparedBy = "LTS Tax Limited";
+      }
+
+      // Default profitAllocation to "Investment" if not extracted
+      if (!extractedData.profitAllocation) {
+        extractedData.profitAllocation = "Investment";
+      }
+
+      // Default isRegisteredOnIgor to "Yes" if entity is a financial institution (FATCA or CRS)
+      if (!extractedData.isRegisteredOnIgor) {
+        if (extractedData.isGuernseyFiFatca === "Yes" || extractedData.isGuernseyFiCrs === "Yes") {
+          extractedData.isRegisteredOnIgor = "Yes";
+        }
+      }
 
       // Merge with existing data (AI data fills in gaps)
       const mergedData = { ...form, ...extractedData };

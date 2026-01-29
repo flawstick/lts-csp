@@ -214,6 +214,7 @@ ${field("Accounts Preparer Name", form.accountsPreparerName)}
 ${field("Accounts Preparer Qualification", form.accountsPreparerQualification)}
 ${field("Net Book Value", form.netBookValue)}
 ${field("Total Profit", form.totalProfit)}
+${field("Profit Before Tax Allocation", form.profitAllocation)}
 `;
 }
 
@@ -222,6 +223,7 @@ function buildFinancialInstitutionsSection(form: SubstanceForm): string {
 ## SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
 ${field("Is Guernsey Financial Institution (FATCA)", form.isGuernseyFiFatca)}
 ${field("Is Guernsey Financial Institution (CRS)", form.isGuernseyFiCrs)}
+${field("Is Registered on IGOR", form.isRegisteredOnIgor)}
 `;
 }
 
@@ -343,7 +345,7 @@ ${meetingList}
 function buildDeclarationSection(form: SubstanceForm): string {
   return `
 ## SECTION 12: DECLARATION
-${field("Prepared By", form.preparedBy)}
+${field("Prepared By", form.preparedBy || "LTS Tax Limited")}
 ${field("Prepared Date", form.preparedDate)}
 ${field("Manager Sign Off", form.managerSignOff)}
 ${field("Manager Sign Off Date", form.managerSignOffDate)}
