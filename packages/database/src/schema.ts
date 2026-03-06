@@ -594,12 +594,14 @@ export const substanceForms = createTable(
     accountsPreparerQualification: varchar("accounts_preparer_qual", { length: 128 }), // ACCA, ICAEW, etc.
     netBookValue: varchar("net_book_value", { length: 64 }), // From Balance Sheet
     totalProfit: varchar("total_profit", { length: 64 }), // From P&L Account
+    profitAllocation: varchar("profit_allocation", { length: 16 }), // "Investment" | "Business"
 
     // =========================================================================
     // SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
     // =========================================================================
     isGuernseyFiFatca: varchar("is_gsy_fi_fatca", { length: 8 }),
     isGuernseyFiCrs: varchar("is_gsy_fi_crs", { length: 8 }),
+    isRegisteredOnIgor: varchar("is_registered_igor", { length: 8 }), // IGOR = Information Gateway Online Reporter
 
     // =========================================================================
     // SECTION 6: RELEVANT ACTIVITIES

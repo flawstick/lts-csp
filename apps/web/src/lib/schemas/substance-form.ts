@@ -10,6 +10,8 @@ export const yesNoEnum = z.enum(["Yes", "No"]);
 
 export const yesNoNaEnum = z.enum(["Yes", "No", "N/A"]);
 
+export const profitAllocationEnum = z.enum(["Investment", "Business"]);
+
 export const relevantActivityEnum = z.enum([
   "Banking",
   "Insurance",
@@ -115,12 +117,14 @@ export const substanceFormSchema = z.object({
   accountsPreparerQualification: z.string().optional(), // e.g. ACCA, ICAEW
   netBookValue: z.string().optional(), // From Balance Sheet
   totalProfit: z.string().optional(), // From P&L Account
+  profitAllocation: profitAllocationEnum.optional(), // "Investment" | "Business"
 
   // =========================================================================
   // SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
   // =========================================================================
   isGuernseyFiFatca: yesNoEnum.optional(), // Is Guernsey Financial Institution under FATCA?
   isGuernseyFiCrs: yesNoEnum.optional(), // Is Financial Institution under CRS?
+  isRegisteredOnIgor: yesNoEnum.optional(), // Is registered on IGOR (Information Gateway Online Reporter)?
 
   // =========================================================================
   // SECTION 6: RELEVANT ACTIVITIES
@@ -227,7 +231,6 @@ export const REQUIRED_FIELDS: (keyof SubstanceFormData)[] = [
   "totalBoardMeetings",
   "boardMeetingsInGuernsey",
   "preparedBy",
-  "preparedDate",
 ];
 
 // ============================================================================
@@ -292,10 +295,12 @@ export const FIELD_LABELS: Record<string, string> = {
   accountsPreparerQualification: "Preparer Qualification (e.g. ACCA, ICAEW)",
   netBookValue: "Net Book Value",
   totalProfit: "Total Profit",
+  profitAllocation: "Profit Before Tax Allocation",
 
   // Financial Institutions
   isGuernseyFiFatca: "Is Guernsey FI under FATCA?",
   isGuernseyFiCrs: "Is Guernsey FI under CRS?",
+  isRegisteredOnIgor: "Is Registered on IGOR?",
 
   // Relevant Activities
   relevantActivity: "Relevant Activity",
@@ -411,13 +416,14 @@ export const FORM_SECTIONS = [
       "accountsPreparerQualification",
       "netBookValue",
       "totalProfit",
+      "profitAllocation",
     ],
   },
   {
     id: "financialInstitutions",
     title: "Financial Institutions (FATCA/CRS)",
     description: "Financial institution status for tax reporting",
-    fields: ["isGuernseyFiFatca", "isGuernseyFiCrs"],
+    fields: ["isGuernseyFiFatca", "isGuernseyFiCrs", "isRegisteredOnIgor"],
   },
   {
     id: "relevantActivities",

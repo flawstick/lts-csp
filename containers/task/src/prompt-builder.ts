@@ -90,7 +90,9 @@ If prompted for CSP or secret credentials:
 
 ## IMPORTANT INSTRUCTIONS
 
-**CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "Certificate 1" (this is always the correct option).
+**CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "Certificate 3" (this is always the correct option).
+
+**TURNOVER FIELD:** The "Turnover / Gross Income" field in Section 6 may be labeled simply as "Turnover" on the portal. Look for a field asking for gross income or turnover amount in the Adequacy Assessment area.
 
 **COMPLETION:** Double-check all fields before moving to the next section. Do not leave any fields empty - fill them with the data provided below or mark as N/A if truly not applicable.
 
@@ -161,9 +163,11 @@ ${substanceForm.missingFields.map(f => `- ${f}`).join('\n')}
 ## COMPLETION
 After filling all sections:
 1. Review the entire form for accuracy
-2. If everything looks correct, click Submit/Save
-3. Report the confirmation number or any success message
-4. If there are validation errors, report them exactly as shown
+2. Navigate to the final submission page/screen
+3. **STOP BEFORE CLICKING SUBMIT** - Do NOT click the final submit button
+4. You should be exactly ONE CLICK away from submission - the submit button should be visible and ready
+5. Report that the form is ready for manual submission and describe what button/action remains
+6. If there are validation errors, report them exactly as shown
 `);
 
   return sections.join('\n');
@@ -210,6 +214,7 @@ ${field("Accounts Preparer Name", form.accountsPreparerName)}
 ${field("Accounts Preparer Qualification", form.accountsPreparerQualification)}
 ${field("Net Book Value", form.netBookValue)}
 ${field("Total Profit", form.totalProfit)}
+${field("Profit Before Tax Allocation", form.profitAllocation)}
 `;
 }
 
@@ -218,6 +223,7 @@ function buildFinancialInstitutionsSection(form: SubstanceForm): string {
 ## SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
 ${field("Is Guernsey Financial Institution (FATCA)", form.isGuernseyFiFatca)}
 ${field("Is Guernsey Financial Institution (CRS)", form.isGuernseyFiCrs)}
+${field("Is Registered on IGOR", form.isRegisteredOnIgor)}
 `;
 }
 
@@ -235,7 +241,7 @@ ${field("High Risk Rebuttal Narrative", form.highRiskRebuttalNarrative)}
 ${field("IP Income Type", form.ipIncomeType)}
 
 ### Adequacy Assessment:
-${field("Activity Gross Income", form.activityGrossIncome)}
+${field("Turnover", form.activityGrossIncome)}
 ${field("Has Adequate Expenditure", form.hasAdequateExpenditure)}
 ${field("Has Adequate Physical Presence", form.hasAdequatePhysicalPresence)}
 ${field("Adequacy Expenditure Details", form.adequacyExpenditureDetails)}
@@ -339,7 +345,7 @@ ${meetingList}
 function buildDeclarationSection(form: SubstanceForm): string {
   return `
 ## SECTION 12: DECLARATION
-${field("Prepared By", form.preparedBy)}
+${field("Prepared By", form.preparedBy || "LTS Tax Limited")}
 ${field("Prepared Date", form.preparedDate)}
 ${field("Manager Sign Off", form.managerSignOff)}
 ${field("Manager Sign Off Date", form.managerSignOffDate)}

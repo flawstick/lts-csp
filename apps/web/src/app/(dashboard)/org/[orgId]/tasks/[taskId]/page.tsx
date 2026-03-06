@@ -997,7 +997,7 @@ export default function TaskDetailPage() {
                           <Button
                             size="sm"
                             className="h-7"
-                            disabled={startJobMutation.isPending || !task.taxReturn?.substanceForm?.isComplete}
+                            disabled={startJobMutation.isPending}
                           >
                             {startJobMutation.isPending ? (
                               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />

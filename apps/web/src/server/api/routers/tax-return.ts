@@ -650,7 +650,7 @@ export const taxReturnRouter = createTRPCRouter({
       return newTask;
     }),
 
-  // Check if form is complete before starting task
+  // Check if form is complete before starting task (now just returns warnings, doesn't block)
   canStartTask: publicProcedure
     .input(z.object({ taxReturnId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
@@ -659,17 +659,19 @@ export const taxReturnRouter = createTRPCRouter({
       });
 
       if (!form) {
+        // Still allow starting, but warn
         return {
-          canStart: false,
-          reason: "Substance form not found. Please create the form first.",
+          canStart: true,
+          warning: "Substance form not found. Some fields may be missing.",
         };
       }
 
       if (!form.isComplete) {
         const missing = (form.missingFields as string[]) || [];
+        // Allow starting with incomplete form, but include warning
         return {
-          canStart: false,
-          reason: `Substance form incomplete. ${missing.length} fields missing.`,
+          canStart: true,
+          warning: `Substance form incomplete. ${missing.length} fields missing.`,
           missingFields: missing,
         };
       }
@@ -754,11 +756,6 @@ export const taxReturnRouter = createTRPCRouter({
 
       if (!task.taxReturn) {
         throw new Error("Task has no associated tax return");
-      }
-
-      // Check if substance form is complete
-      if (!task.taxReturn.substanceForm?.isComplete) {
-        throw new Error("Substance form must be complete before starting");
       }
 
       // Check for running jobs
