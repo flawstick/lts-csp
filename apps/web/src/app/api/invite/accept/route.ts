@@ -54,6 +54,13 @@ export async function POST(request: Request) {
     });
 
     if (existingAccount) {
+      if (existingAccount.accountType === "portal") {
+        await db
+          .update(accounts)
+          .set({ accountType: "dual" })
+          .where(eq(accounts.id, existingAccount.id));
+      }
+
       // User already has an account - just mark invitation accepted
       await db
         .update(pendingInvitations)
@@ -73,6 +80,7 @@ export async function POST(request: Request) {
         userId: user.id,
         fullName: user.user_metadata?.full_name ?? user.email?.split("@")[0] ?? null,
         avatarUrl: user.user_metadata?.avatar_url ?? null,
+        accountType: "internal",
       })
       .returning();
 

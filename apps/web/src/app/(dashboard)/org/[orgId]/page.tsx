@@ -10,13 +10,14 @@ import {
 import { SectionCards } from "@/components/section-cards"
 import { ChartAreaInteractive } from "@/components/chart-area-interactive"
 import { ReturnsDataTable } from "@/components/returns-data-table"
+import { MainDashboardSkeleton } from "@/components/main-dashboard-skeleton"
 import { useOrgFromUrl } from "@/lib/org-context"
 
 export default function DashboardPage() {
-  const { currentOrg } = useOrgFromUrl()
+  const { currentOrg, isLoading } = useOrgFromUrl()
 
-  if (!currentOrg) {
-    return null
+  if (isLoading || !currentOrg) {
+    return <MainDashboardSkeleton />
   }
 
   const orgId = currentOrg.id

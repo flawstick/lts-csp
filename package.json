@@ -9,7 +9,10 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
-    "web": "cd apps/web && bun run dev",
+    "dev:apps": "turbo dev --filter=portal --filter=web",
+    "dev:portal": "cd apps/portal && bun run dev",
+    "dev:web": "cd apps/web && bun run dev",
+    "web": "bun run dev:web",
     "task": "cd containers/task && bun run dev",
     "lint": "turbo lint",
     "test": "turbo test",

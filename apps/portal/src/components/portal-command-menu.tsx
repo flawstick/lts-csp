@@ -1,0 +1,289 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FileSpreadsheet, FolderOpen, Search } from "lucide-react";
+
+import { PORTAL_COMMAND_OPEN_EVENT } from "@/lib/portal-command";
+import type { PortalNavItem } from "@/lib/portal-navigation";
+import { api } from "@/trpc/react";
+import { Button } from "@/components/ui/button";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+  CommandShortcut,
+} from "@/components/ui/command";
+
+type PortalCommandMenuProps = {
+  navItems: PortalNavItem[];
+  currentOrgId: string | null;
+};
+
+function normalizePathnamePart(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function hashString(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(index);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function createClientSlug(orgId: string, clientName: string) {
+  const normalizedName = normalizePathnamePart(clientName) || "client";
+  const orgPrefix = normalizePathnamePart(orgId).slice(0, 8) || "org";
+  const suffix = hashString(`${orgId}:${clientName.toLowerCase()}`).toString(36).slice(0, 6) || "client";
+  return `${normalizedName}-${orgPrefix}-${suffix}`;
+}
+
+export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuProps) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedQuery(commandQuery.trim());
+    }, 180);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [commandQuery]);
+
+  const { data: returnsData } = api.portalReturns.listMyReturns.useQuery(undefined, {
+    staleTime: 30_000,
+    enabled: open && debouncedQuery.length === 0,
+  });
+
+  const { data: searchedReturns, isFetching: isSearchingReturns } =
+    api.portalReturns.searchMyReturns.useQuery(
+      {
+        query: debouncedQuery,
+        limit: 24,
+      },
+      {
+        staleTime: 15_000,
+        enabled: open && debouncedQuery.length > 0,
+      },
+    );
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isEditableTarget =
+        !!target &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.getAttribute("role") === "textbox");
+
+      if (event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableTarget) {
+        event.preventDefault();
+        setOpen(true);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const onCommandOpen = () => setOpen(true);
+    window.addEventListener(PORTAL_COMMAND_OPEN_EVENT, onCommandOpen);
+
+    return () => {
+      window.removeEventListener(PORTAL_COMMAND_OPEN_EVENT, onCommandOpen);
+    };
+  }, []);
+
+  const navigationItems = useMemo(
+    () => navItems.filter((item) => item.key !== "search"),
+    [navItems],
+  );
+
+  const recentReturns = useMemo(() => {
+    return [...(returnsData ?? [])]
+      .sort((a, b) => {
+        const aTime = a.updatedAt ? Date.parse(String(a.updatedAt)) : 0;
+        const bTime = b.updatedAt ? Date.parse(String(b.updatedAt)) : 0;
+        return bTime - aTime;
+      })
+      .slice(0, 8);
+  }, [returnsData]);
+
+  const navigateTo = (href: string) => {
+    setOpen(false);
+    router.push(href);
+  };
+
+  const returnSearchResults = useMemo(
+    () => (debouncedQuery.length > 0 ? searchedReturns ?? [] : []),
+    [debouncedQuery.length, searchedReturns],
+  );
+  const folderSearchResults = useMemo(() => {
+    if (debouncedQuery.length === 0) return [];
+
+    const grouped = new Map<string, { id: string; name: string; orgName: string; slug: string; matchCount: number }>();
+
+    for (const row of returnSearchResults) {
+      const folderName = row.entityName.trim() || "Unnamed Client";
+      const key = `${row.orgId}::${folderName.toLowerCase()}`;
+      const existing = grouped.get(key);
+
+      if (existing) {
+        existing.matchCount += 1;
+      } else {
+        grouped.set(key, {
+          id: key,
+          name: folderName,
+          orgName: row.orgName,
+          slug: createClientSlug(row.orgId, folderName),
+          matchCount: 1,
+        });
+      }
+    }
+
+    return Array.from(grouped.values()).sort((a, b) => a.name.localeCompare(b.name)).slice(0, 10);
+  }, [debouncedQuery.length, returnSearchResults]);
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-8 gap-2"
+        onClick={() => setOpen(true)}
+      >
+        <Search className="size-3.5" />
+        <span className="sr-only">Open command menu</span>
+        <span className="rounded-md border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          /
+        </span>
+      </Button>
+
+      <CommandDialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen);
+          if (!nextOpen) {
+            setCommandQuery("");
+            setDebouncedQuery("");
+          }
+        }}
+      >
+        <CommandInput
+          value={commandQuery}
+          onValueChange={setCommandQuery}
+          placeholder="Search pages, returns, actions..."
+        />
+        <CommandList>
+          <CommandEmpty>No matching command.</CommandEmpty>
+
+          <CommandGroup heading="Navigation">
+            {navigationItems.map((item) => {
+              const ItemIcon = item.icon;
+
+              return (
+                <CommandItem
+                  key={item.key}
+                  value={`${item.title} ${item.href}`}
+                  onSelect={() => navigateTo(item.href)}
+                >
+                  <ItemIcon className="size-4" />
+                  <span>{item.title}</span>
+                  {item.isActive ? <CommandShortcut>Current</CommandShortcut> : null}
+                </CommandItem>
+              );
+            })}
+          </CommandGroup>
+
+          {currentOrgId ? (
+            <>
+              <CommandSeparator />
+              <CommandGroup heading="Quick Actions">
+              <CommandItem onSelect={() => navigateTo(`/org/${currentOrgId}/returns`)}>
+                <FileSpreadsheet className="size-4" />
+                <span>Open Current Org Returns</span>
+              </CommandItem>
+              </CommandGroup>
+            </>
+          ) : null}
+
+          {debouncedQuery.length > 0 ? (
+            <>
+              <CommandSeparator />
+              <CommandGroup heading="Returns">
+                {isSearchingReturns ? (
+                  <CommandItem value={`searching ${debouncedQuery}`} disabled>
+                    <FileSpreadsheet className="size-4" />
+                    <span>Searching returns...</span>
+                  </CommandItem>
+                ) : null}
+                {returnSearchResults.map((row) => (
+                  <CommandItem
+                    key={row.id}
+                    value={`${row.entityName} ${row.orgName} ${row.jurisdictionCode} ${row.jurisdictionName} ${row.taxYear} ${row.externalId ?? ""}`}
+                    onSelect={() => navigateTo(`/org/${row.orgId}/returns/${row.id}`)}
+                  >
+                    <FileSpreadsheet className="size-4" />
+                    <span className="truncate">{row.entityName}</span>
+                    <CommandShortcut>{row.jurisdictionCode}</CommandShortcut>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+
+              {folderSearchResults.length ? (
+                <>
+                  <CommandSeparator />
+                  <CommandGroup heading="Folders">
+                    {folderSearchResults.map((folder) => (
+                      <CommandItem
+                        key={folder.id}
+                        value={`${folder.name} ${folder.orgName} folder documents`}
+                        onSelect={() => navigateTo(`/documents/client/${folder.slug}`)}
+                      >
+                        <FolderOpen className="size-4" />
+                        <span className="truncate">{folder.name}</span>
+                        <CommandShortcut>{folder.matchCount} returns</CommandShortcut>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </>
+              ) : null}
+            </>
+          ) : recentReturns.length ? (
+            <>
+              <CommandSeparator />
+              <CommandGroup heading="Recent Returns">
+                {recentReturns.map((row) => (
+                  <CommandItem
+                    key={row.id}
+                    value={`${row.entityName} ${row.orgName} ${row.jurisdictionCode} ${row.jurisdictionName} ${row.taxYear} ${row.externalId ?? ""}`}
+                    onSelect={() => navigateTo(`/org/${row.orgId}/returns/${row.id}`)}
+                  >
+                    <FileSpreadsheet className="size-4" />
+                    <span className="truncate">{row.entityName}</span>
+                    <CommandShortcut>{row.jurisdictionCode}</CommandShortcut>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </>
+          ) : null}
+        </CommandList>
+      </CommandDialog>
+    </>
+  );
+}

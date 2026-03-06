@@ -78,6 +78,31 @@ export const invitationStatusEnum = pgEnum("invitation_status", [
   "revoked",
 ]);
 
+export const accountTypeEnum = pgEnum("account_type", [
+  "internal",
+  "portal",
+  "dual",
+]);
+
+export const portalMembershipRoleEnum = pgEnum("portal_membership_role", [
+  "viewer",
+  "editor",
+  "admin",
+]);
+
+export const portalMembershipStatusEnum = pgEnum("portal_membership_status", [
+  "pending",
+  "active",
+  "suspended",
+]);
+
+export const portalInvitationStatusEnum = pgEnum("portal_invitation_status", [
+  "pending",
+  "accepted",
+  "expired",
+  "revoked",
+]);
+
 export const invoiceStatusEnum = pgEnum("invoice_status", [
   "draft",
   "sent",
@@ -98,6 +123,7 @@ export const accounts = createTable(
     fullName: varchar("full_name", { length: 256 }),
     avatarUrl: text("avatar_url"),
     phone: varchar({ length: 32 }),
+    accountType: accountTypeEnum("account_type").notNull().default("internal"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -266,6 +292,69 @@ export const pendingInvitations = createTable(
     index("lts_pending_invitation_email_idx").on(t.email),
     uniqueIndex("lts_pending_invitation_token_idx").on(t.token),
     index("lts_pending_invitation_org_idx").on(t.orgId),
+  ]
+);
+
+// ============================================================================
+// PORTAL MEMBERSHIPS - Portal user access to client organisations
+// ============================================================================
+
+export const portalMemberships = createTable(
+  "portal_membership",
+  (d) => ({
+    id: uuid().primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    role: portalMembershipRoleEnum("role").notNull().default("viewer"),
+    status: portalMembershipStatusEnum("status").notNull().default("pending"),
+    invitedBy: uuid("invited_by").references(() => accounts.id),
+    joinedAt: timestamp("joined_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
+      () => new Date()
+    ),
+  }),
+  (t) => [
+    uniqueIndex("lts_portal_membership_account_org_idx").on(t.accountId, t.orgId),
+    index("lts_portal_membership_account_idx").on(t.accountId),
+    index("lts_portal_membership_org_idx").on(t.orgId),
+    index("lts_portal_membership_status_idx").on(t.status),
+  ]
+);
+
+// ============================================================================
+// PORTAL INVITATIONS - Invite users to specific client organisations
+// ============================================================================
+
+export const portalInvitations = createTable(
+  "portal_invitation",
+  (d) => ({
+    id: uuid().primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    email: varchar({ length: 256 }).notNull(),
+    token: varchar({ length: 64 }).notNull().unique(),
+    status: portalInvitationStatusEnum("status").notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    invitedBy: uuid("invited_by")
+      .notNull()
+      .references(() => accounts.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  }),
+  (t) => [
+    uniqueIndex("lts_portal_invitation_token_idx").on(t.token),
+    index("lts_portal_invitation_email_status_idx").on(t.email, t.status),
+    index("lts_portal_invitation_org_idx").on(t.orgId),
   ]
 );
 
@@ -669,6 +758,13 @@ export const accountsRelations = relations(accounts, ({ one, many }) => ({
   createdTasks: many(tasks),
   createdJobs: many(jobs),
   sentInvitations: many(pendingInvitations),
+  portalMemberships: many(portalMemberships, {
+    relationName: "portal_membership_account",
+  }),
+  invitedPortalMemberships: many(portalMemberships, {
+    relationName: "portal_membership_invited_by",
+  }),
+  sentPortalInvitations: many(portalInvitations),
   createdInvoices: many(invoices),
 }));
 
@@ -691,6 +787,8 @@ export const organisationsRelations = relations(organisations, ({ one, many }) =
   tasks: many(tasks),
   taxReturns: many(taxReturns),
   jurisdictionSettings: many(jurisdictionSettings),
+  portalMemberships: many(portalMemberships),
+  portalInvitations: many(portalInvitations),
   invoices: many(invoices),
   taxSyncJobs: many(taxSyncJobs),
 }));
@@ -738,6 +836,34 @@ export const pendingInvitationsRelations = relations(
     }),
   })
 );
+
+export const portalMembershipsRelations = relations(portalMemberships, ({ one }) => ({
+  account: one(accounts, {
+    relationName: "portal_membership_account",
+    fields: [portalMemberships.accountId],
+    references: [accounts.id],
+  }),
+  organisation: one(organisations, {
+    fields: [portalMemberships.orgId],
+    references: [organisations.id],
+  }),
+  invitedByAccount: one(accounts, {
+    relationName: "portal_membership_invited_by",
+    fields: [portalMemberships.invitedBy],
+    references: [accounts.id],
+  }),
+}));
+
+export const portalInvitationsRelations = relations(portalInvitations, ({ one }) => ({
+  organisation: one(organisations, {
+    fields: [portalInvitations.orgId],
+    references: [organisations.id],
+  }),
+  invitedByAccount: one(accounts, {
+    fields: [portalInvitations.invitedBy],
+    references: [accounts.id],
+  }),
+}));
 
 export const invoicesRelations = relations(invoices, ({ one }) => ({
   organisation: one(organisations, {
@@ -849,6 +975,12 @@ export type NewJurisdictionSetting = typeof jurisdictionSettings.$inferInsert;
 
 export type PendingInvitation = typeof pendingInvitations.$inferSelect;
 export type NewPendingInvitation = typeof pendingInvitations.$inferInsert;
+
+export type PortalMembership = typeof portalMemberships.$inferSelect;
+export type NewPortalMembership = typeof portalMemberships.$inferInsert;
+
+export type PortalInvitation = typeof portalInvitations.$inferSelect;
+export type NewPortalInvitation = typeof portalInvitations.$inferInsert;
 
 export type Invoice = typeof invoices.$inferSelect;
 export type NewInvoice = typeof invoices.$inferInsert;
