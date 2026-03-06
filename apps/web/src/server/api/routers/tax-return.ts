@@ -10,7 +10,7 @@ export const taxReturnRouter = createTRPCRouter({
   sync: publicProcedure
     .input(z.object({ token: z.string() }))
     .mutation(async ({ input }) => {
-      const url = "https://my.gov.gg/revenue/employee-assigned-cases?taxReferenceType=All&year=All&formStatus=All&items_per_page=50&page=0";
+      const url = "https://my.gov.gg/revenue/all-cases?taxReferenceType=All&year=All&formStatus=All&items_per_page=50&page=0";
 
       const response = await fetch(url, {
         headers: {

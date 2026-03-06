@@ -3,8 +3,9 @@ import { db, schema } from "@repo/database";
 import { eq } from "drizzle-orm";
 import { authenticate } from "./auth";
 
-const TOTAL_PAGES = 7;
-const BASE_URL = "https://my.gov.gg/revenue/employee-assigned-cases";
+const ITEMS_PER_PAGE = 50;
+const MAX_PAGES = 100;
+const BASE_URL = process.env.MYGOV_CASES_URL || "https://my.gov.gg/revenue/all-cases";
 
 let sessionCookies: string = "";
 
@@ -18,7 +19,7 @@ const getHeaders = () => ({
 const log = (msg: string) => console.log(`[TAX-SYNC] ${msg}`);
 
 async function fetchPage(page: number): Promise<string> {
-  const url = `${BASE_URL}?taxReferenceType=All&year=All&formStatus=All&items_per_page=50&page=${page}`;
+  const url = `${BASE_URL}?taxReferenceType=All&year=All&formStatus=All&items_per_page=${ITEMS_PER_PAGE}&page=${page}`;
   const res = await fetch(url, { headers: getHeaders() });
   if (!res.ok) throw new Error(`Page ${page} failed: ${res.status}`);
   return res.text();
@@ -84,16 +85,27 @@ async function main() {
 
     const allReturns: any[] = [];
 
-    // Fetch all pages
-    for (let page = 0; page < TOTAL_PAGES; page++) {
-      log(`Fetching page ${page + 1}/${TOTAL_PAGES}...`);
+    let pagesFetched = 0;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      log(`Fetching page ${page + 1}...`);
       const html = await fetchPage(page);
       const returns = parseReturns(html);
-      allReturns.push(...returns);
       log(`Page ${page + 1}: ${returns.length} returns`);
+
+      if (returns.length === 0) {
+        break;
+      }
+
+      allReturns.push(...returns);
+      pagesFetched = page + 1;
     }
 
-    log(`Total: ${allReturns.length} returns across ${TOTAL_PAGES} pages`);
+    if (pagesFetched === MAX_PAGES) {
+      log(`Reached pagination safety cap at ${MAX_PAGES} pages`);
+    }
+
+    log(`Total: ${allReturns.length} returns across ${pagesFetched} pages`);
 
     // Update database
     if (allReturns.length > 0) {
