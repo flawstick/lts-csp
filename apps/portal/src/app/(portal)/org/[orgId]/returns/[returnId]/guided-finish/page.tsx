@@ -16,7 +16,7 @@ import {
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
 import { api } from "@/trpc/react";
-import { ReturnWorkspacePageSkeleton } from "@/components/return-workspace-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -306,7 +306,67 @@ export default function GuidedFinishPage() {
   const goBack = () => router.push(`/org/${orgId}/returns/${returnId}`);
 
   if (returnsQuery.isLoading) {
-    return <ReturnWorkspacePageSkeleton />;
+    return (
+      <div className="-m-4 sm:-m-6 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden">
+        <div className="relative grid h-full min-h-0 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]">
+          {/* Sidebar skeleton */}
+          <div className="hidden border-r border-border/60 bg-card lg:flex lg:flex-col">
+            <div className="flex items-center gap-3 border-b border-border/60 px-5 py-4">
+              <Skeleton className="size-8 rounded-lg" />
+              <div>
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="mt-1.5 h-3 w-20" />
+              </div>
+            </div>
+            <div className="flex-1 space-y-1 p-3">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={`step-skel-${i}`} className="flex items-center gap-3 rounded-lg px-3 py-2.5">
+                  <Skeleton className="size-5 rounded-full" />
+                  <div className="flex-1">
+                    <Skeleton className="h-3.5 w-24" />
+                    <Skeleton className="mt-1 h-2.5 w-16" />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-border/60 px-4 py-3">
+              <Skeleton className="h-2 w-full rounded-full" />
+            </div>
+          </div>
+
+          {/* Content skeleton */}
+          <div className="flex min-h-0 flex-col">
+            <div className="flex-1 overflow-auto p-6">
+              <div className="mx-auto max-w-2xl space-y-6">
+                <div>
+                  <Skeleton className="h-3 w-16" />
+                  <Skeleton className="mt-2 h-6 w-48" />
+                  <Skeleton className="mt-2 h-4 w-72" />
+                </div>
+                <div className="space-y-4">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={`field-skel-${i}`} className="space-y-2">
+                      <Skeleton className="h-3.5 w-32" />
+                      <Skeleton className="h-9 w-full rounded-md" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {/* Footer skeleton */}
+            <div className="border-t border-border/60 bg-card px-6 py-3">
+              <div className="flex items-center justify-between">
+                <Skeleton className="h-8 w-24 rounded-md" />
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-8 w-20 rounded-md" />
+                  <Skeleton className="h-8 w-16 rounded-md" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!selectedReturn) {
