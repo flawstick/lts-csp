@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import {
   Building2,
   Crown,
@@ -20,6 +21,7 @@ import { api } from "@/trpc/react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -120,7 +122,7 @@ export default function TeamPage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-4xl space-y-5">
         <div className="portal-card p-5">
           <div className="flex items-center gap-3">
             <span className="inline-flex size-10 items-center justify-center rounded-lg border border-border/70 bg-muted/60 text-foreground">
@@ -134,9 +136,7 @@ export default function TeamPage() {
             </div>
           </div>
         </div>
-        <div className="mt-5 flex items-center justify-center py-16">
-          <Loader2 className="size-5 animate-spin text-muted-foreground" />
-        </div>
+        <TeamSkeleton />
       </div>
     );
   }
@@ -189,6 +189,74 @@ export default function TeamPage() {
           myRole={membership.role}
         />
       ))}
+    </div>
+  );
+}
+
+function TeamSkeleton() {
+  return (
+    <div className="space-y-3">
+      {/* Org header skeleton */}
+      <div className="rounded-xl border border-border/70 bg-card p-4 shadow-xs">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Skeleton className="size-9 rounded-lg" />
+            <div>
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="mt-1.5 h-3 w-20" />
+            </div>
+          </div>
+          <Skeleton className="h-5 w-16 rounded-full" />
+        </div>
+      </div>
+
+      {/* Members skeleton */}
+      <div className="rounded-xl border border-border/70 bg-card p-5 shadow-xs">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="mt-1.5 h-3 w-52" />
+        <div className="mt-4 divide-y divide-border/50">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div
+              key={`member-skeleton-${i}`}
+              className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+            >
+              <div className="flex items-center gap-3">
+                <Skeleton className="size-8 rounded-full" />
+                <div>
+                  <Skeleton className="h-3.5 w-28" />
+                  <Skeleton className="mt-1.5 h-3 w-20" />
+                </div>
+              </div>
+              <Skeleton className="h-5 w-16 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Invitations skeleton */}
+      <div className="rounded-xl border border-border/70 bg-card p-5 shadow-xs">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="mt-1.5 h-3 w-36" />
+          </div>
+          <Skeleton className="h-8 w-28 rounded-md" />
+        </div>
+        <div className="mt-4 divide-y divide-border/50">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div
+              key={`invite-skeleton-${i}`}
+              className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+            >
+              <div>
+                <Skeleton className="h-3.5 w-40" />
+                <Skeleton className="mt-1.5 h-3 w-28" />
+              </div>
+              <Skeleton className="h-5 w-16 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -264,9 +332,11 @@ function OrgTeamSection({
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             {orgLogoUrl ? (
-              <img
+              <Image
                 src={orgLogoUrl}
                 alt={orgName}
+                width={36}
+                height={36}
                 className="size-9 rounded-lg object-cover"
               />
             ) : (

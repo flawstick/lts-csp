@@ -5,23 +5,25 @@ import { z } from "zod";
 
 import {
   accounts,
-  organisations,
   portalInvitations,
   portalMemberships,
 } from "@repo/database";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import type { TRPCContext } from "@/server/api/trpc";
 
-async function getAccountId(ctx: { db: any; user: { id: string } }) {
+type AuthCtx = Pick<TRPCContext, "db"> & { user: { id: string } };
+
+async function getAccountId(ctx: AuthCtx) {
   const account = await ctx.db.query.accounts.findFirst({
     where: eq(accounts.userId, ctx.user.id),
   });
   if (!account) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "Account not found" });
   }
-  return account.id as string;
+  return account.id;
 }
 
-async function assertOrgAdmin(ctx: { db: any; user: { id: string } }, orgId: string) {
+async function assertOrgAdmin(ctx: AuthCtx, orgId: string) {
   const accountId = await getAccountId(ctx);
   const membership = await ctx.db.query.portalMemberships.findFirst({
     where: and(
@@ -30,7 +32,7 @@ async function assertOrgAdmin(ctx: { db: any; user: { id: string } }, orgId: str
       eq(portalMemberships.status, "active"),
     ),
   });
-  if (!membership || membership.role !== "admin") {
+  if (!membership?.role || membership.role !== "admin") {
     throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
   }
   return { accountId, membership };

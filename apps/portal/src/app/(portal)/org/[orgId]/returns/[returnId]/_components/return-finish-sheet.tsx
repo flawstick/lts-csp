@@ -498,9 +498,7 @@ export function ReturnFinishSheet({
                                     key={field}
                                     className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-800"
                                   >
-                                    {FIELD_LABELS[
-                                      field as keyof typeof FIELD_LABELS
-                                    ] ?? field}
+                                    {FIELD_LABELS[field] ?? field}
                                   </span>
                                 ))}
                               </div>
@@ -698,9 +696,7 @@ export function ReturnFinishSheet({
                                         }}
                                         className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-800 transition hover:bg-amber-500/15"
                                       >
-                                        {FIELD_LABELS[
-                                          field as keyof typeof FIELD_LABELS
-                                        ] ?? field}
+                                        {FIELD_LABELS[field] ?? field}
                                       </button>
                                     );
                                   })}

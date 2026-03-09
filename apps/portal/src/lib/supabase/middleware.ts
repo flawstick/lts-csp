@@ -54,15 +54,15 @@ export async function updateSession(request: NextRequest) {
       .eq("user_id", user.id)
       .maybeSingle();
 
-    let accountId = account?.id;
+    let accountId = account?.id as string | undefined;
 
     if (!account) {
       const { error } = await supabase
         .from("lts_account")
         .insert({
           user_id: user.id,
-          full_name: user.user_metadata.full_name ?? user.user_metadata.name ?? null,
-          avatar_url: user.user_metadata.avatar_url ?? user.user_metadata.picture ?? null,
+          full_name: (user.user_metadata.full_name ?? user.user_metadata.name ?? null) as string | null,
+          avatar_url: (user.user_metadata.avatar_url ?? user.user_metadata.picture ?? null) as string | null,
           account_type: "portal",
         })
         .select("id")
@@ -76,13 +76,13 @@ export async function updateSession(request: NextRequest) {
           .select("id")
           .eq("user_id", user.id)
           .maybeSingle();
-        accountId = fresh.data?.id;
+        accountId = fresh.data?.id as string | undefined;
       }
     } else {
-      accountId = account.id;
+      accountId = account.id as string;
     }
 
-    const accountType = account?.account_type ?? "portal";
+    const accountType = (account?.account_type ?? "portal") as string;
     const isInternalOnly = accountType === "internal";
 
     if (isInternalOnly && !isPublicRoute && !pathname.startsWith("/api/")) {

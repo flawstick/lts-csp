@@ -21,8 +21,8 @@ export async function getPortalViewer() {
       .insert(accounts)
       .values({
         userId: user.id,
-        fullName: user.user_metadata.full_name ?? user.user_metadata.name ?? null,
-        avatarUrl: user.user_metadata.avatar_url ?? user.user_metadata.picture ?? null,
+        fullName: (user.user_metadata.full_name as string | undefined) ?? (user.user_metadata.name as string | undefined) ?? null,
+        avatarUrl: (user.user_metadata.avatar_url as string | undefined) ?? (user.user_metadata.picture as string | undefined) ?? null,
         accountType: "portal",
       })
       .returning();

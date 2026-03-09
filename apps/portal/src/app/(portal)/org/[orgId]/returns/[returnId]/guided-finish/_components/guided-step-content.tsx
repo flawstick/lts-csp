@@ -1,7 +1,7 @@
 "use client";
 
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import { Check, FileStack, FileText, UploadCloud, X } from "lucide-react";
+import { Check, FileText, UploadCloud, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
 import {
@@ -48,7 +48,7 @@ export function GuidedStepContent({
   activeStepIndex,
   totalSteps,
   entityName,
-  taxYear,
+  taxYear: _taxYear,
   draftForm,
   setDraftForm,
   draftMissingFields,
@@ -181,7 +181,7 @@ function UploadStepContent({
   setSelectedFinancialFiles,
   financialStatementsIndex,
   setFinancialStatementsIndex,
-  selectedFinancialStatementsName,
+  selectedFinancialStatementsName: _selectedFinancialStatementsName,
   assignedFinancialStatementsFile,
   onStepChange,
 }: {
@@ -330,7 +330,7 @@ function UploadStepContent({
                   }}
                   className="rounded-md bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-400"
                 >
-                  {FIELD_LABELS[field as keyof typeof FIELD_LABELS] ?? field}
+                  {FIELD_LABELS[field] ?? field}
                 </button>
               );
             })}

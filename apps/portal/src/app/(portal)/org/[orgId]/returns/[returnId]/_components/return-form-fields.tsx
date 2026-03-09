@@ -338,7 +338,7 @@ export function ReturnFormFields({
                 ...prev,
                 [field]: field === "relevantActivity"
                   ? normalizeRelevantActivity(v ?? "")
-                  : v || undefined,
+                  : v ?? undefined,
               }))
             }
           />
@@ -425,7 +425,7 @@ export function ReturnFormFields({
             options={options}
             placeholder="Select"
             onChange={(v) =>
-              setDraftForm((prev) => ({ ...prev, [field]: v || undefined }))
+              setDraftForm((prev) => ({ ...prev, [field]: v ?? undefined }))
             }
           />
         </FieldShell>

@@ -408,33 +408,37 @@ export function OrgDashboardView({ orgId, orgName, accountName, rows }: Props) {
   return (
     <div className="space-y-6">
       <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <SplitText
-            text={greeting}
-            tag="h1"
-            splitType="words, chars"
-            delay={28}
-            duration={0.72}
-            from={{ opacity: 0, y: 18, filter: "blur(8px)" }}
-            to={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            threshold={0}
-            rootMargin="0px"
-            textAlign="left"
-            className="block text-3xl font-semibold tracking-tight"
-          />
-          <SplitText
-            text={`${orgName} dashboard and return operations.`}
-            tag="p"
-            splitType="words"
-            delay={18}
-            duration={0.54}
-            from={{ opacity: 0, y: 10, filter: "blur(6px)" }}
-            to={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            threshold={0}
-            rootMargin="0px"
-            textAlign="left"
-            className="mt-1 block text-sm text-muted-foreground"
-          />
+        <div className="space-y-1">
+          <div className="w-full">
+            <SplitText
+              text={greeting}
+              tag="h1"
+              splitType="words, chars"
+              delay={28}
+              duration={0.72}
+              from={{ opacity: 0, y: 18, filter: "blur(8px)" }}
+              to={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              threshold={0}
+              rootMargin="0px"
+              textAlign="left"
+              className="w-full text-3xl font-semibold tracking-tight"
+            />
+          </div>
+          <div className="w-full">
+            <SplitText
+              text={`${orgName} dashboard and return operations.`}
+              tag="p"
+              splitType="words"
+              delay={18}
+              duration={0.54}
+              from={{ opacity: 0, y: 10, filter: "blur(6px)" }}
+              to={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              threshold={0}
+              rootMargin="0px"
+              textAlign="left"
+              className="w-full text-sm text-muted-foreground"
+            />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
