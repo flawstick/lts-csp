@@ -3,7 +3,14 @@
  * Runs on ECS, uses Browser Use Cloud API, streams status via Redis
  */
 
-import { db, taxReturns, substanceForms, jobs, tasks, eq } from "@repo/database";
+import {
+  db,
+  taxReturns,
+  substanceForms,
+  jobs,
+  tasks,
+  eq,
+} from "@repo/database";
 import { publishJobEvent } from "@repo/redis";
 import { BrowserUseClient } from "./browser-use-client";
 import { buildSubstanceFormPrompt } from "./prompt-builder";
@@ -38,6 +45,23 @@ const REQUIRES_ATTENTION_KEYWORDS = [
   "need to login",
 ];
 
+type TaxReturnAttachedFile = {
+  url: string;
+  name: string;
+  size: number;
+  type: string;
+  uploadedAt: string;
+  category?: string;
+  role?: string;
+};
+
+type BrowserSessionInputFile = {
+  originalName: string;
+  sessionFileName: string;
+  category?: string;
+  role?: string;
+};
+
 // ============================================================================
 // Logging + Redis Publishing
 // ============================================================================
@@ -69,12 +93,156 @@ async function publishStatus(status: string, data: Record<string, unknown>) {
   }
 }
 
+function getTaxReturnFiles(files: unknown): TaxReturnAttachedFile[] {
+  if (!Array.isArray(files)) return [];
+
+  const parsed: TaxReturnAttachedFile[] = [];
+
+  for (const file of files) {
+    if (!file || typeof file !== "object") continue;
+
+    const row = file as Record<string, unknown>;
+    if (typeof row.url !== "string" || typeof row.name !== "string") {
+      continue;
+    }
+
+    parsed.push({
+      url: row.url,
+      name: row.name,
+      size: typeof row.size === "number" ? row.size : 0,
+      type:
+        typeof row.type === "string" ? row.type : "application/octet-stream",
+      uploadedAt:
+        typeof row.uploadedAt === "string"
+          ? row.uploadedAt
+          : new Date().toISOString(),
+      category: typeof row.category === "string" ? row.category : undefined,
+      role: typeof row.role === "string" ? row.role : undefined,
+    });
+  }
+
+  return parsed;
+}
+
+function isPdf(file: TaxReturnAttachedFile): boolean {
+  const haystack = `${file.name} ${file.type} ${file.url}`.toLowerCase();
+  return haystack.includes("pdf") || file.name.toLowerCase().endsWith(".pdf");
+}
+
+function looksLikeFinancialStatements(file: TaxReturnAttachedFile): boolean {
+  const haystack = `${file.name} ${file.url}`.toLowerCase();
+  return [
+    "financial statement",
+    "financial-statements",
+    "financials",
+    "accounts",
+    "annual report",
+    "audited",
+    "report and financial",
+  ].some((token) => haystack.includes(token));
+}
+
+function chooseFinancialStatementsFile(
+  files: TaxReturnAttachedFile[],
+): TaxReturnAttachedFile | null {
+  const pdfFiles = files.filter(isPdf);
+
+  return (
+    pdfFiles.find((file) => file.role === "financial_statements") ??
+    pdfFiles.find(
+      (file) =>
+        file.category === "financial" && looksLikeFinancialStatements(file),
+    ) ??
+    pdfFiles.find((file) => file.category === "financial") ??
+    pdfFiles.find((file) => looksLikeFinancialStatements(file)) ??
+    null
+  );
+}
+
+function sanitizeSessionFileName(name: string, fallbackBase: string): string {
+  const trimmed = name.trim();
+  const safeName = (trimmed || fallbackBase)
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return safeName || fallbackBase;
+}
+
+function getPdfExtension(file: TaxReturnAttachedFile): string {
+  if (file.name.toLowerCase().endsWith(".pdf")) {
+    return ".pdf";
+  }
+  return file.type.toLowerCase().includes("pdf") ? ".pdf" : "";
+}
+
+async function uploadFinancialStatementsFile(
+  client: BrowserUseClient,
+  sessionId: string,
+  files: TaxReturnAttachedFile[],
+  logFn: typeof log,
+): Promise<BrowserSessionInputFile | null> {
+  const selectedFile = chooseFinancialStatementsFile(files);
+
+  if (!selectedFile) {
+    await logFn("No financial statements PDF found on tax return");
+    return null;
+  }
+
+  await logFn("Preparing financial statements PDF for Browser Use session", {
+    fileName: selectedFile.name,
+    fileUrl: selectedFile.url,
+    role: selectedFile.role,
+    category: selectedFile.category,
+  });
+
+  const response = await fetch(selectedFile.url);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to download financial statements PDF: ${response.status}`,
+    );
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const uploadName =
+    selectedFile.role === "financial_statements"
+      ? `financial-statements${getPdfExtension(selectedFile) || ".pdf"}`
+      : sanitizeSessionFileName(
+          selectedFile.name,
+          `financial-statements${getPdfExtension(selectedFile) || ".pdf"}`,
+        );
+
+  const sessionFileName = await client.uploadFile(sessionId, {
+    name: uploadName,
+    type:
+      selectedFile.type ||
+      response.headers.get("content-type") ||
+      "application/pdf",
+    buffer,
+  });
+
+  await logFn("Uploaded financial statements PDF to Browser Use session", {
+    originalName: selectedFile.name,
+    sessionFileName,
+  });
+
+  return {
+    originalName: selectedFile.name,
+    sessionFileName,
+    category: selectedFile.category,
+    role: selectedFile.role,
+  };
+}
+
 // ============================================================================
 // Main
 // ============================================================================
 
 async function main() {
-  await log("Task runner starting", { taxReturnId: TAX_RETURN_ID, jobId: JOB_ID });
+  await log("Task runner starting", {
+    taxReturnId: TAX_RETURN_ID,
+    jobId: JOB_ID,
+  });
 
   if (!BROWSER_USE_API_KEY) {
     await log("ERROR: BROWSER_USE_API_KEY is required");
@@ -91,7 +259,10 @@ async function main() {
   try {
     // Update job status
     if (JOB_ID) {
-      await db.update(jobs).set({ status: "running", startedAt: new Date() }).where(eq(jobs.id, JOB_ID));
+      await db
+        .update(jobs)
+        .set({ status: "running", startedAt: new Date() })
+        .where(eq(jobs.id, JOB_ID));
     }
 
     // Fetch tax return with substance form
@@ -103,8 +274,48 @@ async function main() {
 
     if (!taxReturn) throw new Error("Tax return not found");
     if (!taxReturn.substanceForm) throw new Error("Substance form not found");
+    const taxReturnFiles = getTaxReturnFiles(taxReturn.files);
 
-    await log("Building AI prompt", { entity: taxReturn.entityName, year: taxReturn.taxYear });
+    // Create Browser Use session (try without proxy first, then with UK proxy)
+    const useProxy = process.env.USE_UK_PROXY !== "false";
+    await log(
+      `Creating Browser Use session ${useProxy ? "with UK proxy" : "without proxy"}`,
+    );
+    const session = await client.createSession({
+      ...(useProxy && { proxyCountryCode: "uk" as const }),
+      startUrl:
+        taxReturn.link ||
+        taxReturn.jurisdiction?.portalUrl ||
+        "https://my.gov.gg",
+    });
+
+    await log("Session created", {
+      sessionId: session.id,
+      liveUrl: session.liveUrl,
+    });
+
+    let financialStatementsFile: BrowserSessionInputFile | null = null;
+    try {
+      financialStatementsFile = await uploadFinancialStatementsFile(
+        client,
+        session.id,
+        taxReturnFiles,
+        log,
+      );
+    } catch (error) {
+      await log(
+        "Failed to prepare financial statements PDF for Browser Use session",
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+
+    await log("Building AI prompt", {
+      entity: taxReturn.entityName,
+      year: taxReturn.taxYear,
+      hasFinancialStatementsFile: Boolean(financialStatementsFile),
+    });
 
     // Build prompt
     const prompt = buildSubstanceFormPrompt({
@@ -113,17 +324,8 @@ async function main() {
       portalUrl: taxReturn.jurisdiction?.portalUrl || "https://my.gov.gg",
       returnLink: taxReturn.link || undefined,
       overrideSaved: OVERRIDE_SAVED,
+      financialStatementsFile,
     });
-
-    // Create Browser Use session (try without proxy first, then with UK proxy)
-    const useProxy = process.env.USE_UK_PROXY !== "false";
-    await log(`Creating Browser Use session ${useProxy ? "with UK proxy" : "without proxy"}`);
-    const session = await client.createSession({
-      ...(useProxy && { proxyCountryCode: "uk" as const }),
-      startUrl: taxReturn.link || taxReturn.jurisdiction?.portalUrl || "https://my.gov.gg",
-    });
-
-    await log("Session created", { sessionId: session.id, liveUrl: session.liveUrl });
 
     // Publish live URL immediately
     await publishJobEvent({
@@ -140,9 +342,12 @@ async function main() {
 
     // Update job with live URL
     if (JOB_ID) {
-      await db.update(jobs).set({
-        resultData: { liveUrl: session.liveUrl, sessionId: session.id },
-      }).where(eq(jobs.id, JOB_ID));
+      await db
+        .update(jobs)
+        .set({
+          resultData: { liveUrl: session.liveUrl, sessionId: session.id },
+        })
+        .where(eq(jobs.id, JOB_ID));
     }
 
     // Create task
@@ -193,7 +398,8 @@ async function main() {
           data: {
             liveUrl: session.liveUrl,
             sessionId: session.id,
-            message: "Task paused. Complete any manual actions in the browser and click Resume.",
+            message:
+              "Task paused. Complete any manual actions in the browser and click Resume.",
           },
         });
 
@@ -261,9 +467,11 @@ async function main() {
         const output = task.output || "";
 
         // Check if the agent needs user intervention (e.g., login required)
-        const needsAttention = !success && REQUIRES_ATTENTION_KEYWORDS.some(
-          keyword => output.toLowerCase().includes(keyword.toLowerCase())
-        );
+        const needsAttention =
+          !success &&
+          REQUIRES_ATTENTION_KEYWORDS.some((keyword) =>
+            output.toLowerCase().includes(keyword.toLowerCase()),
+          );
 
         if (needsAttention) {
           await log("Task requires user attention - pausing", { output });
@@ -277,23 +485,27 @@ async function main() {
               browserUseTaskId: taskResponse.id,
               liveUrl: session.liveUrl,
               sessionId: session.id,
-              message: "Agent needs user intervention. The browser session is still active - please complete the required action (e.g., login) and resume.",
+              message:
+                "Agent needs user intervention. The browser session is still active - please complete the required action (e.g., login) and resume.",
             },
           });
 
           // Update job to paused status
           if (JOB_ID) {
-            await db.update(jobs).set({
-              status: "paused",
-              resultData: {
-                output,
-                browserUseTaskId: taskResponse.id,
-                liveUrl: session.liveUrl,
-                sessionId: session.id,
-                pausedAt: Date.now(),
-                pauseReason: output,
-              },
-            }).where(eq(jobs.id, JOB_ID));
+            await db
+              .update(jobs)
+              .set({
+                status: "paused",
+                resultData: {
+                  output,
+                  browserUseTaskId: taskResponse.id,
+                  liveUrl: session.liveUrl,
+                  sessionId: session.id,
+                  pausedAt: Date.now(),
+                  pauseReason: output,
+                },
+              })
+              .where(eq(jobs.id, JOB_ID));
           }
 
           // Wait for user to resume or timeout
@@ -336,7 +548,10 @@ ${prompt}
               break;
             }
 
-            if (currentJob.status === "cancelled" || currentJob.status === "failed") {
+            if (
+              currentJob.status === "cancelled" ||
+              currentJob.status === "failed"
+            ) {
               await log("Job was cancelled or failed during pause");
               break;
             }
@@ -349,37 +564,57 @@ ${prompt}
 
           if (finalJobCheck?.status === "paused") {
             await log("Pause timeout - marking as failed");
-            await db.update(jobs).set({
-              status: "failed",
-              completedAt: new Date(),
-              errorMessage: "Timed out waiting for user intervention",
-            }).where(eq(jobs.id, JOB_ID));
+            await db
+              .update(jobs)
+              .set({
+                status: "failed",
+                completedAt: new Date(),
+                errorMessage: "Timed out waiting for user intervention",
+              })
+              .where(eq(jobs.id, JOB_ID));
             break;
           }
 
           continue; // Continue the main polling loop with the new task
         }
 
-        await log(success ? "Task completed successfully" : "Task finished with issues", {
-          output: task.output,
-          isSuccess: success,
-        });
+        await log(
+          success ? "Task completed successfully" : "Task finished with issues",
+          {
+            output: task.output,
+            isSuccess: success,
+          },
+        );
 
         await publishJobEvent({
           type: success ? "job:completed" : "job:failed",
           jobId: JOB_ID,
           timestamp: Date.now(),
-          data: { output: task.output, isSuccess: success, browserUseTaskId: taskResponse.id },
+          data: {
+            output: task.output,
+            isSuccess: success,
+            browserUseTaskId: taskResponse.id,
+          },
         });
 
         // Update DB
-        await db.update(taxReturns).set({ status: success ? "completed" : "failed" }).where(eq(taxReturns.id, TAX_RETURN_ID));
+        await db
+          .update(taxReturns)
+          .set({ status: success ? "completed" : "failed" })
+          .where(eq(taxReturns.id, TAX_RETURN_ID));
         if (JOB_ID) {
-          await db.update(jobs).set({
-            status: success ? "completed" : "failed",
-            completedAt: new Date(),
-            resultData: { output: task.output, browserUseTaskId: taskResponse.id, liveUrl: session.liveUrl },
-          }).where(eq(jobs.id, JOB_ID));
+          await db
+            .update(jobs)
+            .set({
+              status: success ? "completed" : "failed",
+              completedAt: new Date(),
+              resultData: {
+                output: task.output,
+                browserUseTaskId: taskResponse.id,
+                liveUrl: session.liveUrl,
+              },
+            })
+            .where(eq(jobs.id, JOB_ID));
         }
 
         break;
@@ -397,7 +632,9 @@ ${prompt}
       }
 
       if (task.status === "paused") {
-        await publishStatus("paused", { message: "Task paused - waiting for intervention" });
+        await publishStatus("paused", {
+          message: "Task paused - waiting for intervention",
+        });
       }
     }
 
@@ -420,11 +657,14 @@ ${prompt}
     });
 
     if (JOB_ID) {
-      await db.update(jobs).set({
-        status: "failed",
-        completedAt: new Date(),
-        errorMessage: errorMsg,
-      }).where(eq(jobs.id, JOB_ID));
+      await db
+        .update(jobs)
+        .set({
+          status: "failed",
+          completedAt: new Date(),
+          errorMessage: errorMsg,
+        })
+        .where(eq(jobs.id, JOB_ID));
     }
 
     process.exit(1);

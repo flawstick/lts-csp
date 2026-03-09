@@ -3,6 +3,7 @@ type UploadedFile = {
   name: string;
   size: number;
   type: string;
+  category?: "esr" | "financial" | "supporting" | "misc";
 };
 
 export async function uploadPortalFile(input: {

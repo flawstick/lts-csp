@@ -5,7 +5,7 @@ import { authenticate } from "./auth";
 
 const ITEMS_PER_PAGE = 50;
 const MAX_PAGES = 100;
-const BASE_URL = process.env.MYGOV_CASES_URL || "https://my.gov.gg/revenue/all-cases";
+const BASE_URL = "https://my.gov.gg/revenue/employee-assigned-cases";
 
 let sessionCookies: string = "";
 

@@ -12,7 +12,17 @@ const API_BASE = "https://api.browser-use.com/api/v2";
 export type TaskStatus = "started" | "paused" | "finished" | "stopped";
 export type SessionStatus = "active" | "stopped";
 export type BrowserSessionStatus = "active" | "stopped";
-export type ProxyCountryCode = "us" | "uk" | "fr" | "it" | "jp" | "au" | "de" | "fi" | "ca" | "in";
+export type ProxyCountryCode =
+  | "us"
+  | "uk"
+  | "fr"
+  | "it"
+  | "jp"
+  | "au"
+  | "de"
+  | "fi"
+  | "ca"
+  | "in";
 export type SupportedLLM =
   | "browser-use-llm"
   | "gpt-4.1"
@@ -171,7 +181,7 @@ export class BrowserUseClient {
     method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
     body?: unknown,
-    retries = 3
+    retries = 3,
   ): Promise<T> {
     const url = `${API_BASE}${path}`;
     const headers: Record<string, string> = {
@@ -200,11 +210,15 @@ export class BrowserUseClient {
           const errorText = await response.text();
           // Retry on 5xx errors
           if (response.status >= 500 && attempt < retries) {
-            console.log(`[BrowserUseClient] ${response.status} error, retrying (${attempt}/${retries})...`);
-            await new Promise(r => setTimeout(r, 2000 * attempt));
+            console.log(
+              `[BrowserUseClient] ${response.status} error, retrying (${attempt}/${retries})...`,
+            );
+            await new Promise((r) => setTimeout(r, 2000 * attempt));
             continue;
           }
-          throw new Error(`Browser Use API error ${response.status}: ${errorText}`);
+          throw new Error(
+            `Browser Use API error ${response.status}: ${errorText}`,
+          );
         }
 
         // Handle 204 No Content
@@ -212,12 +226,14 @@ export class BrowserUseClient {
           return {} as T;
         }
 
-        return response.json();
+        return (await response.json()) as T;
       } catch (err) {
         clearTimeout(timeout);
-        if (err instanceof Error && err.name === 'AbortError') {
+        if (err instanceof Error && err.name === "AbortError") {
           if (attempt < retries) {
-            console.log(`[BrowserUseClient] Request timeout, retrying (${attempt}/${retries})...`);
+            console.log(
+              `[BrowserUseClient] Request timeout, retrying (${attempt}/${retries})...`,
+            );
             continue;
           }
           throw new Error(`Browser Use API timeout after ${retries} attempts`);
@@ -242,20 +258,25 @@ export class BrowserUseClient {
 
   async updateTask(
     taskId: string,
-    action: "stop" | "pause" | "resume" | "stop_task_and_session"
+    action: "stop" | "pause" | "resume" | "stop_task_and_session",
   ): Promise<TaskView> {
     return this.request<TaskView>("PATCH", `/tasks/${taskId}`, { action });
   }
 
   async getTaskLogs(taskId: string): Promise<{ downloadUrl: string }> {
-    return this.request<{ downloadUrl: string }>("GET", `/tasks/${taskId}/logs`);
+    return this.request<{ downloadUrl: string }>(
+      "GET",
+      `/tasks/${taskId}/logs`,
+    );
   }
 
   // ============================================================================
   // Sessions
   // ============================================================================
 
-  async createSession(request?: CreateSessionRequest): Promise<SessionItemView> {
+  async createSession(
+    request?: CreateSessionRequest,
+  ): Promise<SessionItemView> {
     return this.request<SessionItemView>("POST", "/sessions", request || {});
   }
 
@@ -269,7 +290,9 @@ export class BrowserUseClient {
     });
   }
 
-  async createPublicShare(sessionId: string): Promise<{ shareToken: string; shareUrl: string; viewCount: number }> {
+  async createPublicShare(
+    sessionId: string,
+  ): Promise<{ shareToken: string; shareUrl: string; viewCount: number }> {
     return this.request("POST", `/sessions/${sessionId}/public-share`);
   }
 
@@ -277,7 +300,9 @@ export class BrowserUseClient {
   // Browser Sessions (standalone browsers without agents)
   // ============================================================================
 
-  async createBrowserSession(request?: CreateBrowserSessionRequest): Promise<BrowserSessionView> {
+  async createBrowserSession(
+    request?: CreateBrowserSessionRequest,
+  ): Promise<BrowserSessionView> {
     return this.request<BrowserSessionView>("POST", "/browsers", request || {});
   }
 
@@ -317,18 +342,18 @@ export class BrowserUseClient {
 
   async getUploadUrl(
     sessionId: string,
-    request: UploadFileRequest
+    request: UploadFileRequest,
   ): Promise<UploadFilePresignedUrlResponse> {
     return this.request<UploadFilePresignedUrlResponse>(
       "POST",
       `/files/sessions/${sessionId}/presigned-url`,
-      request
+      request,
     );
   }
 
   async uploadFile(
     sessionId: string,
-    file: { name: string; type: string; buffer: Buffer }
+    file: { name: string; type: string; buffer: Buffer },
   ): Promise<string> {
     // Get presigned URL
     const presigned = await this.getUploadUrl(sessionId, {
@@ -342,7 +367,11 @@ export class BrowserUseClient {
     for (const [key, value] of Object.entries(presigned.fields)) {
       formData.append(key, value);
     }
-    formData.append("file", new Blob([file.buffer], { type: file.type }), file.name);
+    formData.append(
+      "file",
+      new Blob([file.buffer], { type: file.type }),
+      file.name,
+    );
 
     const uploadResponse = await fetch(presigned.url, {
       method: presigned.method,
@@ -358,7 +387,7 @@ export class BrowserUseClient {
 
   async getTaskOutputFile(
     taskId: string,
-    fileId: string
+    fileId: string,
   ): Promise<{ id: string; fileName: string; downloadUrl: string }> {
     return this.request("GET", `/files/tasks/${taskId}/output-files/${fileId}`);
   }

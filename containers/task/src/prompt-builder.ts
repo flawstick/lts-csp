@@ -45,12 +45,11 @@ interface BoardMeeting {
   agendaPoints?: string;
 }
 
-interface AttachedFile {
-  url: string;
-  name: string;
-  size: number;
-  type: string;
-  uploadedAt: string;
+interface SessionInputFile {
+  originalName: string;
+  sessionFileName: string;
+  category?: string;
+  role?: string;
 }
 
 interface PromptBuilderOptions {
@@ -59,13 +58,23 @@ interface PromptBuilderOptions {
   portalUrl: string;
   returnLink?: string;
   overrideSaved?: boolean;
+  financialStatementsFile?: SessionInputFile | null;
 }
 
 /**
  * Builds the main AI prompt for filling out the Guernsey Economic Substance Register
  */
-export function buildSubstanceFormPrompt(options: PromptBuilderOptions): string {
-  const { taxReturn, substanceForm, portalUrl, returnLink, overrideSaved } = options;
+export function buildSubstanceFormPrompt(
+  options: PromptBuilderOptions,
+): string {
+  const {
+    taxReturn,
+    substanceForm,
+    portalUrl,
+    returnLink,
+    overrideSaved,
+    financialStatementsFile,
+  } = options;
 
   const sections: string[] = [];
 
@@ -97,12 +106,27 @@ If prompted for CSP or secret credentials:
 **COMPLETION:** Double-check all fields before moving to the next section. Do not leave any fields empty - fill them with the data provided below or mark as N/A if truly not applicable.
 
 **IF STUCK:** If you cannot complete a field or encounter an error you cannot resolve, pause the task and report the issue for user intervention.
-${overrideSaved ? `
+${
+  financialStatementsFile
+    ? `
+
+## FINANCIAL STATEMENTS PDF
+- A financial statements PDF has already been uploaded to your Browser Use session.
+- Use the session file named "${financialStatementsFile.sessionFileName}" if the portal asks you to upload the financial statements or accounts PDF.
+- Original file name: "${financialStatementsFile.originalName}".
+`
+    : ""
+}
+${
+  overrideSaved
+    ? `
 ## OVERRIDE MODE ENABLED
 - Re-enter ALL fields even if they appear to be already filled in
 - Do not skip any fields because they look complete - overwrite everything with the values provided below
 - This is a full re-submission of all data
-` : ''}
+`
+    : ""
+}
 `);
 
   // Section 1: Background
@@ -154,7 +178,7 @@ ${overrideSaved ? `
     sections.push(`
 ## ⚠️ MISSING INFORMATION
 The following fields are missing data. When you encounter these fields, STOP and report "REQUIRES_ATTENTION" with the field name:
-${substanceForm.missingFields.map(f => `- ${f}`).join('\n')}
+${substanceForm.missingFields.map((f) => `- ${f}`).join("\n")}
 `);
   }
 
@@ -170,7 +194,7 @@ After filling all sections:
 6. If there are validation errors, report them exactly as shown
 `);
 
-  return sections.join('\n');
+  return sections.join("\n");
 }
 
 function buildBackgroundSection(form: SubstanceForm): string {
@@ -262,9 +286,12 @@ function buildEmployeesSection(form: SubstanceForm): string {
 
   let employeeList = "No employees listed";
   if (employees.length > 0) {
-    employeeList = employees.map((emp, i) =>
-      `  ${i + 1}. ${emp.name || "Unnamed"}: FTE=${emp.fteFraction ?? "N/A"}, Qualified FTE=${emp.qualifiedFteFraction ?? "N/A"}`
-    ).join('\n');
+    employeeList = employees
+      .map(
+        (emp, i) =>
+          `  ${i + 1}. ${emp.name || "Unnamed"}: FTE=${emp.fteFraction ?? "N/A"}, Qualified FTE=${emp.qualifiedFteFraction ?? "N/A"}`,
+      )
+      .join("\n");
   }
 
   return `
@@ -300,13 +327,13 @@ function buildBeneficialOwnershipSection(form: SubstanceForm): string {
 ## SECTION 10: BENEFICIAL OWNERSHIP
 
 ### Immediate Parents:
-${immediateParents.length > 0 ? immediateParents.map(formatParent).join('\n') : "None listed"}
+${immediateParents.length > 0 ? immediateParents.map(formatParent).join("\n") : "None listed"}
 
 ### Ultimate Parents:
-${ultimateParents.length > 0 ? ultimateParents.map(formatParent).join('\n') : "None listed"}
+${ultimateParents.length > 0 ? ultimateParents.map(formatParent).join("\n") : "None listed"}
 
 ### Ultimate Beneficial Owners:
-${ubos.length > 0 ? ubos.map(formatUbo).join('\n') : "None listed"}
+${ubos.length > 0 ? ubos.map(formatUbo).join("\n") : "None listed"}
 `;
 }
 
@@ -314,13 +341,24 @@ function buildDirectionManagementSection(form: SubstanceForm): string {
   const directors = (form.directors as Director[]) || [];
   const meetings = (form.boardMeetings as BoardMeeting[]) || [];
 
-  const directorList = directors.length > 0
-    ? directors.map((d, i) => `  ${i + 1}. ${d.name || "N/A"} (${d.initials || "N/A"})`).join('\n')
-    : "No directors listed";
+  const directorList =
+    directors.length > 0
+      ? directors
+          .map(
+            (d, i) => `  ${i + 1}. ${d.name || "N/A"} (${d.initials || "N/A"})`,
+          )
+          .join("\n")
+      : "No directors listed";
 
-  const meetingList = meetings.length > 0
-    ? meetings.map((m, i) => `  ${i + 1}. Date: ${m.date || "N/A"}, Attendees: ${m.attendees || "N/A"}, All in Guernsey: ${m.allPresentInGuernsey ? "Yes" : "No"}`).join('\n')
-    : "No meetings listed";
+  const meetingList =
+    meetings.length > 0
+      ? meetings
+          .map(
+            (m, i) =>
+              `  ${i + 1}. Date: ${m.date || "N/A"}, Attendees: ${m.attendees || "N/A"}, All in Guernsey: ${m.allPresentInGuernsey ? "Yes" : "No"}`,
+          )
+          .join("\n")
+      : "No meetings listed";
 
   return `
 ## SECTION 11: DIRECTED AND MANAGED IN GUERNSEY
@@ -398,7 +436,7 @@ Check the current status of task ${taskId}. Report:
  */
 export function buildRequiresAttentionPrompt(
   missingField: string,
-  currentPage: string
+  currentPage: string,
 ): string {
   return `
 REQUIRES_ATTENTION: Unable to proceed without the following information:

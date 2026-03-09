@@ -37,7 +37,7 @@ export function SidebarOrgSwitcher({
           size="lg"
           disabled
           aria-busy="true"
-          className="portal-card !bg-muted/40 rounded-xl transition-[padding,width] duration-200 ease-linear group-data-[collapsible=icon]:!size-9 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:justify-center"
+          className="portal-card !bg-muted/40 rounded-xl transition-[padding,width] duration-200 ease-linear group-data-[collapsible=icon]:!size-9 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:shadow-[0_0_0_2px_#edeff3,0_8px_16px_-14px_rgb(15_23_42/14%)] dark:group-data-[collapsible=icon]:shadow-[0_0_0_2px_rgba(255,255,255,0.08),0_8px_16px_-14px_rgb(0_0_0/32%)]"
         >
           <Skeleton className="h-6 w-6 shrink-0 rounded-md" />
           <div className="grid max-w-[10rem] flex-1 overflow-hidden text-left text-sm leading-tight transition-[max-width,opacity] duration-200 ease-linear group-data-[collapsible=icon]:hidden">
@@ -60,7 +60,7 @@ export function SidebarOrgSwitcher({
         <DropdownMenuTrigger asChild>
           <SidebarMenuButton
             size="lg"
-            className="portal-card !bg-muted/40 rounded-xl transition-[padding,width] duration-200 ease-linear data-[state=open]:!bg-muted/40 data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:!size-9 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:justify-center"
+            className="portal-card !bg-muted/40 rounded-xl transition-[padding,width] duration-200 ease-linear data-[state=open]:!bg-muted/40 data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:!size-9 group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:shadow-[0_0_0_2px_#edeff3,0_8px_16px_-14px_rgb(15_23_42/14%)] dark:group-data-[collapsible=icon]:shadow-[0_0_0_2px_rgba(255,255,255,0.08),0_8px_16px_-14px_rgb(0_0_0/32%)]"
           >
             <Avatar className="h-6 w-6 shrink-0 rounded-md">
               <AvatarImage src={activeOrg?.orgLogoUrl ?? undefined} alt={activeOrg?.orgName ?? "Organization"} />

@@ -43,10 +43,17 @@ export async function POST(request: Request) {
     }
 
     if (typeof orgId !== "string" || typeof taxReturnId !== "string") {
-      return NextResponse.json({ error: "Invalid upload context." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid upload context." },
+        { status: 400 },
+      );
     }
 
-    if (!ALLOWED_TYPES.some((type) => file.type.includes(type) || type.includes(file.type))) {
+    if (
+      !ALLOWED_TYPES.some(
+        (type) => file.type.includes(type) || type.includes(file.type),
+      )
+    ) {
       return NextResponse.json(
         { error: "Only PDF, Office, CSV, ZIP, and image files are allowed." },
         { status: 400 },
@@ -60,7 +67,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const safeCategory = typeof category === "string" && category.length > 0 ? category : "misc";
+    const safeCategory =
+      typeof category === "string" && category.length > 0 ? category : "misc";
     const pathname = `portal/${orgId}/${taxReturnId}/${safeCategory}/${Date.now()}-${sanitizeFilename(file.name)}`;
 
     const blob = await put(pathname, file, {
@@ -76,11 +84,15 @@ export async function POST(request: Request) {
         name: file.name,
         size: file.size,
         type: file.type || "application/octet-stream",
+        category: safeCategory,
       },
     });
   } catch (error) {
     return NextResponse.json(
-      { error: "Upload failed.", details: error instanceof Error ? error.message : "Unknown error" },
+      {
+        error: "Upload failed.",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     );
   }

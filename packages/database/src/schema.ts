@@ -111,6 +111,19 @@ export const invoiceStatusEnum = pgEnum("invoice_status", [
   "cancelled",
 ]);
 
+export const taxReturnFileCategories = [
+  "esr",
+  "financial",
+  "supporting",
+  "misc",
+] as const;
+
+export type TaxReturnFileCategory = (typeof taxReturnFileCategories)[number];
+
+export const taxReturnFileRoles = ["financial_statements"] as const;
+
+export type TaxReturnFileRole = (typeof taxReturnFileRoles)[number];
+
 // ============================================================================
 // ACCOUNTS - Extends Supabase auth.users
 // ============================================================================
@@ -128,12 +141,10 @@ export const accounts = createTable(
       .defaultNow()
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
+      () => new Date(),
     ),
   }),
-  (t) => [
-    uniqueIndex("lts_account_user_id_idx").on(t.userId),
-  ]
+  (t) => [uniqueIndex("lts_account_user_id_idx").on(t.userId)],
 );
 
 // ============================================================================
@@ -153,9 +164,7 @@ export const globalAdmins = createTable(
       .notNull(),
     createdBy: uuid("created_by").references(() => accounts.id),
   }),
-  (t) => [
-    uniqueIndex("lts_global_admin_account_idx").on(t.accountId),
-  ]
+  (t) => [uniqueIndex("lts_global_admin_account_idx").on(t.accountId)],
 );
 
 // ============================================================================
@@ -173,12 +182,10 @@ export const organisations = createTable(
       .defaultNow()
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
+      () => new Date(),
     ),
   }),
-  (t) => [
-    uniqueIndex("lts_organisation_slug_idx").on(t.slug),
-  ]
+  (t) => [uniqueIndex("lts_organisation_slug_idx").on(t.slug)],
 );
 
 // ============================================================================
@@ -197,12 +204,10 @@ export const jurisdictions = createTable(
       .defaultNow()
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
+      () => new Date(),
     ),
   }),
-  (t) => [
-    uniqueIndex("lts_jurisdiction_code_idx").on(t.code),
-  ]
+  (t) => [uniqueIndex("lts_jurisdiction_code_idx").on(t.code)],
 );
 
 // ============================================================================
@@ -224,12 +229,10 @@ export const orgSettings = createTable(
       .defaultNow()
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
+      () => new Date(),
     ),
   }),
-  (t) => [
-    uniqueIndex("lts_org_setting_org_idx").on(t.orgId),
-  ]
+  (t) => [uniqueIndex("lts_org_setting_org_idx").on(t.orgId)],
 );
 
 // ============================================================================
@@ -252,14 +255,17 @@ export const jurisdictionSettings = createTable(
       .defaultNow()
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
+      () => new Date(),
     ),
   }),
   (t) => [
     index("lts_jurisdiction_setting_jurisdiction_idx").on(t.jurisdictionId),
     index("lts_jurisdiction_setting_org_idx").on(t.orgId),
-    uniqueIndex("lts_jurisdiction_setting_unique_idx").on(t.jurisdictionId, t.orgId),
-  ]
+    uniqueIndex("lts_jurisdiction_setting_unique_idx").on(
+      t.jurisdictionId,
+      t.orgId,
+    ),
+  ],
 );
 
 // ============================================================================
@@ -292,7 +298,7 @@ export const pendingInvitations = createTable(
     index("lts_pending_invitation_email_idx").on(t.email),
     uniqueIndex("lts_pending_invitation_token_idx").on(t.token),
     index("lts_pending_invitation_org_idx").on(t.orgId),
-  ]
+  ],
 );
 
 // ============================================================================
@@ -317,15 +323,18 @@ export const portalMemberships = createTable(
       .defaultNow()
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
+      () => new Date(),
     ),
   }),
   (t) => [
-    uniqueIndex("lts_portal_membership_account_org_idx").on(t.accountId, t.orgId),
+    uniqueIndex("lts_portal_membership_account_org_idx").on(
+      t.accountId,
+      t.orgId,
+    ),
     index("lts_portal_membership_account_idx").on(t.accountId),
     index("lts_portal_membership_org_idx").on(t.orgId),
     index("lts_portal_membership_status_idx").on(t.status),
-  ]
+  ],
 );
 
 // ============================================================================
@@ -355,7 +364,7 @@ export const portalInvitations = createTable(
     uniqueIndex("lts_portal_invitation_token_idx").on(t.token),
     index("lts_portal_invitation_email_status_idx").on(t.email, t.status),
     index("lts_portal_invitation_org_idx").on(t.orgId),
-  ]
+  ],
 );
 
 // ============================================================================
@@ -385,14 +394,14 @@ export const invoices = createTable(
       .defaultNow()
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
+      () => new Date(),
     ),
   }),
   (t) => [
     index("lts_invoice_org_idx").on(t.orgId),
     index("lts_invoice_status_idx").on(t.status),
     uniqueIndex("lts_invoice_number_idx").on(t.invoiceNumber),
-  ]
+  ],
 );
 
 // ============================================================================
@@ -415,25 +424,29 @@ export const taxReturns = createTable(
     externalId: varchar("external_id", { length: 128 }), // For sync source
     link: text("link"), // Direct URL to the tax return page
     pdfUrl: text("pdf_url"), // Link to instruction PDF
-    files: jsonb("files").$type<Array<{
-      url: string;
-      name: string;
-      size: number;
-      type: string;
-      uploadedAt: string;
-    }>>(), // Attached files (Vercel Blob URLs)
+    files: jsonb("files").$type<
+      Array<{
+        url: string;
+        name: string;
+        size: number;
+        type: string;
+        uploadedAt: string;
+        category?: TaxReturnFileCategory;
+        role?: TaxReturnFileRole;
+      }>
+    >(), // Attached files (Vercel Blob URLs)
     metadata: jsonb().$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
+      () => new Date(),
     ),
   }),
   (t) => [
     index("lts_tax_return_org_idx").on(t.orgId),
     uniqueIndex("lts_tax_return_external_id_idx").on(t.externalId),
-  ]
+  ],
 );
 
 // ============================================================================
@@ -462,7 +475,7 @@ export const tasks = createTable(
       .defaultNow()
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
+      () => new Date(),
     ),
   }),
   (t) => [
@@ -471,7 +484,7 @@ export const tasks = createTable(
     index("lts_task_tax_return_idx").on(t.taxReturnId),
     index("lts_task_status_idx").on(t.status),
     index("lts_task_created_by_idx").on(t.createdBy),
-  ]
+  ],
 );
 
 // ============================================================================
@@ -501,14 +514,14 @@ export const jobs = createTable(
       .defaultNow()
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
+      () => new Date(),
     ),
   }),
   (t) => [
     index("lts_job_task_idx").on(t.taskId),
     index("lts_job_status_idx").on(t.status),
     uniqueIndex("lts_job_task_number_idx").on(t.taskId, t.jobNumber),
-  ]
+  ],
 );
 
 // ============================================================================
@@ -541,7 +554,7 @@ export const taxSyncJobs = createTable(
   (t) => [
     index("lts_tax_sync_job_org_idx").on(t.orgId),
     index("lts_tax_sync_job_status_idx").on(t.status),
-  ]
+  ],
 );
 
 // ============================================================================
@@ -575,8 +588,12 @@ export const substanceForms = createTable(
     principalPlaceOfBusiness: text("principal_place_of_business"),
 
     // Entity Structure
-    isIncorporatedInGuernsey: varchar("is_incorporated_guernsey", { length: 8 }), // Yes/No
-    economicClassificationCode: varchar("economic_classification_code", { length: 64 }), // Company Activity Code
+    isIncorporatedInGuernsey: varchar("is_incorporated_guernsey", {
+      length: 8,
+    }), // Yes/No
+    economicClassificationCode: varchar("economic_classification_code", {
+      length: 64,
+    }), // Company Activity Code
     certificateType: varchar("certificate_type", { length: 64 }), // Certificate 1, 2, or 3
     entityActivity: text("entity_activity"), // From Directors Report
 
@@ -589,9 +606,13 @@ export const substanceForms = createTable(
     // =========================================================================
     // SECTION 4: FINANCIAL STATEMENTS
     // =========================================================================
-    areFinancialStatementsConsolidated: varchar("fin_stmt_consolidated", { length: 8 }),
+    areFinancialStatementsConsolidated: varchar("fin_stmt_consolidated", {
+      length: 8,
+    }),
     accountsPreparerName: varchar("accounts_preparer_name", { length: 256 }),
-    accountsPreparerQualification: varchar("accounts_preparer_qual", { length: 128 }), // ACCA, ICAEW, etc.
+    accountsPreparerQualification: varchar("accounts_preparer_qual", {
+      length: 128,
+    }), // ACCA, ICAEW, etc.
     netBookValue: varchar("net_book_value", { length: 64 }), // From Balance Sheet
     totalProfit: varchar("total_profit", { length: 64 }), // From P&L Account
     profitAllocation: varchar("profit_allocation", { length: 16 }), // "Investment" | "Business"
@@ -607,7 +628,9 @@ export const substanceForms = createTable(
     // SECTION 6: RELEVANT ACTIVITIES
     // =========================================================================
     relevantActivity: varchar("relevant_activity", { length: 128 }), // Single dropdown selection
-    hasMultipleRelevantActivities: varchar("has_multiple_activities", { length: 8 }),
+    hasMultipleRelevantActivities: varchar("has_multiple_activities", {
+      length: 8,
+    }),
     hasIntellectualPropertyHolding: varchar("has_ip_holding", { length: 8 }), // Yes/No - Does entity have IP?
 
     // =========================================================================
@@ -623,7 +646,9 @@ export const substanceForms = createTable(
     // =========================================================================
     activityGrossIncome: varchar("activity_gross_income", { length: 64 }), // Gross income for relevant activity
     hasAdequateExpenditure: varchar("has_adequate_expenditure", { length: 8 }), // Yes/No/N/A
-    hasAdequatePhysicalPresence: varchar("has_adequate_physical_presence", { length: 8 }), // Yes/No/N/A
+    hasAdequatePhysicalPresence: varchar("has_adequate_physical_presence", {
+      length: 8,
+    }), // Yes/No/N/A
     adequacyExpenditureDetails: text("adequacy_expenditure_details"),
     adequacyPhysicalPresenceDetails: text("adequacy_physical_presence_details"),
 
@@ -636,14 +661,16 @@ export const substanceForms = createTable(
     // =========================================================================
     // SECTION 8: EMPLOYEES (FTE Calculation)
     // =========================================================================
-    employees: jsonb("employees").$type<Array<{
-      name?: string;
-      qualifiedForReporting?: boolean;
-      unitsOnCompany?: number;
-      totalUnits?: number;
-      fteFraction?: number;
-      qualifiedFteFraction?: number;
-    }>>(),
+    employees: jsonb("employees").$type<
+      Array<{
+        name?: string;
+        qualifiedForReporting?: boolean;
+        unitsOnCompany?: number;
+        totalUnits?: number;
+        fteFraction?: number;
+        qualifiedFteFraction?: number;
+      }>
+    >(),
     totalFte: real("total_fte"),
     totalQualifiedFte: real("total_qualified_fte"),
 
@@ -656,30 +683,36 @@ export const substanceForms = createTable(
     // =========================================================================
     // SECTION 10: BENEFICIAL OWNERSHIP
     // =========================================================================
-    immediateParents: jsonb("immediate_parents").$type<Array<{
-      name?: string;
-      countryOfTaxResidence?: string;
-      tin?: string;
-      tinCountry?: string;
-      registeredAddress?: string;
-    }>>(),
-    ultimateParents: jsonb("ultimate_parents").$type<Array<{
-      name?: string;
-      countryOfTaxResidence?: string;
-      tin?: string;
-      tinCountry?: string;
-      registeredAddress?: string;
-    }>>(),
-    ultimateBeneficialOwners: jsonb("ubos").$type<Array<{
-      name?: string;
-      dateOfBirth?: string;
-      placeOfBirth?: string;
-      nationality?: string;
-      countryOfTaxResidence?: string;
-      tin?: string;
-      tinCountry?: string;
-      address?: string;
-    }>>(),
+    immediateParents: jsonb("immediate_parents").$type<
+      Array<{
+        name?: string;
+        countryOfTaxResidence?: string;
+        tin?: string;
+        tinCountry?: string;
+        registeredAddress?: string;
+      }>
+    >(),
+    ultimateParents: jsonb("ultimate_parents").$type<
+      Array<{
+        name?: string;
+        countryOfTaxResidence?: string;
+        tin?: string;
+        tinCountry?: string;
+        registeredAddress?: string;
+      }>
+    >(),
+    ultimateBeneficialOwners: jsonb("ubos").$type<
+      Array<{
+        name?: string;
+        dateOfBirth?: string;
+        placeOfBirth?: string;
+        nationality?: string;
+        countryOfTaxResidence?: string;
+        tin?: string;
+        tinCountry?: string;
+        address?: string;
+      }>
+    >(),
 
     // =========================================================================
     // SECTION 11: DIRECTED AND MANAGED IN GUERNSEY
@@ -690,19 +723,27 @@ export const substanceForms = createTable(
     adequateMeetingFrequency: varchar("adequate_meeting_freq", { length: 8 }),
     enoughDirectorsPresent: varchar("enough_directors_present", { length: 8 }),
     directorsHaveExpertise: varchar("directors_have_expertise", { length: 8 }),
-    strategicDecisionsMadeInGuernsey: varchar("strategic_decisions_gsy", { length: 8 }),
-    recordsMaintainedInGuernsey: varchar("records_maintained_gsy", { length: 8 }),
+    strategicDecisionsMadeInGuernsey: varchar("strategic_decisions_gsy", {
+      length: 8,
+    }),
+    recordsMaintainedInGuernsey: varchar("records_maintained_gsy", {
+      length: 8,
+    }),
     boardMeetingLocation: varchar("board_meeting_location", { length: 256 }),
-    directors: jsonb("directors").$type<Array<{
-      name?: string;
-      initials?: string;
-    }>>(),
-    boardMeetings: jsonb("board_meetings").$type<Array<{
-      date?: string;
-      attendees?: string;
-      allPresentInGuernsey?: boolean;
-      agendaPoints?: string;
-    }>>(),
+    directors: jsonb("directors").$type<
+      Array<{
+        name?: string;
+        initials?: string;
+      }>
+    >(),
+    boardMeetings: jsonb("board_meetings").$type<
+      Array<{
+        date?: string;
+        attendees?: string;
+        allPresentInGuernsey?: boolean;
+        agendaPoints?: string;
+      }>
+    >(),
 
     // =========================================================================
     // SECTION 12: DECLARATION
@@ -739,13 +780,13 @@ export const substanceForms = createTable(
       .defaultNow()
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
-      () => new Date()
+      () => new Date(),
     ),
   }),
   (t) => [
     uniqueIndex("lts_substance_form_tax_return_idx").on(t.taxReturnId),
     index("lts_substance_form_complete_idx").on(t.isComplete),
-  ]
+  ],
 );
 
 // ============================================================================
@@ -781,19 +822,22 @@ export const globalAdminsRelations = relations(globalAdmins, ({ one }) => ({
   }),
 }));
 
-export const organisationsRelations = relations(organisations, ({ one, many }) => ({
-  settings: one(orgSettings, {
-    fields: [organisations.id],
-    references: [orgSettings.orgId],
+export const organisationsRelations = relations(
+  organisations,
+  ({ one, many }) => ({
+    settings: one(orgSettings, {
+      fields: [organisations.id],
+      references: [orgSettings.orgId],
+    }),
+    tasks: many(tasks),
+    taxReturns: many(taxReturns),
+    jurisdictionSettings: many(jurisdictionSettings),
+    portalMemberships: many(portalMemberships),
+    portalInvitations: many(portalInvitations),
+    invoices: many(invoices),
+    taxSyncJobs: many(taxSyncJobs),
   }),
-  tasks: many(tasks),
-  taxReturns: many(taxReturns),
-  jurisdictionSettings: many(jurisdictionSettings),
-  portalMemberships: many(portalMemberships),
-  portalInvitations: many(portalInvitations),
-  invoices: many(invoices),
-  taxSyncJobs: many(taxSyncJobs),
-}));
+);
 
 export const jurisdictionsRelations = relations(jurisdictions, ({ many }) => ({
   settings: many(jurisdictionSettings),
@@ -819,7 +863,7 @@ export const jurisdictionSettingsRelations = relations(
       fields: [jurisdictionSettings.orgId],
       references: [organisations.id],
     }),
-  })
+  }),
 );
 
 // NOTE: orgMembersRelations and orgMemberPermissionsRelations removed
@@ -836,36 +880,42 @@ export const pendingInvitationsRelations = relations(
       fields: [pendingInvitations.invitedBy],
       references: [accounts.id],
     }),
-  })
+  }),
 );
 
-export const portalMembershipsRelations = relations(portalMemberships, ({ one }) => ({
-  account: one(accounts, {
-    relationName: "portal_membership_account",
-    fields: [portalMemberships.accountId],
-    references: [accounts.id],
+export const portalMembershipsRelations = relations(
+  portalMemberships,
+  ({ one }) => ({
+    account: one(accounts, {
+      relationName: "portal_membership_account",
+      fields: [portalMemberships.accountId],
+      references: [accounts.id],
+    }),
+    organisation: one(organisations, {
+      fields: [portalMemberships.orgId],
+      references: [organisations.id],
+    }),
+    invitedByAccount: one(accounts, {
+      relationName: "portal_membership_invited_by",
+      fields: [portalMemberships.invitedBy],
+      references: [accounts.id],
+    }),
   }),
-  organisation: one(organisations, {
-    fields: [portalMemberships.orgId],
-    references: [organisations.id],
-  }),
-  invitedByAccount: one(accounts, {
-    relationName: "portal_membership_invited_by",
-    fields: [portalMemberships.invitedBy],
-    references: [accounts.id],
-  }),
-}));
+);
 
-export const portalInvitationsRelations = relations(portalInvitations, ({ one }) => ({
-  organisation: one(organisations, {
-    fields: [portalInvitations.orgId],
-    references: [organisations.id],
+export const portalInvitationsRelations = relations(
+  portalInvitations,
+  ({ one }) => ({
+    organisation: one(organisations, {
+      fields: [portalInvitations.orgId],
+      references: [organisations.id],
+    }),
+    invitedByAccount: one(accounts, {
+      fields: [portalInvitations.invitedBy],
+      references: [accounts.id],
+    }),
   }),
-  invitedByAccount: one(accounts, {
-    fields: [portalInvitations.invitedBy],
-    references: [accounts.id],
-  }),
-}));
+);
 
 export const invoicesRelations = relations(invoices, ({ one }) => ({
   organisation: one(organisations, {

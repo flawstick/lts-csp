@@ -37,6 +37,17 @@ export const parentEntitySchema = z.object({
   registeredAddress: z.string().optional(),
 });
 
+// Outsourcer (structured - matches MS Form)
+export const outsourcerSchema = z.object({
+  name: z.string().optional(),
+  fteProvided: z.number().optional(),
+  totalExpense: z.string().optional(),
+  companyRegistrationNumber: z.string().optional(),
+  isExclusivelyGuernsey: yesNoEnum.optional(),
+  country: z.string().optional(),
+  hasAdequateSupervision: yesNoEnum.optional(),
+});
+
 // Ultimate Beneficial Owner (individual)
 export const uboSchema = z.object({
   name: z.string().optional(),
@@ -100,12 +111,18 @@ export const substanceFormSchema = z.object({
   economicClassificationCode: z.string().optional(), // Company Activity Code
   certificateType: z.string().optional(), // Certificate 1, 2, or 3
   entityActivity: z.string().optional(), // From Directors Report
+  isGuernseyTaxResident: yesNoEnum.optional(),
+  hasRegisteredWithGrs: yesNoEnum.optional(),
+  beneficialMemberCategories: z.array(z.string()).optional(), // Tick-box categories
 
   // =========================================================================
   // SECTION 3: PARTNERSHIP INFORMATION (if applicable)
   // =========================================================================
   partnershipName: z.string().optional(),
   partnershipNumber: z.string().optional(),
+  isSolelyGuernseyPartners: yesNoEnum.optional(),
+  partnershipActivitiesWhollyInGuernsey: yesNoEnum.optional(),
+  partnershipPoeMOutsideGuernsey: yesNoEnum.optional(),
 
   // =========================================================================
   // SECTION 4: FINANCIAL STATEMENTS
@@ -120,13 +137,18 @@ export const substanceFormSchema = z.object({
   // SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
   // =========================================================================
   isGuernseyFiFatca: yesNoEnum.optional(), // Is Guernsey Financial Institution under FATCA?
+  isRegisteredWithIgor: yesNoEnum.optional(), // IGOR - Information Gateway Online Reporter
+  igorNotRegisteredReason: z.string().optional(),
   isGuernseyFiCrs: yesNoEnum.optional(), // Is Financial Institution under CRS?
 
   // =========================================================================
   // SECTION 6: RELEVANT ACTIVITIES
   // =========================================================================
   relevantActivity: relevantActivityEnum.optional(),
+  cigaCheckboxes: z.array(z.string()).optional(), // CIGA tick-boxes for the relevant activity
   hasMultipleRelevantActivities: yesNoEnum.optional(),
+  secondRelevantActivity: relevantActivityEnum.optional(),
+  secondCigaCheckboxes: z.array(z.string()).optional(),
   hasIntellectualPropertyHolding: yesNoEnum.optional(), // Does entity have IP?
 
   // =========================================================================
@@ -157,16 +179,20 @@ export const substanceFormSchema = z.object({
   employees: z.array(employeeFteSchema).optional(),
   totalFte: z.number().optional(),
   totalQualifiedFte: z.number().optional(),
+  hasAdequateEmployees: yesNoNaEnum.optional(),
 
   // =========================================================================
   // SECTION 9: OUTSOURCING
   // =========================================================================
   hasCigaOutsourcing: yesNoNaEnum.optional(),
   outsourcingDetails: z.string().optional(),
+  outsourcerCount: z.number().optional(),
+  outsourcers: z.array(outsourcerSchema).optional(),
 
   // =========================================================================
   // SECTION 10: BENEFICIAL OWNERSHIP
   // =========================================================================
+  hasFailedEconomicSubstance: yesNoEnum.optional(),
   immediateParents: z.array(parentEntitySchema).optional(),
   ultimateParents: z.array(parentEntitySchema).optional(),
   ultimateBeneficialOwners: z.array(uboSchema).optional(),
@@ -200,6 +226,14 @@ export const substanceFormSchema = z.object({
   // SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)
   // =========================================================================
   isConstituentEntity: yesNoEnum.optional(),
+  mneReportingEntityName: z.string().optional(),
+  mneReportingEntityCountry: z.string().optional(),
+  mneAccountingPeriodStart: z.string().optional(),
+  mneAccountingPeriodEnd: z.string().optional(),
+  isPillar2InScope: yesNoEnum.optional(),
+  upeName: z.string().optional(),
+  upeLocation: z.string().optional(),
+  expectConstituentEntityNextPeriod: yesNoEnum.optional(),
 
   // =========================================================================
   // SECTION 14: ADDITIONAL INFORMATION
@@ -207,8 +241,10 @@ export const substanceFormSchema = z.object({
   hasPostBalanceSheetEvent: yesNoEnum.optional(),
   postBalanceSheetEventDetails: z.string().optional(),
   hasC42Association: yesNoEnum.optional(), // Statement of Practice C42
+  c42SubmissionDate: z.string().optional(),
   c42AssociatedCompanies: z.string().optional(),
   contractInformation: z.string().optional(), // CSP standard contract info
+  additionalInformation: z.string().optional(), // "Would you like to add any further information?"
 });
 
 export type SubstanceFormData = z.infer<typeof substanceFormSchema>;
@@ -278,13 +314,19 @@ export const FIELD_LABELS: Record<string, string> = {
   registeredAddress: "Registered Address",
   principalPlaceOfBusiness: "Principal Place of Business",
   isIncorporatedInGuernsey: "Is Entity Incorporated in Guernsey?",
-  economicClassificationCode: "Economic Classification Code",
+  economicClassificationCode: "Company Activity Code",
   certificateType: "Certificate Type",
   entityActivity: "Entity Activity",
+  isGuernseyTaxResident: "Is the Company Guernsey Tax Resident?",
+  hasRegisteredWithGrs: "Has Registered with the GRS?",
+  beneficialMemberCategories: "Beneficial Member Categories",
 
   // Partnership Information
   partnershipName: "Partnership Name",
   partnershipNumber: "Partnership Number",
+  isSolelyGuernseyPartners: "Solely Guernsey Individual Partners?",
+  partnershipActivitiesWhollyInGuernsey: "Activities Wholly in Guernsey?",
+  partnershipPoeMOutsideGuernsey: "Place of Effective Management Outside Guernsey?",
 
   // Financial Statements
   areFinancialStatementsConsolidated: "Are Financial Statements Consolidated?",
@@ -295,11 +337,16 @@ export const FIELD_LABELS: Record<string, string> = {
 
   // Financial Institutions
   isGuernseyFiFatca: "Is Guernsey FI under FATCA?",
+  isRegisteredWithIgor: "Is Registered with IGOR?",
+  igorNotRegisteredReason: "Reason Not Registered with IGOR",
   isGuernseyFiCrs: "Is Guernsey FI under CRS?",
 
   // Relevant Activities
   relevantActivity: "Relevant Activity",
+  cigaCheckboxes: "CIGA Performed (Checkboxes)",
   hasMultipleRelevantActivities: "Has Multiple Relevant Activities?",
+  secondRelevantActivity: "Second Relevant Activity",
+  secondCigaCheckboxes: "Second Activity CIGA (Checkboxes)",
   hasIntellectualPropertyHolding: "Does Entity Have IP Holding?",
 
   // Intellectual Property
@@ -322,12 +369,16 @@ export const FIELD_LABELS: Record<string, string> = {
   employees: "Employees (FTE)",
   totalFte: "Total FTE",
   totalQualifiedFte: "Total Qualified FTE",
+  hasAdequateEmployees: "Adequate Number of Employees?",
 
   // Outsourcing
   hasCigaOutsourcing: "Any CIGA Outsourcing?",
   outsourcingDetails: "Outsourcing Details",
+  outsourcerCount: "Number of Outsourcers",
+  outsourcers: "Outsourcers",
 
   // Beneficial Ownership
+  hasFailedEconomicSubstance: "Failed Economic Substance Declaration?",
   immediateParents: "Immediate Parents",
   ultimateParents: "Ultimate Parents",
   ultimateBeneficialOwners: "Ultimate Beneficial Owners",
@@ -353,13 +404,23 @@ export const FIELD_LABELS: Record<string, string> = {
 
   // Country by Country Reporting
   isConstituentEntity: "Is Constituent Entity (CbCR)?",
+  mneReportingEntityName: "MNE Reporting Entity Name",
+  mneReportingEntityCountry: "MNE Reporting Entity Country",
+  mneAccountingPeriodStart: "MNE Accounting Period Start",
+  mneAccountingPeriodEnd: "MNE Accounting Period End",
+  isPillar2InScope: "In-scope of Pillar 2 Global Minimum Tax?",
+  upeName: "Ultimate Parent Entity (UPE) Name",
+  upeLocation: "Ultimate Parent Entity (UPE) Location",
+  expectConstituentEntityNextPeriod: "Expected Constituent Entity Next Period?",
 
   // Additional Information
   hasPostBalanceSheetEvent: "Has Post Balance Sheet Event?",
   postBalanceSheetEventDetails: "Post Balance Sheet Event Details",
-  hasC42Association: "Has C42 Association?",
+  hasC42Association: "Has C42 Application?",
+  c42SubmissionDate: "C42 Application Submission Date",
   c42AssociatedCompanies: "C42 Associated Companies",
   contractInformation: "Contract Information (CSP)",
+  additionalInformation: "Additional Information",
 };
 
 // ============================================================================
@@ -367,44 +428,50 @@ export const FIELD_LABELS: Record<string, string> = {
 // ============================================================================
 
 export const FORM_SECTIONS = [
+  // ── General Information ──────────────────────────────────────────────
   {
-    id: "background",
-    title: "Background",
-    description: "Basic entity information and accounting period",
+    id: "generalInfo",
+    title: "General Information",
+    description: "Entity name, accounting period, and entity type",
     fields: [
       "entityName",
-      "entityType",
       "accountingPeriodStart",
       "accountingPeriodEnd",
       "isCollectiveInvestmentVehicle",
+      "entityType",
     ],
   },
   {
-    id: "company",
+    id: "companyInfo",
     title: "Company Information",
-    description: "Company registration, address details, and entity structure",
+    description: "Company activity code, tax residency, and GRS registration",
     fields: [
-      "companyNumber",
-      "taxReferenceNumber",
-      "registeredAddress",
-      "principalPlaceOfBusiness",
-      "isIncorporatedInGuernsey",
       "economicClassificationCode",
-      "certificateType",
-      "entityActivity",
+      "isGuernseyTaxResident",
+      "hasRegisteredWithGrs",
+      "taxReferenceNumber",
+      "beneficialMemberCategories",
     ],
+    conditional: (data: Partial<SubstanceFormData>) => data.entityType === "Company",
   },
   {
-    id: "partnership",
+    id: "partnershipInfo",
     title: "Partnership Information",
-    description: "Required if entity is a partnership",
-    fields: ["partnershipName", "partnershipNumber"],
+    description: "Partnership registration and Guernsey status",
+    fields: [
+      "partnershipName",
+      "partnershipNumber",
+      "hasRegisteredWithGrs",
+      "isSolelyGuernseyPartners",
+      "partnershipActivitiesWhollyInGuernsey",
+      "partnershipPoeMOutsideGuernsey",
+    ],
     conditional: (data: Partial<SubstanceFormData>) => data.entityType === "Partnership",
   },
   {
     id: "financialStatements",
     title: "Financial Statements",
-    description: "Details about the entity's financial statements and key figures",
+    description: "Consolidation, preparer details, and key financial figures",
     fields: [
       "areFinancialStatementsConsolidated",
       "accountsPreparerName",
@@ -416,57 +483,113 @@ export const FORM_SECTIONS = [
   {
     id: "financialInstitutions",
     title: "Financial Institutions (FATCA/CRS)",
-    description: "Financial institution status for tax reporting",
-    fields: ["isGuernseyFiFatca", "isGuernseyFiCrs"],
+    description: "FATCA, IGOR, and CRS registration status",
+    fields: [
+      "isGuernseyFiFatca",
+      "isRegisteredWithIgor",
+      "igorNotRegisteredReason",
+      "isGuernseyFiCrs",
+    ],
   },
   {
-    id: "relevantActivities",
-    title: "Relevant Activities",
-    description: "Income-generating activities performed by the entity",
-    fields: ["relevantActivity", "hasMultipleRelevantActivities", "hasIntellectualPropertyHolding"],
+    id: "cbcr",
+    title: "Country by Country Reporting",
+    description: "Constituent entity status, MNE details, and Pillar 2",
+    fields: [
+      "isConstituentEntity",
+      "mneReportingEntityName",
+      "mneReportingEntityCountry",
+      "mneAccountingPeriodStart",
+      "mneAccountingPeriodEnd",
+      "isPillar2InScope",
+      "upeName",
+      "upeLocation",
+      "expectConstituentEntityNextPeriod",
+    ],
+  },
+  {
+    id: "c42",
+    title: "Statement of Practice C42",
+    description: "C42 application status",
+    fields: [
+      "hasC42Association",
+      "c42SubmissionDate",
+      "c42AssociatedCompanies",
+    ],
+  },
+
+  // ── Economic Substance ───────────────────────────────────────────────
+  {
+    id: "economicSubstance",
+    title: "Economic Substance",
+    description: "Relevant activities and core income generating activities (CIGA)",
+    fields: [
+      "relevantActivity",
+      "cigaCheckboxes",
+      "cigaPerformed",
+      "cigaDetails",
+    ],
+  },
+  {
+    id: "substanceRequirements",
+    title: "Economic Substance Requirements",
+    description: "FTE employees, physical presence, and outsourcing",
+    fields: [
+      "totalFte",
+      "totalQualifiedFte",
+      "employees",
+      "hasAdequateEmployees",
+      "hasAdequatePhysicalPresence",
+      "hasAdequateExpenditure",
+      "hasCigaOutsourcing",
+      "outsourcerCount",
+      "outsourcers",
+      "outsourcingDetails",
+    ],
+  },
+  {
+    id: "economicSubstance2",
+    title: "Economic Substance 2",
+    description: "Additional relevant activity if income from more than one",
+    fields: [
+      "hasMultipleRelevantActivities",
+      "secondRelevantActivity",
+      "secondCigaCheckboxes",
+    ],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
   },
   {
     id: "intellectualProperty",
     title: "Intellectual Property",
     description: "IP holding company details and high-risk status",
-    fields: ["isHighRiskIpEntity", "wantsToRebutHighRiskStatus", "highRiskRebuttalNarrative", "ipIncomeType"],
+    fields: [
+      "hasIntellectualPropertyHolding",
+      "isHighRiskIpEntity",
+      "wantsToRebutHighRiskStatus",
+      "highRiskRebuttalNarrative",
+      "ipIncomeType",
+    ],
     conditional: (data: Partial<SubstanceFormData>) =>
       data.relevantActivity === "Intellectual Property Holding Company" || data.hasIntellectualPropertyHolding === "Yes",
   },
-  {
-    id: "adequacy",
-    title: "Adequacy Assessment",
-    description: "Assessment of adequate substance (expenditure and physical presence)",
-    fields: ["hasAdequateExpenditure", "hasAdequatePhysicalPresence", "adequacyExpenditureDetails", "adequacyPhysicalPresenceDetails"],
-  },
-  {
-    id: "ciga",
-    title: "Core Income Generating Activities (CIGA)",
-    description: "Details of CIGA performed for the relevant activity",
-    fields: ["cigaPerformed", "cigaDetails"],
-  },
-  {
-    id: "employees",
-    title: "Employees (FTE Calculation)",
-    description: "Full-time equivalent employee calculations",
-    fields: ["employees", "totalFte", "totalQualifiedFte"],
-  },
-  {
-    id: "outsourcing",
-    title: "Outsourcing",
-    description: "Details of any outsourced CIGA",
-    fields: ["hasCigaOutsourcing", "outsourcingDetails"],
-  },
+
+  // ── Ownership & Governance ───────────────────────────────────────────
   {
     id: "beneficialOwnership",
     title: "Beneficial Ownership",
     description: "Parent entities and ultimate beneficial owners",
-    fields: ["immediateParents", "ultimateParents", "ultimateBeneficialOwners"],
+    fields: [
+      "hasFailedEconomicSubstance",
+      "immediateParents",
+      "ultimateParents",
+      "ultimateBeneficialOwners",
+    ],
   },
   {
     id: "directedManaged",
     title: "Directed and Managed in Guernsey",
-    description: "Board meetings and decision-making in Guernsey",
+    description: "Board meetings, directors, and decision-making in Guernsey",
     fields: [
       "allBoardMeetingsInGuernsey",
       "totalBoardMeetings",
@@ -481,23 +604,21 @@ export const FORM_SECTIONS = [
       "boardMeetings",
     ],
   },
+
+  // ── Finalising ───────────────────────────────────────────────────────
   {
-    id: "declaration",
-    title: "Declaration",
-    description: "Sign-off by preparer and manager",
-    fields: ["preparedBy", "preparedDate", "managerSignOff", "managerSignOffDate"],
-  },
-  {
-    id: "countryByCountry",
-    title: "Country by Country Reporting",
-    description: "CbCR constituent entity status",
-    fields: ["isConstituentEntity"],
-  },
-  {
-    id: "additionalInformation",
-    title: "Additional Information",
-    description: "Post balance sheet events, C42 associations, and contract info",
-    fields: ["hasPostBalanceSheetEvent", "postBalanceSheetEventDetails", "hasC42Association", "c42AssociatedCompanies", "contractInformation"],
+    id: "finalising",
+    title: "Finalising the Return",
+    description: "Additional information, declaration, and sign-off",
+    fields: [
+      "additionalInformation",
+      "hasPostBalanceSheetEvent",
+      "postBalanceSheetEventDetails",
+      "preparedBy",
+      "preparedDate",
+      "managerSignOff",
+      "managerSignOffDate",
+    ],
   },
 ] as const;
 

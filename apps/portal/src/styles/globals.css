@@ -141,13 +141,13 @@
     @apply relative border border-border bg-card text-card-foreground;
     border-radius: var(--radius-xl);
     box-shadow:
-      0 0 0 4px #edeff3,
+      0 0 0 4px oklch(0.922 0 0),
       0 12px 24px -18px rgb(15 23 42 / 18%);
   }
 
   .dark .portal-card {
     box-shadow:
-      0 0 0 4px #171a20,
+      0 0 0 4px oklch(1 0 0 / 10%),
       0 12px 24px -18px rgb(0 0 0 / 42%);
   }
 }

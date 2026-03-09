@@ -14,6 +14,8 @@ import {
   substanceForms,
   tasks,
   taxReturns,
+  taxReturnFileCategories,
+  taxReturnFileRoles,
 } from "@repo/database";
 import {
   CIGA_BY_ACTIVITY,
@@ -29,6 +31,8 @@ const portalFileSchema = z.object({
   name: z.string().min(1),
   size: z.number().int().nonnegative(),
   type: z.string().min(1),
+  category: z.enum(taxReturnFileCategories).optional(),
+  role: z.enum(taxReturnFileRoles).optional(),
 });
 
 const aiExtractionSchema = z.object({
@@ -226,10 +230,7 @@ function parseRecentReturnMetadata(user: User, orgId: string): string[] {
   return ordered;
 }
 
-async function ensurePortalAccount(ctx: {
-  db: TRPCContext["db"];
-  user: User;
-}) {
+async function ensurePortalAccount(ctx: { db: TRPCContext["db"]; user: User }) {
   let account = await ctx.db.query.accounts.findFirst({
     where: eq(accounts.userId, ctx.user.id),
   });
@@ -313,7 +314,12 @@ export const portalReturnsRouter = createTRPCRouter({
         })
         .from(portalMemberships)
         .innerJoin(organisations, eq(portalMemberships.orgId, organisations.id))
-        .where(and(eq(portalMemberships.accountId, account.id), eq(portalMemberships.status, "active")));
+        .where(
+          and(
+            eq(portalMemberships.accountId, account.id),
+            eq(portalMemberships.status, "active"),
+          ),
+        );
 
       if (!memberships.length) {
         return {
@@ -343,11 +349,17 @@ export const portalReturnsRouter = createTRPCRouter({
           jurisdictionName: jurisdictions.name,
         })
         .from(taxReturns)
-        .innerJoin(jurisdictions, eq(taxReturns.jurisdictionId, jurisdictions.id))
+        .innerJoin(
+          jurisdictions,
+          eq(taxReturns.jurisdictionId, jurisdictions.id),
+        )
         .where(eq(taxReturns.orgId, selectedOrg.orgId))
         .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt));
 
-      const recentReturnIds = parseRecentReturnMetadata(ctx.user, selectedOrg.orgId);
+      const recentReturnIds = parseRecentReturnMetadata(
+        ctx.user,
+        selectedOrg.orgId,
+      );
 
       const grouped = new Map<
         string,
@@ -381,7 +393,9 @@ export const portalReturnsRouter = createTRPCRouter({
             .filter((row): row is NonNullable<typeof row> => !!row);
 
           const selectedIds = new Set(recentRows.map((row) => row.id));
-          const latestRows = jurisdictionGroup.rows.filter((row) => !selectedIds.has(row.id));
+          const latestRows = jurisdictionGroup.rows.filter(
+            (row) => !selectedIds.has(row.id),
+          );
           const pinned = [...recentRows, ...latestRows].slice(0, 3);
 
           return {
@@ -414,7 +428,12 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: portalMemberships.orgId,
       })
       .from(portalMemberships)
-      .where(and(eq(portalMemberships.accountId, account.id), eq(portalMemberships.status, "active")));
+      .where(
+        and(
+          eq(portalMemberships.accountId, account.id),
+          eq(portalMemberships.status, "active"),
+        ),
+      );
 
     if (memberships.length === 0) {
       return [];
@@ -459,7 +478,12 @@ export const portalReturnsRouter = createTRPCRouter({
           orgId: portalMemberships.orgId,
         })
         .from(portalMemberships)
-        .where(and(eq(portalMemberships.accountId, account.id), eq(portalMemberships.status, "active")));
+        .where(
+          and(
+            eq(portalMemberships.accountId, account.id),
+            eq(portalMemberships.status, "active"),
+          ),
+        );
 
       if (memberships.length === 0) {
         return [];
@@ -483,7 +507,10 @@ export const portalReturnsRouter = createTRPCRouter({
         })
         .from(taxReturns)
         .innerJoin(organisations, eq(taxReturns.orgId, organisations.id))
-        .innerJoin(jurisdictions, eq(taxReturns.jurisdictionId, jurisdictions.id))
+        .innerJoin(
+          jurisdictions,
+          eq(taxReturns.jurisdictionId, jurisdictions.id),
+        )
         .where(
           and(
             inArray(taxReturns.orgId, orgIds),
@@ -506,7 +533,11 @@ export const portalReturnsRouter = createTRPCRouter({
     .input(z.object({ orgId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const account = await ensurePortalAccount(ctx);
-      await assertActiveMembership({ db: ctx.db, accountId: account.id, orgId: input.orgId });
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
 
       const rows = await ctx.db
         .select({
@@ -528,7 +559,10 @@ export const portalReturnsRouter = createTRPCRouter({
           missingSubstanceFields: substanceForms.missingFields,
         })
         .from(taxReturns)
-        .innerJoin(jurisdictions, eq(taxReturns.jurisdictionId, jurisdictions.id))
+        .innerJoin(
+          jurisdictions,
+          eq(taxReturns.jurisdictionId, jurisdictions.id),
+        )
         .leftJoin(substanceForms, eq(substanceForms.taxReturnId, taxReturns.id))
         .where(eq(taxReturns.orgId, input.orgId))
         .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt));
@@ -545,14 +579,24 @@ export const portalReturnsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const account = await ensurePortalAccount(ctx);
-      await assertActiveMembership({ db: ctx.db, accountId: account.id, orgId: input.orgId });
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
 
       const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, input.orgId)),
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
       });
 
       if (!returnRecord) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
       }
 
       const form = await ctx.db.query.substanceForms.findFirst({
@@ -571,14 +615,24 @@ export const portalReturnsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const account = await ensurePortalAccount(ctx);
-      await assertActiveMembership({ db: ctx.db, accountId: account.id, orgId: input.orgId });
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
 
       const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, input.orgId)),
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
       });
 
       if (!returnRecord) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
       }
 
       const existing = await ctx.db.query.substanceForms.findFirst({
@@ -611,18 +665,29 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: z.string().uuid(),
         taxReturnId: z.string().uuid(),
         data: substanceFormSchema.partial(),
+        clearForm: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const account = await ensurePortalAccount(ctx);
-      await assertActiveMembership({ db: ctx.db, accountId: account.id, orgId: input.orgId });
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
 
       const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, input.orgId)),
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
       });
 
       if (!returnRecord) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
       }
 
       const existing = await ctx.db.query.substanceForms.findFirst({
@@ -636,13 +701,21 @@ export const portalReturnsRouter = createTRPCRouter({
         });
       }
 
-      const merged = { ...existing, ...input.data } as SubstanceFormData;
+      const updateData = input.clearForm
+        ? Object.fromEntries(
+            Object.keys(substanceFormSchema.shape).map((key) => [key, null]),
+          )
+        : input.data;
+
+      const merged = input.clearForm
+        ? ({} as SubstanceFormData)
+        : ({ ...existing, ...input.data } as SubstanceFormData);
       const missingFields = getMissingFields(merged);
 
       const [updated] = await ctx.db
         .update(substanceForms)
         .set({
-          ...input.data,
+          ...updateData,
           missingFields,
           isComplete: missingFields.length === 0,
           lastEditedAt: new Date(),
@@ -664,20 +737,40 @@ export const portalReturnsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const account = await ensurePortalAccount(ctx);
-      await assertActiveMembership({ db: ctx.db, accountId: account.id, orgId: input.orgId });
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
 
       const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, input.orgId)),
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
       });
 
       if (!returnRecord) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
       }
 
       const existingFiles = returnRecord.files ?? [];
       const uploadedAt = new Date().toISOString();
+      const incomingFinancialStatements = input.documents.find(
+        (doc) => doc.role === "financial_statements",
+      );
+      const baseFiles = incomingFinancialStatements
+        ? existingFiles.map((file) =>
+            file.role === "financial_statements"
+              ? { ...file, role: undefined }
+              : file,
+          )
+        : existingFiles;
       const mergedFiles = [
-        ...existingFiles,
+        ...baseFiles,
         ...input.documents.map((doc) => ({ ...doc, uploadedAt })),
       ];
 
@@ -690,6 +783,81 @@ export const portalReturnsRouter = createTRPCRouter({
         .where(eq(taxReturns.id, returnRecord.id));
 
       return { success: true, files: mergedFiles };
+    }),
+
+  assignReturnDocumentRole: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        taxReturnId: z.string().uuid(),
+        fileUrl: z.string().url(),
+        role: z.enum(taxReturnFileRoles).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      const returnRecord = await ctx.db.query.taxReturns.findFirst({
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
+      });
+
+      if (!returnRecord) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
+      }
+
+      const existingFiles = returnRecord.files ?? [];
+      const hasTargetFile = existingFiles.some(
+        (file) => file.url === input.fileUrl,
+      );
+
+      if (!hasTargetFile) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "File not found on this return.",
+        });
+      }
+
+      const updatedFiles = existingFiles.map((file) => {
+        if (file.url === input.fileUrl) {
+          return {
+            ...file,
+            role: input.role ?? undefined,
+          };
+        }
+
+        if (
+          input.role === "financial_statements" &&
+          file.role === "financial_statements"
+        ) {
+          return {
+            ...file,
+            role: undefined,
+          };
+        }
+
+        return file;
+      });
+
+      await ctx.db
+        .update(taxReturns)
+        .set({
+          files: updatedFiles,
+          updatedAt: new Date(),
+        })
+        .where(eq(taxReturns.id, returnRecord.id));
+
+      return { success: true, files: updatedFiles };
     }),
 
   saveReturnIntake: protectedProcedure
@@ -706,14 +874,24 @@ export const portalReturnsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const account = await ensurePortalAccount(ctx);
-      await assertActiveMembership({ db: ctx.db, accountId: account.id, orgId: input.orgId });
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
 
       const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, input.orgId)),
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
       });
 
       if (!returnRecord) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
       }
 
       const existingMetadata: Record<string, unknown> =
@@ -723,7 +901,9 @@ export const portalReturnsRouter = createTRPCRouter({
       const nextMetadata = {
         ...existingMetadata,
         portalIntake: {
-          ...((existingMetadata.portalIntake as Record<string, unknown> | undefined) ?? {}),
+          ...((existingMetadata.portalIntake as
+            | Record<string, unknown>
+            | undefined) ?? {}),
           ...input.intake,
           updatedAt: new Date().toISOString(),
           updatedByAccountId: account.id,
@@ -751,14 +931,24 @@ export const portalReturnsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const account = await ensurePortalAccount(ctx);
-      await assertActiveMembership({ db: ctx.db, accountId: account.id, orgId: input.orgId });
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
 
       const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, input.orgId)),
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
       });
 
       if (!returnRecord) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
       }
 
       const apiKey = process.env.AI_GATEWAY_API_KEY;
@@ -796,7 +986,13 @@ export const portalReturnsRouter = createTRPCRouter({
       const fileContents: FileContent[] = [];
       const textContents: TextContent[] = [];
 
-      const supportedFileTypes = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"];
+      const supportedFileTypes = [
+        "application/pdf",
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "image/gif",
+      ];
       const excelTypes = [
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.ms-excel",
@@ -808,9 +1004,12 @@ export const portalReturnsRouter = createTRPCRouter({
           continue;
         }
 
-        const mediaType = response.headers.get("content-type") ?? "application/octet-stream";
+        const mediaType =
+          response.headers.get("content-type") ?? "application/octet-stream";
         const normalizedMedia = mediaType.toLowerCase();
-        const isCsv = normalizedMedia.includes("text/csv") || url.toLowerCase().endsWith(".csv");
+        const isCsv =
+          normalizedMedia.includes("text/csv") ||
+          url.toLowerCase().endsWith(".csv");
         const isExcel =
           excelTypes.some((type) => normalizedMedia.includes(type)) ||
           normalizedMedia.includes("spreadsheet") ||
@@ -858,7 +1057,9 @@ export const portalReturnsRouter = createTRPCRouter({
 
         if (
           supportedFileTypes.some(
-            (type) => normalizedMedia === type || normalizedMedia.startsWith(type.split("/")[0]!),
+            (type) =>
+              normalizedMedia === type ||
+              normalizedMedia.startsWith(type.split("/")[0]!),
           )
         ) {
           fileContents.push({
@@ -872,7 +1073,8 @@ export const portalReturnsRouter = createTRPCRouter({
       if (fileContents.length === 0 && textContents.length === 0) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "No supported files to extract from. Use PDF, image, CSV, or Excel.",
+          message:
+            "No supported files to extract from. Use PDF, image, CSV, or Excel.",
         });
       }
 
@@ -883,7 +1085,10 @@ export const portalReturnsRouter = createTRPCRouter({
       const model = gateway("google/gemini-3-pro-preview");
 
       const cigaOptionsText = Object.entries(CIGA_BY_ACTIVITY)
-        .map(([activity, options]) => `${activity}:\n  - ${options.join("\n  - ")}`)
+        .map(
+          ([activity, options]) =>
+            `${activity}:\n  - ${options.join("\n  - ")}`,
+        )
         .join("\n\n");
 
       const prompt = `You are extracting data for a Guernsey Economic Substance Register form.
@@ -912,7 +1117,8 @@ ${cigaOptionsText}
         output: "object",
         schema: aiExtractionSchema,
         schemaName: "PortalGuernseySubstanceForm",
-        schemaDescription: "Guernsey Economic Substance Register form extraction for portal clients",
+        schemaDescription:
+          "Guernsey Economic Substance Register form extraction for portal clients",
         messages: [
           {
             role: "user",
@@ -939,7 +1145,8 @@ ${cigaOptionsText}
         .returning();
 
       const extractedFields = Object.keys(extractedData).filter(
-        (field) => extractedData[field as keyof typeof extractedData] !== undefined,
+        (field) =>
+          extractedData[field as keyof typeof extractedData] !== undefined,
       );
 
       return {
@@ -958,14 +1165,24 @@ ${cigaOptionsText}
     )
     .mutation(async ({ ctx, input }) => {
       const account = await ensurePortalAccount(ctx);
-      await assertActiveMembership({ db: ctx.db, accountId: account.id, orgId: input.orgId });
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
 
       const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, input.orgId)),
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
       });
 
       if (!returnRecord) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
       }
 
       const [createdTask] = await ctx.db

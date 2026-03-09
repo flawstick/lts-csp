@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import SplitText from "@/components/SplitText";
 import { cn } from "@/lib/utils";
 
 type DashboardRow = {
@@ -49,6 +50,7 @@ type DashboardRow = {
 type Props = {
   orgId: string;
   orgName: string;
+  accountName?: string | null;
   rows: DashboardRow[];
 };
 
@@ -179,6 +181,13 @@ function percentFromRatio(value: number) {
   return oneDecimal.endsWith(".0") ? `${Math.trunc(percent)}%` : `${oneDecimal}%`;
 }
 
+function getGreetingName(value?: string | null) {
+  if (!value) return null;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) return null;
+  return normalized.split(" ")[0] ?? null;
+}
+
 function StatVerticalMeter({
   ratioValue,
   fillClassName,
@@ -251,7 +260,9 @@ function getTimeline(rows: DashboardRow[], range: TimelineRange): TimelinePoint[
   return sorted.slice(-range);
 }
 
-export function OrgDashboardView({ orgId, orgName, rows }: Props) {
+export function OrgDashboardView({ orgId, orgName, accountName, rows }: Props) {
+  const greetingName = getGreetingName(accountName);
+  const greeting = greetingName ? `Welcome Back, ${greetingName}!` : "Welcome Back!";
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortField, setSortField] = useState<SortField>("year");
@@ -398,8 +409,32 @@ export function OrgDashboardView({ orgId, orgName, rows }: Props) {
     <div className="space-y-6">
       <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Welcome Back!</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{orgName} dashboard and return operations.</p>
+          <SplitText
+            text={greeting}
+            tag="h1"
+            splitType="words, chars"
+            delay={28}
+            duration={0.72}
+            from={{ opacity: 0, y: 18, filter: "blur(8px)" }}
+            to={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            threshold={0}
+            rootMargin="0px"
+            textAlign="left"
+            className="block text-3xl font-semibold tracking-tight"
+          />
+          <SplitText
+            text={`${orgName} dashboard and return operations.`}
+            tag="p"
+            splitType="words"
+            delay={18}
+            duration={0.54}
+            from={{ opacity: 0, y: 10, filter: "blur(6px)" }}
+            to={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            threshold={0}
+            rootMargin="0px"
+            textAlign="left"
+            className="mt-1 block text-sm text-muted-foreground"
+          />
         </div>
 
         <div className="flex items-center gap-2">

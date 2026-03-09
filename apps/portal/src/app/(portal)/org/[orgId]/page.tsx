@@ -17,9 +17,11 @@ function normalizeStatus(status: string) {
 async function OrgDashboardData({
   orgId,
   orgName,
+  accountName,
 }: {
   orgId: string;
   orgName: string;
+  accountName?: string | null;
 }) {
   const rows = await api.portalReturns.listByOrg({ orgId }).catch(() => null);
 
@@ -31,6 +33,7 @@ async function OrgDashboardData({
     <OrgDashboardView
       orgId={orgId}
       orgName={orgName}
+      accountName={accountName}
       rows={rows.map((row) => ({
         id: row.id,
         entityName: row.entityName,
@@ -65,7 +68,11 @@ export default async function OrgPortalPage({
 
   return (
     <Suspense fallback={<OrgDashboardSkeleton />}>
-      <OrgDashboardData orgId={orgId} orgName={membership.orgName} />
+      <OrgDashboardData
+        orgId={orgId}
+        orgName={membership.orgName}
+        accountName={viewer.account.fullName}
+      />
     </Suspense>
   );
 }

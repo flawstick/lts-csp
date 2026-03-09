@@ -1,6 +1,7 @@
 import { PortalHeader } from "@/components/portal-header";
 import { PortalSidebar } from "@/components/portal-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { Toaster } from "@/components/ui/sonner";
 
 export default function PortalLayout({
   children,
@@ -16,6 +17,7 @@ export default function PortalLayout({
           <main className="flex-1 overflow-auto p-4 sm:p-6">{children}</main>
         </div>
       </div>
+      <Toaster />
     </SidebarProvider>
   );
 }
