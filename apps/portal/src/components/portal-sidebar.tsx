@@ -102,6 +102,28 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
     [activeOrg?.orgName, linkOrgId, pathname],
   );
 
+  // Eagerly prefetch all sidebar routes + org-scoped pages
+  useEffect(() => {
+    const routes = navItems
+      .filter((item) => item.key !== "search" && item.href !== "#search")
+      .map((item) => item.href);
+
+    if (linkOrgId) {
+      routes.push(
+        `/org/${linkOrgId}`,
+        `/org/${linkOrgId}/returns`,
+        `/org/${linkOrgId}/tasks`,
+      );
+    }
+
+    routes.push("/team", "/documents");
+
+    const unique = [...new Set(routes)];
+    for (const route of unique) {
+      router.prefetch(route);
+    }
+  }, [navItems, linkOrgId, router]);
+
   const logout = async () => {
     await supabase.auth.signOut();
     router.push("/login");
