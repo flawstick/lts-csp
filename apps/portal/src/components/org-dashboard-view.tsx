@@ -15,10 +15,12 @@ import {
   Settings2,
   Sparkles,
   SquareCheck,
+  Users,
   XCircle,
 } from "lucide-react";
 import { CartesianGrid, Line, LineChart, XAxis } from "recharts";
 
+import { Avatar, AvatarFallback, AvatarImage, AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import {
@@ -31,9 +33,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import SplitText from "@/components/SplitText";
+import { api } from "@/trpc/react";
 import { cn } from "@/lib/utils";
 
 type DashboardRow = {
@@ -141,6 +145,18 @@ const THROUGHPUT_SERIES: Array<{ key: ThroughputSeriesKey; label: string; color:
 ];
 
 const PAGE_SIZE = 14;
+const AVATAR_DISPLAY_LIMIT = 6;
+
+function memberInitials(name: string | null) {
+  if (!name) return "?";
+  return name
+    .split(" ")
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
 
 function returnScore(row: DashboardRow) {
   let score = 0;
@@ -263,6 +279,11 @@ function getTimeline(rows: DashboardRow[], range: TimelineRange): TimelinePoint[
 
 export function OrgDashboardView({ orgId, orgName, accountName, rows }: Props) {
   const router = useRouter();
+  const membersQuery = api.portalTeam.listMembers.useQuery({ orgId });
+  const activeMembers = useMemo(
+    () => (membersQuery.data ?? []).filter((m) => m.status === "active"),
+    [membersQuery.data],
+  );
   const greetingName = getGreetingName(accountName);
   const greeting = greetingName ? `Welcome Back, ${greetingName}!` : "Welcome Back!";
   const [search, setSearch] = useState("");
@@ -443,7 +464,72 @@ export function OrgDashboardView({ orgId, orgName, accountName, rows }: Props) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {activeMembers.length > 0 ? (
+            <HoverCard>
+              <HoverCardTrigger asChild>
+                <button type="button" className="flex items-center outline-none">
+                  <AvatarGroup>
+                    {activeMembers.slice(0, AVATAR_DISPLAY_LIMIT).map((member) => (
+                      <Avatar key={member.id} size="sm">
+                        {member.avatarUrl ? (
+                          <AvatarImage src={member.avatarUrl} alt={member.fullName ?? ""} />
+                        ) : null}
+                        <AvatarFallback className="text-[10px]">
+                          {memberInitials(member.fullName)}
+                        </AvatarFallback>
+                      </Avatar>
+                    ))}
+                    {activeMembers.length > AVATAR_DISPLAY_LIMIT ? (
+                      <AvatarGroupCount className="text-[10px]">
+                        +{activeMembers.length - AVATAR_DISPLAY_LIMIT}
+                      </AvatarGroupCount>
+                    ) : null}
+                  </AvatarGroup>
+                </button>
+              </HoverCardTrigger>
+              <HoverCardContent align="end" className="w-72 p-0">
+                <div className="space-y-1 p-3">
+                  <p className="text-sm font-semibold">Portal Members</p>
+                  <p className="text-xs text-muted-foreground">
+                    {activeMembers.length} {activeMembers.length === 1 ? "person" : "people"} with access
+                  </p>
+                </div>
+                <div className="max-h-[220px] overflow-y-auto border-t px-3 py-2">
+                  {activeMembers.slice(0, AVATAR_DISPLAY_LIMIT).map((member) => (
+                    <div key={member.id} className="flex items-center gap-2.5 rounded-md px-1 py-1.5">
+                      <Avatar size="sm">
+                        {member.avatarUrl ? (
+                          <AvatarImage src={member.avatarUrl} alt={member.fullName ?? ""} />
+                        ) : null}
+                        <AvatarFallback className="text-[10px]">
+                          {memberInitials(member.fullName)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-medium">{member.fullName ?? "Unknown"}</p>
+                        <p className="truncate text-[11px] text-muted-foreground capitalize">{member.role}</p>
+                      </div>
+                    </div>
+                  ))}
+                  {activeMembers.length > AVATAR_DISPLAY_LIMIT ? (
+                    <p className="px-1 py-1.5 text-xs text-muted-foreground">
+                      +{activeMembers.length - AVATAR_DISPLAY_LIMIT} more
+                    </p>
+                  ) : null}
+                </div>
+                <div className="border-t p-2">
+                  <Link href="/team">
+                    <Button variant="ghost" size="sm" className="h-8 w-full gap-2">
+                      <Users className="size-3.5" />
+                      Manage access
+                    </Button>
+                  </Link>
+                </div>
+              </HoverCardContent>
+            </HoverCard>
+          ) : null}
+
           <Link href={`/org/${orgId}/returns`}>
             <Button variant="outline" className="h-9 gap-2">
               <FileSpreadsheet className="size-4" />
