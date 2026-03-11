@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import {
   ArrowUpDown,
@@ -261,6 +262,7 @@ function getTimeline(rows: DashboardRow[], range: TimelineRange): TimelinePoint[
 }
 
 export function OrgDashboardView({ orgId, orgName, accountName, rows }: Props) {
+  const router = useRouter();
   const greetingName = getGreetingName(accountName);
   const greeting = greetingName ? `Welcome Back, ${greetingName}!` : "Welcome Back!";
   const [search, setSearch] = useState("");
@@ -844,9 +846,15 @@ export function OrgDashboardView({ orgId, orgName, accountName, rows }: Props) {
               {pageRows.map((row) => {
                 const score = returnScore(row);
                 return (
-                  <tr key={row.id} className="border-b/60 transition hover:bg-muted/30">
+                  <tr
+                    key={row.id}
+                    className="cursor-pointer border-b/60 transition hover:bg-muted/30"
+                    onClick={() => router.push(`/org/${orgId}/returns/${row.id}`)}
+                  >
                     <td className="px-4 py-3">
-                      <p className="font-medium">{row.entityName}</p>
+                      <Link href={`/org/${orgId}/returns/${row.id}`} className="font-medium hover:underline" onClick={(e) => e.stopPropagation()}>
+                        {row.entityName}
+                      </Link>
                       <p className="text-xs text-muted-foreground">{row.fileCount} files</p>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{row.jurisdictionCode}</td>
