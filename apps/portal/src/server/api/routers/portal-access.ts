@@ -99,6 +99,8 @@ export const portalAccessRouter = createTRPCRouter({
         id: account.id,
         accountType: account.accountType,
         email: ctx.user.email,
+        fullName: account.fullName,
+        avatarUrl: account.avatarUrl,
       },
       memberships,
     };

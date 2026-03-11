@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ChevronsUpDown, LogOut } from "lucide-react";
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SidebarIcon } from "@/components/ui/animated-icons";
 import {
   DropdownMenu,
@@ -25,10 +25,23 @@ import { cn } from "@/lib/utils";
 type SidebarFooterSectionProps = {
   returnsUrl: string;
   email?: string | null;
+  fullName?: string | null;
+  avatarUrl?: string | null;
   onLogout: () => Promise<void>;
 };
 
-export function SidebarFooterSection({ returnsUrl, email, onLogout }: SidebarFooterSectionProps) {
+function getInitials(name: string | null | undefined) {
+  if (!name) return "U";
+  return name
+    .split(" ")
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+export function SidebarFooterSection({ returnsUrl, email, fullName, avatarUrl, onLogout }: SidebarFooterSectionProps) {
   return (
     <SidebarFooter className="px-2.5 pb-3 group-data-[collapsible=icon]:px-0">
       <div className="portal-card max-h-40 overflow-hidden rounded-xl p-3 text-sm transition-[max-height,opacity,padding,margin,border,box-shadow] duration-200 ease-linear group-data-[collapsible=icon]:max-h-0 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:shadow-none">
@@ -55,11 +68,12 @@ export function SidebarFooterSection({ returnsUrl, email, onLogout }: SidebarFoo
                 )}
               >
                 <Avatar className="h-8 w-8 shrink-0 rounded-lg">
-                  <AvatarFallback className="rounded-lg">U</AvatarFallback>
+                  {avatarUrl ? <AvatarImage src={avatarUrl} alt={fullName ?? ""} className="rounded-lg" /> : null}
+                  <AvatarFallback className="rounded-lg">{getInitials(fullName)}</AvatarFallback>
                 </Avatar>
                 <div className="grid max-w-[10rem] flex-1 overflow-hidden text-left text-sm leading-tight transition-[max-width,opacity] duration-200 ease-linear group-data-[collapsible=icon]:hidden">
-                  <span className="truncate font-medium">{email ?? "Authenticated User"}</span>
-                  <span className="truncate text-xs">Authenticated</span>
+                  <span className="truncate font-medium">{fullName ?? email ?? "User"}</span>
+                  <span className="truncate text-xs text-muted-foreground">{email ?? "Authenticated"}</span>
                 </div>
                 <ChevronsUpDown className="ml-auto size-4 transition-opacity duration-150 ease-linear group-data-[collapsible=icon]:hidden" />
               </SidebarMenuButton>
