@@ -76,7 +76,7 @@ export function ReturnWorkspaceHeader({
           </p>
         </div>
 
-        <Button asChild className="rounded-xl px-5">
+        <Button asChild className="px-5">
           <motion.button
             type="button"
             onClick={onOpenFinishSheet}

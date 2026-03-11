@@ -96,7 +96,7 @@ export function ReturnFormTab({
             <Button
               onClick={onInitForm}
               disabled={isInitializing}
-              className="mt-5 rounded-full px-5 shadow-[0_18px_44px_-26px_rgba(37,99,235,0.85)]"
+              className="mt-5 px-5 shadow-[0_18px_44px_-26px_rgba(37,99,235,0.85)]"
             >
               {isInitializing ? (
                 <Loader2 className="size-4 animate-spin" />

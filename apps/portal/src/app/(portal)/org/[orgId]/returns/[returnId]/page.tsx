@@ -472,7 +472,7 @@ export default function ReturnWorkspacePage() {
             It may have been removed or you may not have access.
           </p>
           <Button
-            className="mt-5 rounded-full"
+            className="mt-5"
             variant="outline"
             onClick={() => router.push(`/org/${orgId}/returns`)}
           >
