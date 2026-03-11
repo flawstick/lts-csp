@@ -1,4 +1,5 @@
 import { portalAccessRouter } from "@/server/api/routers/portal-access";
+import { portalFeedbackRouter } from "@/server/api/routers/portal-feedback";
 import { portalReturnsRouter } from "@/server/api/routers/portal-returns";
 import { portalTeamRouter } from "@/server/api/routers/portal-team";
 import { postRouter } from "@/server/api/routers/post";
@@ -12,6 +13,7 @@ import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 export const appRouter = createTRPCRouter({
   post: postRouter,
   portalAccess: portalAccessRouter,
+  portalFeedback: portalFeedbackRouter,
   portalReturns: portalReturnsRouter,
   portalTeam: portalTeamRouter,
 });

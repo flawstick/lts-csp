@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { ChevronsUpDown, LogOut } from "lucide-react";
+import { useState } from "react";
+import { ChevronsUpDown, LogOut, MessageSquarePlus } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SidebarIcon } from "@/components/ui/animated-icons";
@@ -19,11 +19,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { FeedbackDialog } from "@/components/feedback-dialog";
 
 import { cn } from "@/lib/utils";
 
 type SidebarFooterSectionProps = {
-  returnsUrl: string;
   email?: string | null;
   fullName?: string | null;
   avatarUrl?: string | null;
@@ -41,21 +41,27 @@ function getInitials(name: string | null | undefined) {
     .toUpperCase();
 }
 
-export function SidebarFooterSection({ returnsUrl, email, fullName, avatarUrl, onLogout }: SidebarFooterSectionProps) {
+export function SidebarFooterSection({ email, fullName, avatarUrl, onLogout }: SidebarFooterSectionProps) {
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+
   return (
     <SidebarFooter className="px-2.5 pb-3 group-data-[collapsible=icon]:px-0">
-      <div className="portal-card max-h-40 overflow-hidden rounded-xl p-3 text-sm transition-[max-height,opacity,padding,margin,border,box-shadow] duration-200 ease-linear group-data-[collapsible=icon]:max-h-0 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:shadow-none">
-        <p className="truncate whitespace-nowrap text-base font-semibold leading-tight">LTS Client Workspace</p>
-        <p className="mt-1 truncate whitespace-nowrap text-xs text-muted-foreground">
-          Last accessed returns are pinned per jurisdiction. Open any return to update the list.
+      <div className="portal-card max-h-48 overflow-hidden rounded-xl p-3 text-sm transition-[max-height,opacity,padding,margin,border,box-shadow] duration-200 ease-linear group-data-[collapsible=icon]:max-h-0 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:shadow-none">
+        <p className="text-base font-semibold leading-tight">We value your feedback</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          Leave us a note if you spot any issues or have suggestions.
         </p>
-        <Link
-          href={returnsUrl}
-          className="mt-3 inline-flex w-full items-center justify-center rounded-lg border px-2 py-1.5 text-xs font-medium hover:bg-muted/50"
+        <button
+          type="button"
+          onClick={() => setFeedbackOpen(true)}
+          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors hover:bg-muted/50"
         >
-          Open Returns
-        </Link>
+          <MessageSquarePlus className="size-3.5" />
+          Send Feedback
+        </button>
       </div>
+
+      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
 
       <SidebarMenu className="group-data-[collapsible=icon]:items-center">
         <SidebarMenuItem className="group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center">

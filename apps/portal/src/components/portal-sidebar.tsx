@@ -175,7 +175,6 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
       </SidebarContent>
 
       <SidebarFooterSection
-        returnsUrl={returnsUrl}
         email={membershipsQuery.data?.account.email ?? null}
         fullName={membershipsQuery.data?.account.fullName ?? null}
         avatarUrl={membershipsQuery.data?.account.avatarUrl ?? null}
