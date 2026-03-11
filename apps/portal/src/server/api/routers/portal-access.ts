@@ -24,32 +24,46 @@ async function ensurePortalAccount(ctx: {
     where: eq(accounts.userId, ctx.user.id),
   });
 
-  if (!account) {
-    const metadata = (ctx.user.user_metadata ?? {}) as Record<string, unknown>;
-    const fullName =
-      typeof metadata.full_name === "string"
-        ? metadata.full_name
-        : typeof metadata.name === "string"
-          ? metadata.name
-          : null;
-    const avatarUrl =
-      typeof metadata.avatar_url === "string"
-        ? metadata.avatar_url
-        : typeof metadata.picture === "string"
-          ? metadata.picture
-          : null;
+  const metadata = (ctx.user.user_metadata ?? {}) as Record<string, unknown>;
+  const latestFullName =
+    typeof metadata.full_name === "string"
+      ? metadata.full_name
+      : typeof metadata.name === "string"
+        ? metadata.name
+        : null;
+  const latestAvatarUrl =
+    typeof metadata.avatar_url === "string"
+      ? metadata.avatar_url
+      : typeof metadata.picture === "string"
+        ? metadata.picture
+        : null;
 
+  if (!account) {
     const [created] = await ctx.db
       .insert(accounts)
       .values({
         userId: ctx.user.id,
-        fullName,
-        avatarUrl,
+        fullName: latestFullName,
+        avatarUrl: latestAvatarUrl,
         accountType: "portal",
       })
       .returning();
 
     account = created ?? undefined;
+  } else if (
+    account.fullName !== latestFullName ||
+    account.avatarUrl !== latestAvatarUrl
+  ) {
+    const [updated] = await ctx.db
+      .update(accounts)
+      .set({
+        fullName: latestFullName ?? account.fullName,
+        avatarUrl: latestAvatarUrl ?? account.avatarUrl,
+      })
+      .where(eq(accounts.id, account.id))
+      .returning();
+
+    account = updated ?? account;
   }
 
   if (!account) {
