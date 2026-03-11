@@ -3,16 +3,31 @@
 import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight, Share2, Sparkles } from "lucide-react";
+import { ChevronRight, Share2, Sparkles, Users } from "lucide-react";
 
 import { buildPortalNavigationModel, getPortalOrgIdFromPathname } from "@/lib/portal-navigation";
 import { cn } from "@/lib/utils";
 import { api } from "@/trpc/react";
+import { Avatar, AvatarFallback, AvatarImage, AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { PortalCommandMenu } from "@/components/portal-command-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+
+const AVATAR_LIMIT = 6;
+
+function initials(name: string | null) {
+  if (!name) return "?";
+  return name
+    .split(" ")
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
 
 export function PortalHeader() {
   const pathname = usePathname();
@@ -35,6 +50,15 @@ export function PortalHeader() {
         orgName: currentOrgName,
       }),
     [currentOrgId, currentOrgName, defaultOrgId, pathname],
+  );
+
+  const membersQuery = api.portalTeam.listMembers.useQuery(
+    { orgId: currentOrgId! },
+    { enabled: !!currentOrgId },
+  );
+  const activeMembers = useMemo(
+    () => (membersQuery.data ?? []).filter((m) => m.status === "active"),
+    [membersQuery.data],
   );
 
   const CurrentIcon = navigation.currentIcon;
@@ -86,11 +110,70 @@ export function PortalHeader() {
       </div>
 
       <div className="flex items-center gap-2">
-        <div className="hidden items-center -space-x-2.5 rounded-full bg-background/70 px-2.5 py-1.5 md:flex">
-          <span className="size-5 rounded-full bg-cyan-300" />
-          <span className="size-5 rounded-full bg-emerald-300" />
-          <span className="size-5 rounded-full bg-fuchsia-300" />
-        </div>
+        {activeMembers.length > 0 ? (
+          <HoverCard>
+            <HoverCardTrigger asChild>
+              <button type="button" className="hidden items-center outline-none md:flex">
+                <AvatarGroup>
+                  {activeMembers.slice(0, AVATAR_LIMIT).map((member) => (
+                    <Avatar key={member.id} size="sm">
+                      {member.avatarUrl ? (
+                        <AvatarImage src={member.avatarUrl} alt={member.fullName ?? ""} />
+                      ) : null}
+                      <AvatarFallback className="text-[10px]">
+                        {initials(member.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                  ))}
+                  {activeMembers.length > AVATAR_LIMIT ? (
+                    <AvatarGroupCount className="text-[10px]">
+                      +{activeMembers.length - AVATAR_LIMIT}
+                    </AvatarGroupCount>
+                  ) : null}
+                </AvatarGroup>
+              </button>
+            </HoverCardTrigger>
+            <HoverCardContent align="end" className="w-72 p-0">
+              <div className="space-y-1 p-3">
+                <p className="text-sm font-semibold">Portal Members</p>
+                <p className="text-xs text-muted-foreground">
+                  {activeMembers.length} {activeMembers.length === 1 ? "person" : "people"} with access
+                </p>
+              </div>
+              <div className="max-h-[220px] overflow-y-auto border-t px-3 py-2">
+                {activeMembers.slice(0, AVATAR_LIMIT).map((member) => (
+                  <div key={member.id} className="flex items-center gap-2.5 rounded-md px-1 py-1.5">
+                    <Avatar size="sm">
+                      {member.avatarUrl ? (
+                        <AvatarImage src={member.avatarUrl} alt={member.fullName ?? ""} />
+                      ) : null}
+                      <AvatarFallback className="text-[10px]">
+                        {initials(member.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium">{member.fullName ?? "Unknown"}</p>
+                      <p className="truncate text-[11px] text-muted-foreground capitalize">{member.role}</p>
+                    </div>
+                  </div>
+                ))}
+                {activeMembers.length > AVATAR_LIMIT ? (
+                  <p className="px-1 py-1.5 text-xs text-muted-foreground">
+                    +{activeMembers.length - AVATAR_LIMIT} more
+                  </p>
+                ) : null}
+              </div>
+              <div className="border-t p-2">
+                <Link href="/team">
+                  <Button variant="ghost" size="sm" className="h-8 w-full gap-2">
+                    <Users className="size-3.5" />
+                    Manage access
+                  </Button>
+                </Link>
+              </div>
+            </HoverCardContent>
+          </HoverCard>
+        ) : null}
 
         <PortalCommandMenu navItems={navigation.navItems} currentOrgId={currentOrgId} />
 
