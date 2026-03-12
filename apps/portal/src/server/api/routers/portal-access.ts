@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import type { User } from "@supabase/supabase-js";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -141,6 +141,122 @@ export const portalAccessRouter = createTRPCRouter({
           org: invitation.organisation,
           expiresAt: invitation.expiresAt,
         },
+      };
+    }),
+
+  getMyPendingInvitations: protectedProcedure
+    .query(async ({ ctx }) => {
+      if (!ctx.user.email) {
+        return { invitations: [] };
+      }
+
+      const pending = await ctx.db.query.portalInvitations.findMany({
+        where: and(
+          sql`lower(${portalInvitations.email}) = ${ctx.user.email.toLowerCase()}`,
+          eq(portalInvitations.status, "pending"),
+        ),
+        with: {
+          organisation: {
+            columns: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+        },
+      });
+
+      // Filter out expired
+      const now = new Date();
+      const valid = pending.filter((inv) => new Date(inv.expiresAt) > now);
+
+      return {
+        invitations: valid.map((inv) => ({
+          id: inv.id,
+          email: inv.email,
+          org: inv.organisation,
+          expiresAt: inv.expiresAt.toISOString(),
+        })),
+      };
+    }),
+
+  acceptInvitationById: protectedProcedure
+    .input(z.object({ invitationId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.user.email) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Unauthorized" });
+      }
+
+      const invitation = await ctx.db.query.portalInvitations.findFirst({
+        where: and(
+          eq(portalInvitations.id, input.invitationId),
+          eq(portalInvitations.status, "pending"),
+        ),
+      });
+
+      if (!invitation) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Invitation not found" });
+      }
+
+      if (invitation.email.toLowerCase() !== ctx.user.email.toLowerCase()) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Invitation email does not match signed-in user",
+        });
+      }
+
+      if (new Date(invitation.expiresAt) < new Date()) {
+        await ctx.db
+          .update(portalInvitations)
+          .set({ status: "expired" })
+          .where(eq(portalInvitations.id, invitation.id));
+
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Invitation expired" });
+      }
+
+      const account = await ensurePortalAccount(ctx);
+
+      const existingMembership = await ctx.db.query.portalMemberships.findFirst({
+        where: and(
+          eq(portalMemberships.accountId, account.id),
+          eq(portalMemberships.orgId, invitation.orgId),
+        ),
+      });
+
+      if (existingMembership) {
+        await ctx.db
+          .update(portalMemberships)
+          .set({
+            status: "active",
+            joinedAt: existingMembership.joinedAt ?? new Date(),
+          })
+          .where(eq(portalMemberships.id, existingMembership.id));
+      } else {
+        await ctx.db.insert(portalMemberships).values({
+          accountId: account.id,
+          orgId: invitation.orgId,
+          invitedBy: invitation.invitedBy,
+          role: "viewer",
+          status: "active",
+          joinedAt: new Date(),
+        });
+      }
+
+      if (account.accountType === "internal") {
+        await ctx.db
+          .update(accounts)
+          .set({ accountType: "dual" })
+          .where(eq(accounts.id, account.id));
+      }
+
+      await ctx.db
+        .update(portalInvitations)
+        .set({ status: "accepted", acceptedAt: new Date() })
+        .where(eq(portalInvitations.id, invitation.id));
+
+      return {
+        success: true,
+        orgId: invitation.orgId,
       };
     }),
 
