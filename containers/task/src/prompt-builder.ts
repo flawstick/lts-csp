@@ -110,11 +110,19 @@ ${
   financialStatementsFile
     ? `
 
-## FINANCIAL STATEMENTS PDF
+## FINANCIAL STATEMENTS PDF — CRITICAL: DO NOT SKIP THIS
 - A financial statements PDF has already been uploaded to your Browser Use session.
-- When you encounter a file upload input for financial statements or accounts on the portal, use the **upload_file** action with the session file named "${financialStatementsFile.sessionFileName}".
-- Original file name: "${financialStatementsFile.originalName}".
-- You MUST upload this file when prompted. If the upload fails or you cannot find the file input, STOP and report "REQUIRES_ATTENTION: Financial statements upload failed".
+- File name in session: "${financialStatementsFile.sessionFileName}"
+- Original file name: "${financialStatementsFile.originalName}"
+
+**PORTAL FLOW FOR FINANCIAL STATEMENTS:**
+1. The portal will ask a question like "Are financial statements available online?" or "Have financial statements been filed online?" or similar.
+2. You MUST select **"No"** to this question. Selecting "Yes" or skipping will cause the upload section to be missed.
+3. After selecting "No", a file upload input will appear for you to upload the financial statements PDF.
+4. Use the **upload_file** action with the file named "${financialStatementsFile.sessionFileName}" to upload it.
+5. Do NOT skip this section. Do NOT select "Yes". Do NOT move past without uploading the file.
+
+**IF THE UPLOAD FAILS:** STOP and report "REQUIRES_ATTENTION: Financial statements upload failed".
 `
     : `
 
@@ -273,6 +281,7 @@ ${field("Profit Before Tax Allocation", form.profitAllocation)}
 - Net Book Value and Total Profit: if the value is negative (a loss), enter **0**. The portal does not accept negative values.
 - Profit Before Tax Allocation is REQUIRED — must be either "Investment" or "Business".
 - Accounts Preparer Name/Qualification is the ACCOUNTANT who prepared the financial statements, NOT LTS Tax.
+- **FINANCIAL STATEMENTS UPLOAD:** When the portal asks if financial statements are available online, select **"No"** and then upload the PDF file using the upload_file action. See the FINANCIAL STATEMENTS PDF section above for details. DO NOT SKIP THIS.
 `;
 }
 
