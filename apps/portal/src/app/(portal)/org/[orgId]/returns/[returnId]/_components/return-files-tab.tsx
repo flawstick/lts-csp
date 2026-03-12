@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useId,
-  useState,
-  type Dispatch,
-  type DragEvent,
-  type SetStateAction,
-} from "react";
+import { useId, useMemo, useState, type DragEvent } from "react";
 import {
   ExternalLink,
   FileSpreadsheet,
@@ -16,116 +10,117 @@ import {
   UploadCloud,
 } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 import {
   formatBytes,
   isPdfLike,
-  type PendingFiles,
   type VaultFile,
 } from "./return-workspace-shared";
 
-type UploadTarget = "esr" | "financial";
+type UploadedFile = { name: string; url: string; type: string };
 
 type ReturnFilesTabProps = {
   selectedReturnId: string;
   selectedFiles: VaultFile[];
-  pendingEsrFiles: PendingFiles;
-  setPendingEsrFiles: Dispatch<SetStateAction<PendingFiles>>;
-  pendingFinancialFiles: PendingFiles;
-  setPendingFinancialFiles: Dispatch<SetStateAction<PendingFiles>>;
-  isDocumentsPending: boolean;
+  hasFinancialStatements: boolean;
+  isUploading: boolean;
   isExtractPending: boolean;
   isAssignPending: boolean;
-  onUploadEsr: () => void;
-  onUploadFinancials: () => void;
+  uploadedFileUrls: UploadedFile[] | null;
+  onUploadFiles: (files: File[]) => void;
+  onAssignFinancialStatements: (fileUrl: string) => void;
+  onDismissAssignment: () => void;
   onRunAiExtraction: () => void;
-  onAssignFinancialStatements: (file: VaultFile) => void;
 };
 
 export function ReturnFilesTab({
-  selectedReturnId,
   selectedFiles,
-  pendingEsrFiles,
-  setPendingEsrFiles,
-  pendingFinancialFiles,
-  setPendingFinancialFiles,
-  isDocumentsPending,
+  hasFinancialStatements,
+  isUploading,
   isExtractPending,
   isAssignPending,
-  onUploadEsr,
-  onUploadFinancials,
-  onRunAiExtraction,
+  uploadedFileUrls,
+  onUploadFiles,
   onAssignFinancialStatements,
+  onDismissAssignment,
+  onRunAiExtraction,
 }: ReturnFilesTabProps) {
-  const [activeDropTarget, setActiveDropTarget] = useState<UploadTarget>("esr");
+  const fileInputId = useId();
   const [isDragging, setIsDragging] = useState(false);
-  const esrInputId = useId();
-  const financialInputId = useId();
-  const assignedFinancialStatementsFile =
-    selectedFiles.find((file) => file.role === "financial_statements") ?? null;
-  const queuedEsrFile = pendingEsrFiles[selectedReturnId]?.[0] ?? null;
-  const queuedFinancialFiles = pendingFinancialFiles[selectedReturnId] ?? [];
+  const [selectedRadio, setSelectedRadio] = useState<string>("__none__");
 
-  const setQueuedEsrFile = (file: File | null) => {
-    setPendingEsrFiles((previous) => ({
-      ...previous,
-      [selectedReturnId]: file ? [file] : [],
-    }));
-  };
+  const uploadedPdfs = useMemo(
+    () => (uploadedFileUrls ?? []).filter((f) => isPdfLike(f)),
+    [uploadedFileUrls],
+  );
 
-  const setQueuedFinancialSelections = (files: File[]) => {
-    setPendingFinancialFiles((previous) => ({
-      ...previous,
-      [selectedReturnId]: files,
-    }));
-  };
+  const shouldPrompt =
+    uploadedFileUrls !== null &&
+    !hasFinancialStatements &&
+    uploadedPdfs.length > 0;
+
+  const showAlertDialog = shouldPrompt && uploadedPdfs.length === 1;
+  const showPickerDialog = shouldPrompt && uploadedPdfs.length > 1;
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(false);
-
-    const droppedFiles = Array.from(event.dataTransfer.files ?? []);
-    if (!droppedFiles.length) {
-      return;
-    }
-
-    if (activeDropTarget === "esr") {
-      setQueuedEsrFile(droppedFiles[0] ?? null);
-      return;
-    }
-
-    setQueuedFinancialSelections(droppedFiles);
+    const files = Array.from(event.dataTransfer.files ?? []);
+    if (files.length) onUploadFiles(files);
   };
+
+  const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length) onUploadFiles(files);
+    event.target.value = "";
+  };
+
+  const handleConfirmRadio = () => {
+    if (selectedRadio === "__none__") {
+      onDismissAssignment();
+    } else {
+      onAssignFinancialStatements(selectedRadio);
+    }
+    setSelectedRadio("__none__");
+  };
+
+  const assignedFile =
+    selectedFiles.find((f) => f.role === "financial_statements") ?? null;
 
   return (
     <TabsContent value="files">
       <div className="space-y-4">
-        {/* Upload intake */}
+        {/* Upload zone */}
         <div className="rounded-xl border border-border/70 bg-card p-5 shadow-xs">
           <input
-            id={esrInputId}
-            type="file"
-            accept=".xlsx,.xls,.csv,.pdf"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0] ?? null;
-              setQueuedEsrFile(file);
-            }}
-          />
-          <input
-            id={financialInputId}
+            id={fileInputId}
             type="file"
             multiple
             accept=".pdf,.xlsx,.xls,.csv,.zip,.doc,.docx"
             className="hidden"
-            onChange={(event) => {
-              setQueuedFinancialSelections(
-                Array.from(event.target.files ?? []),
-              );
-            }}
+            onChange={handleFileInput}
           />
 
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -134,47 +129,32 @@ export function ReturnFilesTab({
                 <UploadCloud className="size-4.5" />
               </span>
               <div>
-                <p className="text-sm font-semibold">Upload intake</p>
-                <p className="text-muted-foreground mt-0.5 max-w-2xl text-sm">
-                  Drop files here, then send them through ESR extraction or into the financial pack.
+                <p className="text-sm font-semibold">Upload documents</p>
+                <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">
+                  Drop files here or browse. PDFs, spreadsheets, and documents are accepted.
                 </p>
               </div>
             </div>
 
-            {assignedFinancialStatementsFile ? (
+            {assignedFile ? (
               <span className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                Statements: {assignedFinancialStatementsFile.name}
+                Statements: {assignedFile.name}
               </span>
             ) : null}
           </div>
 
-          {/* Drop zone */}
           <div
             className={cn(
-              "mt-4 rounded-lg border-2 border-dashed px-5 py-8 transition duration-200",
-              activeDropTarget === "esr"
-                ? "border-border/60"
-                : "border-emerald-500/25",
-              isDragging &&
-                (activeDropTarget === "esr"
-                  ? "border-primary/40 bg-primary/[0.03]"
-                  : "border-emerald-500/50 bg-emerald-500/[0.04]"),
+              "mt-4 rounded-lg border-2 border-dashed px-5 py-10 transition duration-200",
+              isDragging
+                ? "border-primary/40 bg-primary/[0.03]"
+                : "border-border/60",
             )}
-            onDragEnter={(event) => {
-              event.preventDefault();
-              setIsDragging(true);
-            }}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setIsDragging(true);
-            }}
-            onDragLeave={(event) => {
-              event.preventDefault();
-              if (
-                event.currentTarget.contains(event.relatedTarget as Node)
-              ) {
-                return;
-              }
+            onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              if (e.currentTarget.contains(e.relatedTarget as Node)) return;
               setIsDragging(false);
             }}
             onDrop={handleDrop}
@@ -182,107 +162,41 @@ export function ReturnFilesTab({
             <div className="flex flex-col items-center gap-4 text-center">
               <span
                 className={cn(
-                  "inline-flex size-11 items-center justify-center rounded-full border bg-muted/40",
-                  activeDropTarget === "esr"
-                    ? "border-border/60 text-muted-foreground"
-                    : "border-emerald-500/20 text-emerald-600 dark:text-emerald-400",
+                  "inline-flex size-11 items-center justify-center rounded-full border bg-muted/40 transition-colors",
+                  isDragging
+                    ? "border-primary/30 text-primary"
+                    : "border-border/60 text-muted-foreground",
                 )}
               >
-                <UploadCloud className="size-5" />
+                {isUploading ? (
+                  <Loader2 className="size-5 animate-spin" />
+                ) : (
+                  <UploadCloud className="size-5" />
+                )}
               </span>
 
               <div>
                 <p className="text-sm font-medium">
-                  {isDragging
-                    ? activeDropTarget === "esr"
-                      ? "Drop the ESR file here"
-                      : "Drop financial files here"
-                    : "Drag files here or browse"}
+                  {isUploading
+                    ? "Uploading..."
+                    : isDragging
+                      ? "Drop files here"
+                      : "Drag files here or browse"}
                 </p>
-                <p className="text-muted-foreground mt-1 text-xs">
-                  {activeDropTarget === "esr"
-                    ? "Excel, CSV or PDF. Only the first file is used."
-                    : "PDF, Excel, CSV, ZIP, DOC accepted."}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  PDF, Excel, CSV, ZIP, DOC accepted
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={activeDropTarget === "esr" ? "default" : "outline"}
-                  onClick={() => setActiveDropTarget("esr")}
-                >
-                  ESR file
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={activeDropTarget === "financial" ? "default" : "outline"}
-                  onClick={() => setActiveDropTarget("financial")}
-                >
-                  Financial pack
-                </Button>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    const targetInput = document.getElementById(
-                      activeDropTarget === "esr"
-                        ? esrInputId
-                        : financialInputId,
-                    );
-                    targetInput?.click();
-                  }}
-                >
-                  {activeDropTarget === "esr"
-                    ? "Choose ESR file"
-                    : "Choose financial files"}
-                </Button>
-                {activeDropTarget === "esr" ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={onUploadEsr}
-                    disabled={isDocumentsPending || isExtractPending}
-                  >
-                    {isDocumentsPending || isExtractPending ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Sparkles className="size-4" />
-                    )}
-                    Upload ESR + Extract
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={onUploadFinancials}
-                    disabled={isDocumentsPending || isExtractPending}
-                  >
-                    {isDocumentsPending || isExtractPending ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <UploadCloud className="size-4" />
-                    )}
-                    Upload financial files
-                  </Button>
-                )}
-              </div>
-
-              <p className="text-muted-foreground text-xs">
-                {activeDropTarget === "esr"
-                  ? (queuedEsrFile?.name ?? "No ESR file selected.")
-                  : queuedFinancialFiles.length > 0
-                    ? `${queuedFinancialFiles.length} financial file(s) selected.`
-                    : "No financial files selected."}
-              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isUploading}
+                onClick={() => document.getElementById(fileInputId)?.click()}
+              >
+                Choose files
+              </Button>
             </div>
           </div>
         </div>
@@ -292,8 +206,8 @@ export function ReturnFilesTab({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold">Uploaded files</p>
-              <p className="text-muted-foreground mt-0.5 text-sm">
-                Review documents, open them, or assign the statements PDF.
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Review documents, open them, or run AI extraction.
               </p>
             </div>
 
@@ -313,7 +227,7 @@ export function ReturnFilesTab({
           </div>
 
           {!selectedFiles.length ? (
-            <p className="text-muted-foreground mt-4 rounded-lg border border-dashed border-border/60 px-4 py-10 text-center text-sm">
+            <p className="mt-4 rounded-lg border border-dashed border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
               No uploaded files yet.
             </p>
           ) : (
@@ -342,7 +256,7 @@ export function ReturnFilesTab({
                           </span>
                         ) : null}
                       </div>
-                      <p className="text-muted-foreground mt-0.5 text-xs">
+                      <p className="mt-0.5 text-xs text-muted-foreground">
                         {formatBytes(file.size)} ·{" "}
                         {file.uploadedAt
                           ? new Date(file.uploadedAt).toLocaleString()
@@ -351,44 +265,112 @@ export function ReturnFilesTab({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
-                    {isPdfLike(file) ? (
-                      <Button
-                        size="sm"
-                        variant={
-                          file.role === "financial_statements"
-                            ? "default"
-                            : "outline"
-                        }
-                        disabled={
-                          isAssignPending ||
-                          isDocumentsPending ||
-                          isExtractPending
-                        }
-                        onClick={() => {
-                          onAssignFinancialStatements(file);
-                        }}
-                      >
-                        <FileText className="size-3.5" />
-                        {file.role === "financial_statements"
-                          ? "Assigned"
-                          : "Assign financials"}
-                      </Button>
-                    ) : null}
-
-                    <Button variant="ghost" size="sm" asChild>
-                      <a href={file.url} target="_blank" rel="noreferrer">
-                        <ExternalLink className="size-3.5" />
-                        Open
-                      </a>
-                    </Button>
-                  </div>
+                  <Button variant="ghost" size="sm" asChild>
+                    <a href={file.url} target="_blank" rel="noreferrer">
+                      <ExternalLink className="size-3.5" />
+                      Open
+                    </a>
+                  </Button>
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Single PDF prompt */}
+      <AlertDialog
+        open={showAlertDialog}
+        onOpenChange={(open) => { if (!open) onDismissAssignment(); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Financial Statements?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Is <span className="font-medium text-foreground">{uploadedPdfs[0]?.name}</span> your
+              financial statements for this return?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={onDismissAssignment}>No</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const pdf = uploadedPdfs[0];
+                if (pdf) onAssignFinancialStatements(pdf.url);
+              }}
+            >
+              Yes, assign it
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Multiple PDFs picker */}
+      <Dialog
+        open={showPickerDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            onDismissAssignment();
+            setSelectedRadio("__none__");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select Financial Statements</DialogTitle>
+            <DialogDescription>
+              Which of these PDFs is the financial statements for this return?
+            </DialogDescription>
+          </DialogHeader>
+
+          <RadioGroup
+            value={selectedRadio}
+            onValueChange={setSelectedRadio}
+            className="gap-0 divide-y divide-border/50 rounded-lg border border-border/60"
+          >
+            {uploadedPdfs.map((file) => (
+              <label
+                key={file.url}
+                className={cn(
+                  "flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30",
+                  selectedRadio === file.url && "bg-primary/[0.04]",
+                )}
+              >
+                <RadioGroupItem value={file.url} />
+                <FileText className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 truncate text-sm">{file.name}</span>
+              </label>
+            ))}
+            <label
+              className={cn(
+                "flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30",
+                selectedRadio === "__none__" && "bg-primary/[0.04]",
+              )}
+            >
+              <RadioGroupItem value="__none__" />
+              <span className="text-sm text-muted-foreground">None of these</span>
+            </label>
+          </RadioGroup>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                onDismissAssignment();
+                setSelectedRadio("__none__");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmRadio} disabled={isAssignPending}>
+              {isAssignPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TabsContent>
   );
 }

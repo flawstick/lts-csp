@@ -26,7 +26,6 @@ import {
   isPdfLike,
   normalizeStatus,
   sanitizeFormData,
-  type PendingFiles,
   type SectionId,
   type WorkspaceTab,
 } from "./_components/return-workspace-shared";
@@ -42,11 +41,12 @@ export default function ReturnWorkspacePage() {
     FORM_SECTIONS[0].id,
   );
   const [draftForm, setDraftForm] = useState<Partial<SubstanceFormData>>({});
-  const [pendingEsrFiles, setPendingEsrFiles] = useState<PendingFiles>({});
-  const [pendingFinancialFiles, setPendingFinancialFiles] =
-    useState<PendingFiles>({});
   const [savingSection, setSavingSection] = useState(false);
   const [isSectionDialogOpen, setIsSectionDialogOpen] = useState(false);
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+  const [uploadedFileUrls, setUploadedFileUrls] = useState<
+    Array<{ name: string; url: string; type: string }> | null
+  >(null);
 
   const recentTrackedRef = useRef<string | null>(null);
 
@@ -224,122 +224,44 @@ export default function ReturnWorkspacePage() {
     }
   };
 
-  const uploadFinancialDocuments = async (input: {
-    files: File[];
-    assignFinancialStatements?: boolean;
-    financialStatementsIndex?: number | null;
-  }) => {
-    if (!selectedReturn) return;
+  const handleUploadFiles = async (files: File[]) => {
+    if (!selectedReturn || !files.length) return;
 
-    const files = input.files.filter(Boolean);
-    if (!files.length) {
-      return;
-    }
-
-    const assignedIndex = input.assignFinancialStatements
-      ? typeof input.financialStatementsIndex === "number" &&
-        isPdfLike(files[input.financialStatementsIndex] ?? null)
-        ? input.financialStatementsIndex
-        : files.findIndex((file) => isPdfLike(file))
-      : -1;
-
-    const uploaded = await Promise.all(
-      files.map((file) =>
-        uploadPortalFile({
-          orgId,
-          taxReturnId: selectedReturn.id,
-          file,
-          category: "financial",
-        }),
-      ),
-    );
-
-    await addDocumentsMutation.mutateAsync({
-      orgId,
-      taxReturnId: selectedReturn.id,
-      documents: uploaded.map((file, index) => ({
-        ...file,
-        role:
-          input.assignFinancialStatements && index === assignedIndex
-            ? "financial_statements"
-            : undefined,
-      })),
-    });
-  };
-
-  const handleUploadEsr = async () => {
-    if (!selectedReturn) return;
-
-    const selectedEsr = pendingEsrFiles[selectedReturn.id]?.[0];
-    if (!selectedEsr) {
-      showMessage("Choose an ESR file before starting AI processing.");
-      return;
-    }
+    setIsUploadingFiles(true);
+    setUploadedFileUrls(null);
 
     try {
-      showMessage("Uploading ESR and starting AI processing...");
-      const uploaded = await uploadPortalFile({
-        orgId,
-        taxReturnId: selectedReturn.id,
-        file: selectedEsr,
-        category: "esr",
-      });
+      showMessage("Uploading files...");
+
+      const uploaded = await Promise.all(
+        files.map((file) =>
+          uploadPortalFile({
+            orgId,
+            taxReturnId: selectedReturn.id,
+            file,
+            category: isPdfLike(file) ? "financial" : "supporting",
+          }),
+        ),
+      );
 
       await addDocumentsMutation.mutateAsync({
         orgId,
         taxReturnId: selectedReturn.id,
-        documents: [uploaded],
+        documents: uploaded,
       });
 
-      const extractionUrls = Array.from(
-        new Set([...selectedFiles.map((file) => file.url), uploaded.url]),
-      );
-      const result = await extractSubstanceFormMutation.mutateAsync({
-        orgId,
-        taxReturnId: selectedReturn.id,
-        fileUrls: extractionUrls,
-      });
+      toast.dismiss();
+      toast.success(`${uploaded.length} file(s) uploaded.`);
 
-      setPendingEsrFiles((previous) => ({
-        ...previous,
-        [selectedReturn.id]: [],
-      }));
-      setActiveTab("form");
-      showMessage(
-        `ESR uploaded. AI extracted ${result.extractedFields.length} field(s).`,
+      setUploadedFileUrls(
+        uploaded.map((f) => ({ name: f.name, url: f.url, type: f.type })),
       );
     } catch (error) {
       showMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to process ESR right now.",
+        error instanceof Error ? error.message : "Unable to upload files.",
       );
-    }
-  };
-
-  const handleUploadFinancials = async () => {
-    if (!selectedReturn) return;
-
-    const files = pendingFinancialFiles[selectedReturn.id] ?? [];
-    if (!files.length) {
-      showMessage("Choose at least one financial document.");
-      return;
-    }
-
-    try {
-      showMessage("Uploading financial documents...");
-      await uploadFinancialDocuments({ files });
-      setPendingFinancialFiles((previous) => ({
-        ...previous,
-        [selectedReturn.id]: [],
-      }));
-      showMessage("Financial pack uploaded to vault.");
-    } catch (error) {
-      showMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to upload financial files.",
-      );
+    } finally {
+      setIsUploadingFiles(false);
     }
   };
 
@@ -375,22 +297,16 @@ export default function ReturnWorkspacePage() {
   const handleAssignFinancialStatements = async (fileUrl: string) => {
     if (!selectedReturn) return;
 
-    const file = selectedFiles.find((entry) => entry.url === fileUrl);
-    if (!file) return;
-
     try {
       await assignDocumentRoleMutation.mutateAsync({
         orgId,
         taxReturnId: selectedReturn.id,
         fileUrl,
-        role:
-          file.role === "financial_statements" ? null : "financial_statements",
+        role: "financial_statements",
       });
-      showMessage(
-        file.role === "financial_statements"
-          ? "Financial statements assignment cleared."
-          : `"${file.name}" assigned as the financial statements PDF.`,
-      );
+      setUploadedFileUrls(null);
+      toast.dismiss();
+      toast.success("Financial statements assigned.");
     } catch (error) {
       showMessage(
         error instanceof Error
@@ -585,24 +501,20 @@ export default function ReturnWorkspacePage() {
               <ReturnFilesTab
                 selectedReturnId={selectedReturn.id}
                 selectedFiles={selectedFiles}
-                pendingEsrFiles={pendingEsrFiles}
-                setPendingEsrFiles={setPendingEsrFiles}
-                pendingFinancialFiles={pendingFinancialFiles}
-                setPendingFinancialFiles={setPendingFinancialFiles}
-                isDocumentsPending={addDocumentsMutation.isPending}
+                hasFinancialStatements={selectedFiles.some((f) => f.role === "financial_statements")}
+                isUploading={isUploadingFiles}
                 isExtractPending={extractSubstanceFormMutation.isPending}
                 isAssignPending={assignDocumentRoleMutation.isPending}
-                onUploadEsr={() => {
-                  void handleUploadEsr();
+                uploadedFileUrls={uploadedFileUrls}
+                onUploadFiles={(files) => {
+                  void handleUploadFiles(files);
                 }}
-                onUploadFinancials={() => {
-                  void handleUploadFinancials();
+                onAssignFinancialStatements={(fileUrl) => {
+                  void handleAssignFinancialStatements(fileUrl);
                 }}
+                onDismissAssignment={() => setUploadedFileUrls(null)}
                 onRunAiExtraction={() => {
                   void handleRunAiExtraction();
-                }}
-                onAssignFinancialStatements={(file) => {
-                  void handleAssignFinancialStatements(file.url);
                 }}
               />
             </Tabs>
