@@ -28,9 +28,9 @@ const aiExtractionSchema = z.object({
   registeredAddress: z.string().optional().describe("Registered office address"),
   principalPlaceOfBusiness: z.string().optional().describe("Principal place of business address"),
   isIncorporatedInGuernsey: z.enum(["Yes", "No"]).optional().describe("Is the entity incorporated in Guernsey?"),
-  economicClassificationCode: z.string().optional().describe("Economic classification code / Company Activity Code"),
+  economicClassificationCode: z.string().optional().describe("Economic classification code / Company Activity Code — REQUIRED for 2025 returns, this is a dropdown on the portal"),
   certificateType: z.string().optional().describe("Certificate type (Certificate 1, 2, or 3)"),
-  entityActivity: z.string().optional().describe("Entity activity from Directors Report"),
+  entityActivity: z.string().optional().describe("Nature of the entity's business activity (e.g., 'Property Holdings', 'Investment Holding') — extract from Directors Report or company description"),
 
   // SECTION 3: PARTNERSHIP INFORMATION
   partnershipName: z.string().optional().describe("Partnership name if applicable"),
@@ -38,10 +38,10 @@ const aiExtractionSchema = z.object({
 
   // SECTION 4: FINANCIAL STATEMENTS
   areFinancialStatementsConsolidated: z.enum(["Yes", "No"]).optional().describe("Are financial statements consolidated?"),
-  accountsPreparerName: z.string().optional().describe("Name of accounts preparer"),
-  accountsPreparerQualification: z.string().optional().describe("Qualification of preparer (ACCA, ICAEW, etc.)"),
-  netBookValue: z.string().optional().describe("Net book value from Balance Sheet"),
-  totalProfit: z.string().optional().describe("Total profit from Profit & Loss Account"),
+  accountsPreparerName: z.string().optional().describe("Name of the firm/person who prepared the FINANCIAL ACCOUNTS (the accountant/auditor, NOT the ESR form preparer — do NOT use 'LTS Tax Limited' here)"),
+  accountsPreparerQualification: z.string().optional().describe("Qualification of the accounts preparer/auditor (ACCA, ICAEW, etc.) — this is the accountant's qualification, not LTS"),
+  netBookValue: z.string().optional().describe("Net book value from Balance Sheet — if negative, return '0'"),
+  totalProfit: z.string().optional().describe("Total profit from Profit & Loss Account — if negative (a loss), return '0'"),
   profitAllocation: z.enum(["Investment", "Business"]).optional().describe("Profit before tax allocation - Investment or Business"),
 
   // SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
@@ -208,7 +208,15 @@ export const substanceFormRouter = createTRPCRouter({
           // Set defaults
           preparedBy: "LTS Tax Limited",
           profitAllocation: "Investment",
-          missingFields: getMissingFields({ preparedBy: "LTS Tax Limited" }),
+          isGuernseyFiFatca: "No",
+          isGuernseyFiCrs: "No",
+          isRegisteredOnIgor: "No",
+          isConstituentEntity: "No",
+          missingFields: getMissingFields({
+            preparedBy: "LTS Tax Limited",
+            profitAllocation: "Investment",
+            isConstituentEntity: "No",
+          }),
         })
         .returning();
 
@@ -398,21 +406,23 @@ SECTION 2: COMPANY INFORMATION
 - Company number, tax reference number
 - Registered address, principal place of business
 - Is entity incorporated in Guernsey? (Yes/No)
-- Economic classification code / Company Activity Code
+- Economic classification code / Company Activity Code — REQUIRED for 2025 returns
 - Certificate type (Certificate 1, 2, or 3)
-- Entity activity from Directors Report
+- Entity activity / Nature of the entity's business activity (e.g., "Property Holdings") — extract from Directors Report or company description. Always try to fill this.
 
 SECTION 3: PARTNERSHIP INFORMATION (if applicable)
 - Partnership name and number
 
 SECTION 4: FINANCIAL STATEMENTS
 - Are statements consolidated?
-- Accounts preparer name and qualification
-- Net book value (from Balance Sheet)
-- Total profit (from Profit & Loss Account)
+- Accounts preparer name and qualification — this is the ACCOUNTANT/AUDITOR who prepared the financial accounts, NOT "LTS Tax Limited" (LTS prepares the ESR form, not the accounts)
+- Net book value (from Balance Sheet) — if negative, return "0"
+- Total profit (from Profit & Loss Account) — if negative (a loss), return "0"
+- Profit allocation — REQUIRED, always pick "Investment" or "Business"
 
 SECTION 5: FINANCIAL INSTITUTIONS
-- FATCA and CRS status
+- FATCA and CRS status — default to "No" if entity is not a financial institution
+- IMPORTANT: If FATCA is "Yes", the entity MUST be registered on IGOR — "No" for IGOR with "Yes" for FATCA is a red flag
 
 SECTION 6: RELEVANT ACTIVITIES
 Choose ONE from: Banking, Insurance, Fund management, Financing and leasing, Distribution and Service Centre, Headquarters, Shipping, Self-managed fund, Intellectual Property Holding Company, Pure Equity Holding Company, None of the above
@@ -458,7 +468,7 @@ SECTION 12: DECLARATION
 - Manager sign off, date
 
 SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)
-- Is the entity a Constituent Entity for CbCR purposes? (Yes/No)
+- Is the entity a Constituent Entity for CbCR purposes? (Yes/No) — REQUIRED for 2025 returns, default to "No" if not specified
 
 SECTION 14: ADDITIONAL INFORMATION
 - Has there been a post balance sheet event? (Yes/No)
@@ -473,7 +483,16 @@ For dates, extract as ISO 8601 strings (YYYY-MM-DD).
 For Yes/No questions, use exactly "Yes", "No", or "N/A" where applicable.
 For the relevant activity, pick the single most applicable option from the dropdown list.
 Only extract information that is explicitly stated or can be clearly inferred.
-Do not make up or guess values - leave fields empty if information is not available.`;
+Do not make up or guess values - leave fields empty if information is not available.
+
+IMPORTANT RULES:
+- If total profit is negative (a loss), return "0". The portal does not accept negative values.
+- If net book value is negative, return "0".
+- profitAllocation is REQUIRED — always pick "Investment" or "Business" based on the entity's income type.
+- economicClassificationCode is REQUIRED for 2025 returns.
+- isConstituentEntity (CbCR) is REQUIRED for 2025 returns — default to "No" if not stated.
+- accountsPreparerName is the ACCOUNTANT who prepared the financial accounts, NOT "LTS Tax Limited".
+- If the entity has no relevant activity ("None of the above"), leave sections 6B, 7, 8, 9, and 10 empty.`;
 
       console.log("[AI Extraction] Calling generateObject with", fileContents.length, "file(s) and", textContents.length, "text content(s)");
 
@@ -509,6 +528,7 @@ Do not make up or guess values - leave fields empty if information is not availa
       const extractedData = result.object;
 
       // Apply defaults for fields that should have default values
+
       // Default preparedBy to "LTS Tax Limited" if not extracted
       if (!extractedData.preparedBy) {
         extractedData.preparedBy = "LTS Tax Limited";
@@ -519,11 +539,40 @@ Do not make up or guess values - leave fields empty if information is not availa
         extractedData.profitAllocation = "Investment";
       }
 
-      // Default isRegisteredOnIgor to "Yes" if entity is a financial institution (FATCA or CRS)
+      // Clamp negative financial values to "0" — portal does not accept negatives
+      if (extractedData.totalProfit) {
+        const numericProfit = parseFloat(extractedData.totalProfit.replace(/[^0-9.-]/g, ""));
+        if (!isNaN(numericProfit) && numericProfit < 0) {
+          extractedData.totalProfit = "0";
+        }
+      }
+      if (extractedData.netBookValue) {
+        const numericNbv = parseFloat(extractedData.netBookValue.replace(/[^0-9.-]/g, ""));
+        if (!isNaN(numericNbv) && numericNbv < 0) {
+          extractedData.netBookValue = "0";
+        }
+      }
+
+      // FATCA/CRS defaults — "No" when not a financial institution
+      if (!extractedData.isGuernseyFiFatca) {
+        extractedData.isGuernseyFiFatca = "No";
+      }
+      if (!extractedData.isGuernseyFiCrs) {
+        extractedData.isGuernseyFiCrs = "No";
+      }
+
+      // IGOR: "Yes" if FI under FATCA or CRS, "No" otherwise
       if (!extractedData.isRegisteredOnIgor) {
         if (extractedData.isGuernseyFiFatca === "Yes" || extractedData.isGuernseyFiCrs === "Yes") {
           extractedData.isRegisteredOnIgor = "Yes";
+        } else {
+          extractedData.isRegisteredOnIgor = "No";
         }
+      }
+
+      // CbCR — default to "No" for 2025 returns
+      if (!extractedData.isConstituentEntity) {
+        extractedData.isConstituentEntity = "No";
       }
 
       // Merge with existing data (AI data fills in gaps)

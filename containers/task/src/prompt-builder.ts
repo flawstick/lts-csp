@@ -112,10 +112,16 @@ ${
 
 ## FINANCIAL STATEMENTS PDF
 - A financial statements PDF has already been uploaded to your Browser Use session.
-- Use the session file named "${financialStatementsFile.sessionFileName}" if the portal asks you to upload the financial statements or accounts PDF.
+- When you encounter a file upload input for financial statements or accounts on the portal, use the **upload_file** action with the session file named "${financialStatementsFile.sessionFileName}".
 - Original file name: "${financialStatementsFile.originalName}".
+- You MUST upload this file when prompted. If the upload fails or you cannot find the file input, STOP and report "REQUIRES_ATTENTION: Financial statements upload failed".
 `
-    : ""
+    : `
+
+## FINANCIAL STATEMENTS PDF
+- No financial statements PDF was uploaded to this session.
+- If the portal requires a financial statements upload, STOP and report "REQUIRES_ATTENTION: No financial statements PDF available for upload".
+`
 }
 ${
   overrideSaved
@@ -149,17 +155,29 @@ ${
   // Section 6: Relevant Activities
   sections.push(buildRelevantActivitiesSection(substanceForm));
 
-  // Section 7: CIGA
-  sections.push(buildCigaSection(substanceForm));
+  const hasRelevantActivity =
+    substanceForm.relevantActivity &&
+    substanceForm.relevantActivity !== "None of the above";
 
-  // Section 8: Employees
-  sections.push(buildEmployeesSection(substanceForm));
+  if (hasRelevantActivity) {
+    // Sections 7-10 only apply when entity has a relevant activity
+    // Section 7: CIGA
+    sections.push(buildCigaSection(substanceForm));
 
-  // Section 9: Outsourcing
-  sections.push(buildOutsourcingSection(substanceForm));
+    // Section 8: Employees
+    sections.push(buildEmployeesSection(substanceForm));
 
-  // Section 10: Beneficial Ownership
-  sections.push(buildBeneficialOwnershipSection(substanceForm));
+    // Section 9: Outsourcing
+    sections.push(buildOutsourcingSection(substanceForm));
+
+    // Section 10: Beneficial Ownership
+    sections.push(buildBeneficialOwnershipSection(substanceForm));
+  } else {
+    sections.push(`
+## SECTIONS 7-10: SKIPPED
+The entity has no relevant activity — Adequacy Assessment, CIGA, Employees (FTE), Outsourcing, and Beneficial Ownership sections are not applicable. Leave these sections blank on the portal.
+`);
+  }
 
   // Section 11: Direction and Management
   sections.push(buildDirectionManagementSection(substanceForm));
@@ -219,6 +237,10 @@ ${field("Is Incorporated in Guernsey", form.isIncorporatedInGuernsey)}
 ${field("Economic Classification Code", form.economicClassificationCode)}
 ${field("Certificate Type", form.certificateType)}
 ${field("Entity Activity", form.entityActivity)}
+
+**IMPORTANT:**
+- Economic Classification Code is REQUIRED for 2025 returns — this is a dropdown field on the portal, select the matching option.
+- Entity Activity describes the nature of the entity's business (e.g., "Property Holdings"). Preferred to have it filled even if the entity has no relevant activity.
 `;
 }
 
@@ -230,15 +252,27 @@ ${field("Partnership Number", form.partnershipNumber)}
 `;
 }
 
+function clampNegativeToZero(value: string | null | undefined): string | null | undefined {
+  if (!value) return value;
+  const num = parseFloat(value.replace(/[^0-9.-]/g, ""));
+  if (!isNaN(num) && num < 0) return "0";
+  return value;
+}
+
 function buildFinancialStatementsSection(form: SubstanceForm): string {
   return `
 ## SECTION 4: FINANCIAL STATEMENTS
 ${field("Are Financial Statements Consolidated", form.areFinancialStatementsConsolidated)}
 ${field("Accounts Preparer Name", form.accountsPreparerName)}
 ${field("Accounts Preparer Qualification", form.accountsPreparerQualification)}
-${field("Net Book Value", form.netBookValue)}
-${field("Total Profit", form.totalProfit)}
+${field("Net Book Value", clampNegativeToZero(form.netBookValue))}
+${field("Total Profit", clampNegativeToZero(form.totalProfit))}
 ${field("Profit Before Tax Allocation", form.profitAllocation)}
+
+**IMPORTANT:**
+- Net Book Value and Total Profit: if the value is negative (a loss), enter **0**. The portal does not accept negative values.
+- Profit Before Tax Allocation is REQUIRED — must be either "Investment" or "Business".
+- Accounts Preparer Name/Qualification is the ACCOUNTANT who prepared the financial statements, NOT LTS Tax.
 `;
 }
 
@@ -248,16 +282,17 @@ function buildFinancialInstitutionsSection(form: SubstanceForm): string {
 ${field("Is Guernsey Financial Institution (FATCA)", form.isGuernseyFiFatca)}
 ${field("Is Guernsey Financial Institution (CRS)", form.isGuernseyFiCrs)}
 ${field("Is Registered on IGOR", form.isRegisteredOnIgor)}
+
+**IMPORTANT:** If FATCA is "Yes", the entity MUST be registered on IGOR. "No" for IGOR with "Yes" for FATCA is a red flag on the Guernsey portal.
 `;
 }
 
 function buildRelevantActivitiesSection(form: SubstanceForm): string {
-  return `
-## SECTION 6: RELEVANT ACTIVITIES
-${field("Relevant Activity", form.relevantActivity)}
-${field("Has Multiple Relevant Activities", form.hasMultipleRelevantActivities)}
-${field("Has Intellectual Property Holding", form.hasIntellectualPropertyHolding)}
+  const hasActivity =
+    form.relevantActivity && form.relevantActivity !== "None of the above";
 
+  const ipSection = hasActivity
+    ? `
 ### IP Holdings (if applicable):
 ${field("Is High Risk IP Entity", form.isHighRiskIpEntity)}
 ${field("Wants to Rebut High Risk Status", form.wantsToRebutHighRiskStatus)}
@@ -269,7 +304,16 @@ ${field("Turnover", form.activityGrossIncome)}
 ${field("Has Adequate Expenditure", form.hasAdequateExpenditure)}
 ${field("Has Adequate Physical Presence", form.hasAdequatePhysicalPresence)}
 ${field("Adequacy Expenditure Details", form.adequacyExpenditureDetails)}
-${field("Adequacy Physical Presence Details", form.adequacyPhysicalPresenceDetails)}
+${field("Adequacy Physical Presence Details", form.adequacyPhysicalPresenceDetails)}`
+    : `
+**No relevant activity — IP Holdings and Adequacy Assessment sections are not applicable. Leave blank.`;
+
+  return `
+## SECTION 6: RELEVANT ACTIVITIES
+${field("Relevant Activity", form.relevantActivity)}
+${field("Has Multiple Relevant Activities", form.hasMultipleRelevantActivities)}
+${field("Has Intellectual Property Holding", form.hasIntellectualPropertyHolding)}
+${ipSection}
 `;
 }
 
@@ -393,7 +437,9 @@ ${field("Manager Sign Off Date", form.managerSignOffDate)}
 function buildCbcrSection(form: SubstanceForm): string {
   return `
 ## SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)
-${field("Is Constituent Entity", form.isConstituentEntity)}
+${field("Is Constituent Entity", form.isConstituentEntity || "No")}
+
+**IMPORTANT:** This is a REQUIRED question for 2025 returns. Default is "No".
 `;
 }
 

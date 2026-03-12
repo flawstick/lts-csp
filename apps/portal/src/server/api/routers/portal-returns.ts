@@ -46,18 +46,20 @@ const aiExtractionSchema = z.object({
   registeredAddress: z.string().optional(),
   principalPlaceOfBusiness: z.string().optional(),
   isIncorporatedInGuernsey: z.enum(["Yes", "No"]).optional(),
-  economicClassificationCode: z.string().optional(),
+  economicClassificationCode: z.string().optional().describe("REQUIRED for 2025 returns — Company Activity Code dropdown"),
   certificateType: z.string().optional(),
-  entityActivity: z.string().optional(),
+  entityActivity: z.string().optional().describe("Nature of the entity's business activity (e.g., 'Property Holdings') — extract from Directors Report"),
   partnershipName: z.string().optional(),
   partnershipNumber: z.string().optional(),
   areFinancialStatementsConsolidated: z.enum(["Yes", "No"]).optional(),
-  accountsPreparerName: z.string().optional(),
-  accountsPreparerQualification: z.string().optional(),
-  netBookValue: z.string().optional(),
-  totalProfit: z.string().optional(),
+  accountsPreparerName: z.string().optional().describe("Name of the ACCOUNTANT/AUDITOR who prepared the financial accounts, NOT the ESR form preparer"),
+  accountsPreparerQualification: z.string().optional().describe("Qualification of the accounts preparer/auditor (ACCA, ICAEW, etc.)"),
+  netBookValue: z.string().optional().describe("Net book value from Balance Sheet — if negative, return '0'"),
+  totalProfit: z.string().optional().describe("Total profit from P&L — if negative (a loss), return '0'"),
+  profitAllocation: z.enum(["Investment", "Business"]).optional().describe("Profit before tax allocation — REQUIRED, always pick one"),
   isGuernseyFiFatca: z.enum(["Yes", "No"]).optional(),
   isGuernseyFiCrs: z.enum(["Yes", "No"]).optional(),
+  isRegisteredOnIgor: z.enum(["Yes", "No"]).optional().describe("Is registered on IGOR — must be Yes if FATCA is Yes"),
   relevantActivity: z
     .enum([
       "Banking",
@@ -860,6 +862,59 @@ export const portalReturnsRouter = createTRPCRouter({
       return { success: true, files: updatedFiles };
     }),
 
+  removeReturnDocument: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        taxReturnId: z.string().uuid(),
+        fileUrl: z.string().url(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      const returnRecord = await ctx.db.query.taxReturns.findFirst({
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
+      });
+
+      if (!returnRecord) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
+      }
+
+      const existingFiles = returnRecord.files ?? [];
+      const updatedFiles = existingFiles.filter(
+        (file) => file.url !== input.fileUrl,
+      );
+
+      if (updatedFiles.length === existingFiles.length) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "File not found on this return.",
+        });
+      }
+
+      await ctx.db
+        .update(taxReturns)
+        .set({
+          files: updatedFiles,
+          updatedAt: new Date(),
+        })
+        .where(eq(taxReturns.id, returnRecord.id));
+
+      return { success: true };
+    }),
+
   saveReturnIntake: protectedProcedure
     .input(
       z.object({
@@ -972,7 +1027,13 @@ export const portalReturnsRouter = createTRPCRouter({
             taxReferenceNumber: returnRecord.externalId ?? undefined,
             accountingPeriodStart: `${returnRecord.taxYear}-01-01`,
             accountingPeriodEnd: `${returnRecord.taxYear}-12-31`,
-            missingFields: getMissingFields({}),
+            isGuernseyFiFatca: "No",
+            isGuernseyFiCrs: "No",
+            isRegisteredOnIgor: "No",
+            isConstituentEntity: "No",
+            missingFields: getMissingFields({
+              isConstituentEntity: "No",
+            }),
             lastEditedBy: account.id,
           })
           .returning();
@@ -1101,6 +1162,14 @@ Use these strict output rules:
 - Yes/No fields: "Yes" or "No"
 - Yes/No/N/A fields: "Yes", "No", or "N/A"
 - relevantActivity: pick exactly one allowed option from the enum.
+- If total profit is negative (a loss), return "0". The portal does not accept negative values.
+- If net book value is negative, return "0".
+- profitAllocation is REQUIRED — always pick "Investment" or "Business".
+- economicClassificationCode is REQUIRED for 2025 returns.
+- isConstituentEntity (CbCR) is REQUIRED for 2025 returns — default to "No" if not stated.
+- accountsPreparerName is the ACCOUNTANT who prepared the financial accounts, NOT "LTS Tax Limited".
+- entityActivity: always try to extract the nature of the entity's activity (e.g., "Property Holdings").
+- If the entity has no relevant activity ("None of the above"), leave adequacy, CIGA, employees, outsourcing, and beneficial ownership sections empty.
 
 For CIGA, use these activity mappings:
 ${cigaOptionsText}
@@ -1128,6 +1197,38 @@ ${cigaOptionsText}
       });
 
       const extractedData = result.object;
+
+      // Clamp negative financial values to "0"
+      if (extractedData.totalProfit) {
+        const num = parseFloat(extractedData.totalProfit.replace(/[^0-9.-]/g, ""));
+        if (!isNaN(num) && num < 0) extractedData.totalProfit = "0";
+      }
+      if (extractedData.netBookValue) {
+        const num = parseFloat(extractedData.netBookValue.replace(/[^0-9.-]/g, ""));
+        if (!isNaN(num) && num < 0) extractedData.netBookValue = "0";
+      }
+
+      // Default profitAllocation to "Investment" if not extracted
+      if (!extractedData.profitAllocation) {
+        extractedData.profitAllocation = "Investment";
+      }
+
+      // FATCA/CRS defaults
+      if (!extractedData.isGuernseyFiFatca) extractedData.isGuernseyFiFatca = "No";
+      if (!extractedData.isGuernseyFiCrs) extractedData.isGuernseyFiCrs = "No";
+
+      // IGOR: "Yes" if FI under FATCA or CRS, "No" otherwise
+      if (!extractedData.isRegisteredOnIgor) {
+        if (extractedData.isGuernseyFiFatca === "Yes" || extractedData.isGuernseyFiCrs === "Yes") {
+          extractedData.isRegisteredOnIgor = "Yes";
+        } else {
+          extractedData.isRegisteredOnIgor = "No";
+        }
+      }
+
+      // CbCR default
+      if (!extractedData.isConstituentEntity) extractedData.isConstituentEntity = "No";
+
       const merged = { ...form, ...extractedData } as SubstanceFormData;
       const missingFields = getMissingFields(merged);
 

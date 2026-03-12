@@ -226,6 +226,9 @@ export const REQUIRED_FIELDS: (keyof SubstanceFormData)[] = [
   "entityType",
   "accountingPeriodStart",
   "accountingPeriodEnd",
+  "economicClassificationCode",
+  "profitAllocation",
+  "isConstituentEntity",
   "relevantActivity",
   "allBoardMeetingsInGuernsey",
   "totalBoardMeetings",
@@ -239,6 +242,10 @@ export const REQUIRED_FIELDS: (keyof SubstanceFormData)[] = [
 
 export function getMissingFields(data: Partial<SubstanceFormData>): string[] {
   const missing: string[] = [];
+  const hasRelevantActivity =
+    data.relevantActivity !== undefined &&
+    data.relevantActivity !== null &&
+    data.relevantActivity !== "None of the above";
 
   for (const field of REQUIRED_FIELDS) {
     const value = data[field];
@@ -252,8 +259,11 @@ export function getMissingFields(data: Partial<SubstanceFormData>): string[] {
     if (!data.partnershipName) missing.push("partnershipName");
   }
 
-  if (data.hasCigaOutsourcing === "Yes" && !data.outsourcingDetails) {
-    missing.push("outsourcingDetails");
+  // Only require substance-related fields when entity has a relevant activity
+  if (hasRelevantActivity) {
+    if (data.hasCigaOutsourcing === "Yes" && !data.outsourcingDetails) {
+      missing.push("outsourcingDetails");
+    }
   }
 
   return missing;
@@ -444,30 +454,40 @@ export const FORM_SECTIONS = [
     title: "Adequacy Assessment",
     description: "Assessment of adequate substance (expenditure and physical presence)",
     fields: ["hasAdequateExpenditure", "hasAdequatePhysicalPresence", "adequacyExpenditureDetails", "adequacyPhysicalPresenceDetails"],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
   },
   {
     id: "ciga",
     title: "Core Income Generating Activities (CIGA)",
     description: "Details of CIGA performed for the relevant activity",
     fields: ["cigaPerformed", "cigaDetails"],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
   },
   {
     id: "employees",
     title: "Employees (FTE Calculation)",
     description: "Full-time equivalent employee calculations",
     fields: ["employees", "totalFte", "totalQualifiedFte"],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
   },
   {
     id: "outsourcing",
     title: "Outsourcing",
     description: "Details of any outsourced CIGA",
     fields: ["hasCigaOutsourcing", "outsourcingDetails"],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
   },
   {
     id: "beneficialOwnership",
     title: "Beneficial Ownership",
     description: "Parent entities and ultimate beneficial owners",
     fields: ["immediateParents", "ultimateParents", "ultimateBeneficialOwners"],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
   },
   {
     id: "directedManaged",

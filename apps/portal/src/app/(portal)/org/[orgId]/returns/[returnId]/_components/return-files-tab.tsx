@@ -6,7 +6,9 @@ import {
   FileSpreadsheet,
   FileText,
   Loader2,
+  MoreVertical,
   Sparkles,
+  Trash2,
   UploadCloud,
 } from "lucide-react";
 
@@ -21,6 +23,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -53,6 +62,8 @@ type ReturnFilesTabProps = {
   onAssignFinancialStatements: (fileUrl: string) => void;
   onDismissAssignment: () => void;
   onRunAiExtraction: () => void;
+  onRemoveDocument: (fileUrl: string) => void;
+  onUnassignFinancialStatements: (fileUrl: string) => void;
 };
 
 export function ReturnFilesTab({
@@ -66,10 +77,17 @@ export function ReturnFilesTab({
   onAssignFinancialStatements,
   onDismissAssignment,
   onRunAiExtraction,
+  onRemoveDocument,
+  onUnassignFinancialStatements,
 }: ReturnFilesTabProps) {
   const fileInputId = useId();
   const [isDragging, setIsDragging] = useState(false);
   const [selectedRadio, setSelectedRadio] = useState<string>("__none__");
+  const [deletingFileUrl, setDeletingFileUrl] = useState<string | null>(null);
+
+  const deletingFile = deletingFileUrl
+    ? selectedFiles.find((f) => f.url === deletingFileUrl) ?? null
+    : null;
 
   const uploadedPdfs = useMemo(
     () => (uploadedFileUrls ?? []).filter((f) => isPdfLike(f)),
@@ -81,7 +99,7 @@ export function ReturnFilesTab({
     !hasFinancialStatements &&
     uploadedPdfs.length > 0;
 
-  const showAlertDialog = shouldPrompt && uploadedPdfs.length === 1;
+  const showSingleDialog = shouldPrompt && uploadedPdfs.length === 1;
   const showPickerDialog = shouldPrompt && uploadedPdfs.length > 1;
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -105,9 +123,6 @@ export function ReturnFilesTab({
     }
     setSelectedRadio("__none__");
   };
-
-  const assignedFile =
-    selectedFiles.find((f) => f.role === "financial_statements") ?? null;
 
   return (
     <TabsContent value="files">
@@ -136,11 +151,6 @@ export function ReturnFilesTab({
               </div>
             </div>
 
-            {assignedFile ? (
-              <span className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                Statements: {assignedFile.name}
-              </span>
-            ) : null}
           </div>
 
           <div
@@ -265,12 +275,49 @@ export function ReturnFilesTab({
                     </div>
                   </div>
 
-                  <Button variant="ghost" size="sm" asChild>
-                    <a href={file.url} target="_blank" rel="noreferrer">
-                      <ExternalLink className="size-3.5" />
-                      Open
-                    </a>
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="sm" asChild>
+                      <a href={file.url} target="_blank" rel="noreferrer">
+                        <ExternalLink className="size-3.5" />
+                        Open
+                      </a>
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="size-8">
+                          <MoreVertical className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="max-w-48">
+                        {file.role === "financial_statements" ? (
+                          <DropdownMenuItem
+                            className="cursor-pointer"
+                            onClick={() => onUnassignFinancialStatements(file.url)}
+                          >
+                            <FileText className="size-3.5" />
+                            Unassign financial statements
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            className="cursor-pointer"
+                            onClick={() => onAssignFinancialStatements(file.url)}
+                          >
+                            <FileText className="size-3.5" />
+                            Assign as financial statements
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          className="cursor-pointer"
+                          onClick={() => setDeletingFileUrl(file.url)}
+                        >
+                          <Trash2 className="size-3.5" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </div>
               ))}
             </div>
@@ -279,98 +326,137 @@ export function ReturnFilesTab({
       </div>
 
       {/* Single PDF prompt */}
-      <AlertDialog
-        open={showAlertDialog}
-        onOpenChange={(open) => { if (!open) onDismissAssignment(); }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Financial Statements?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Is <span className="font-medium text-foreground">{uploadedPdfs[0]?.name}</span> your
-              financial statements for this return?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={onDismissAssignment}>No</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                const pdf = uploadedPdfs[0];
-                if (pdf) onAssignFinancialStatements(pdf.url);
-              }}
-            >
-              Yes, assign it
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {showSingleDialog ? (
+        <Dialog
+          open
+          onOpenChange={(open) => { if (!open) onDismissAssignment(); }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Financial Statements?</DialogTitle>
+              <DialogDescription>
+                Is <span className="font-medium text-foreground">{uploadedPdfs[0]?.name}</span> your
+                financial statements for this return?
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={onDismissAssignment}>No</Button>
+              <Button
+                disabled={isAssignPending}
+                onClick={() => {
+                  const pdf = uploadedPdfs[0];
+                  if (pdf) onAssignFinancialStatements(pdf.url);
+                }}
+              >
+                {isAssignPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : null}
+                Yes, assign it
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
 
       {/* Multiple PDFs picker */}
-      <Dialog
-        open={showPickerDialog}
-        onOpenChange={(open) => {
-          if (!open) {
-            onDismissAssignment();
-            setSelectedRadio("__none__");
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Select Financial Statements</DialogTitle>
-            <DialogDescription>
-              Which of these PDFs is the financial statements for this return?
-            </DialogDescription>
-          </DialogHeader>
+      {showPickerDialog ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              onDismissAssignment();
+              setSelectedRadio("__none__");
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Select Financial Statements</DialogTitle>
+              <DialogDescription>
+                Which of these PDFs is the financial statements for this return?
+              </DialogDescription>
+            </DialogHeader>
 
-          <RadioGroup
-            value={selectedRadio}
-            onValueChange={setSelectedRadio}
-            className="gap-0 divide-y divide-border/50 rounded-lg border border-border/60"
-          >
-            {uploadedPdfs.map((file) => (
+            <RadioGroup
+              value={selectedRadio}
+              onValueChange={setSelectedRadio}
+              className="gap-0 divide-y divide-border/50 rounded-lg border border-border/60"
+            >
+              {uploadedPdfs.map((file) => (
+                <label
+                  key={file.url}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30",
+                    selectedRadio === file.url && "bg-primary/[0.04]",
+                  )}
+                >
+                  <RadioGroupItem value={file.url} />
+                  <FileText className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 truncate text-sm">{file.name}</span>
+                </label>
+              ))}
               <label
-                key={file.url}
                 className={cn(
                   "flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30",
-                  selectedRadio === file.url && "bg-primary/[0.04]",
+                  selectedRadio === "__none__" && "bg-primary/[0.04]",
                 )}
               >
-                <RadioGroupItem value={file.url} />
-                <FileText className="size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 truncate text-sm">{file.name}</span>
+                <RadioGroupItem value="__none__" />
+                <span className="text-sm text-muted-foreground">None of these</span>
               </label>
-            ))}
-            <label
-              className={cn(
-                "flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30",
-                selectedRadio === "__none__" && "bg-primary/[0.04]",
-              )}
-            >
-              <RadioGroupItem value="__none__" />
-              <span className="text-sm text-muted-foreground">None of these</span>
-            </label>
-          </RadioGroup>
+            </RadioGroup>
 
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                onDismissAssignment();
-                setSelectedRadio("__none__");
-              }}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleConfirmRadio} disabled={isAssignPending}>
-              {isAssignPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : null}
-              Confirm
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  onDismissAssignment();
+                  setSelectedRadio("__none__");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleConfirmRadio} disabled={isAssignPending}>
+                {isAssignPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : null}
+                Confirm
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+      {/* Delete confirmation */}
+      {deletingFileUrl ? (
+        <AlertDialog
+          open
+          onOpenChange={(open) => { if (!open) setDeletingFileUrl(null); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove file?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to remove{" "}
+                <span className="font-medium text-foreground">
+                  {deletingFile?.name ?? "this file"}
+                </span>
+                ? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  onRemoveDocument(deletingFileUrl);
+                  setDeletingFileUrl(null);
+                }}
+              >
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
     </TabsContent>
   );
 }

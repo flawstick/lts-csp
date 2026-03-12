@@ -364,6 +364,9 @@ async function main() {
         entityName: taxReturn.entityName,
         taxYear: String(taxReturn.taxYear),
       },
+      ...(financialStatementsFile && {
+        includedFileNames: [financialStatementsFile.sessionFileName],
+      }),
     });
 
     await log("Task created", { taskId: taskResponse.id });

@@ -132,6 +132,7 @@ export const substanceFormSchema = z.object({
   accountsPreparerQualification: z.string().optional(), // e.g. ACCA, ICAEW
   netBookValue: z.string().optional(), // From Balance Sheet
   totalProfit: z.string().optional(), // From P&L Account
+  profitAllocation: z.enum(["Investment", "Business"]).optional(), // Profit before tax allocation
 
   // =========================================================================
   // SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
@@ -258,6 +259,9 @@ export const REQUIRED_FIELDS: (keyof SubstanceFormData)[] = [
   "entityType",
   "accountingPeriodStart",
   "accountingPeriodEnd",
+  "economicClassificationCode",
+  "profitAllocation",
+  "isConstituentEntity",
   "relevantActivity",
   "allBoardMeetingsInGuernsey",
   "totalBoardMeetings",
@@ -272,6 +276,10 @@ export const REQUIRED_FIELDS: (keyof SubstanceFormData)[] = [
 
 export function getMissingFields(data: Partial<SubstanceFormData>): string[] {
   const missing: string[] = [];
+  const hasRelevantActivity =
+    data.relevantActivity !== undefined &&
+    data.relevantActivity !== null &&
+    data.relevantActivity !== "None of the above";
 
   for (const field of REQUIRED_FIELDS) {
     const value = data[field];
@@ -285,8 +293,11 @@ export function getMissingFields(data: Partial<SubstanceFormData>): string[] {
     if (!data.partnershipName) missing.push("partnershipName");
   }
 
-  if (data.hasCigaOutsourcing === "Yes" && !data.outsourcingDetails) {
-    missing.push("outsourcingDetails");
+  // Only require substance-related fields when entity has a relevant activity
+  if (hasRelevantActivity) {
+    if (data.hasCigaOutsourcing === "Yes" && !data.outsourcingDetails) {
+      missing.push("outsourcingDetails");
+    }
   }
 
   return missing;
@@ -334,6 +345,7 @@ export const FIELD_LABELS: Record<string, string> = {
   accountsPreparerQualification: "Preparer Qualification (e.g. ACCA, ICAEW)",
   netBookValue: "Net Book Value",
   totalProfit: "Total Profit",
+  profitAllocation: "Profit Before Tax Allocation",
 
   // Financial Institutions
   isGuernseyFiFatca: "Is Guernsey FI under FATCA?",
@@ -478,6 +490,7 @@ export const FORM_SECTIONS = [
       "accountsPreparerQualification",
       "netBookValue",
       "totalProfit",
+      "profitAllocation",
     ],
   },
   {
@@ -546,6 +559,8 @@ export const FORM_SECTIONS = [
       "outsourcers",
       "outsourcingDetails",
     ],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
   },
   {
     id: "economicSubstance2",
@@ -585,6 +600,8 @@ export const FORM_SECTIONS = [
       "ultimateParents",
       "ultimateBeneficialOwners",
     ],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
   },
   {
     id: "directedManaged",

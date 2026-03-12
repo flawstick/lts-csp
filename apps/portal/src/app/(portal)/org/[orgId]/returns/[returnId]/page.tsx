@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
 import { uploadPortalFile } from "@/lib/portal-upload";
@@ -95,6 +95,13 @@ export default function ReturnWorkspacePage() {
 
   const assignDocumentRoleMutation =
     api.portalReturns.assignReturnDocumentRole.useMutation({
+      onSuccess: () => {
+        void utils.portalReturns.listByOrg.invalidate({ orgId });
+      },
+    });
+
+  const removeDocumentMutation =
+    api.portalReturns.removeReturnDocument.useMutation({
       onSuccess: () => {
         void utils.portalReturns.listByOrg.invalidate({ orgId });
       },
@@ -316,6 +323,45 @@ export default function ReturnWorkspacePage() {
     }
   };
 
+  const handleUnassignFinancialStatements = async (fileUrl: string) => {
+    if (!selectedReturn) return;
+
+    try {
+      await assignDocumentRoleMutation.mutateAsync({
+        orgId,
+        taxReturnId: selectedReturn.id,
+        fileUrl,
+        role: null,
+      });
+      toast.dismiss();
+      toast.success("Financial statements unassigned.");
+    } catch (error) {
+      showMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to update file assignment.",
+      );
+    }
+  };
+
+  const handleRemoveDocument = async (fileUrl: string) => {
+    if (!selectedReturn) return;
+
+    try {
+      await removeDocumentMutation.mutateAsync({
+        orgId,
+        taxReturnId: selectedReturn.id,
+        fileUrl,
+      });
+      toast.dismiss();
+      toast.success("File removed.");
+    } catch (error) {
+      showMessage(
+        error instanceof Error ? error.message : "Unable to remove file.",
+      );
+    }
+  };
+
   const handleInitForm = async () => {
     try {
       await ensureSubstanceFormExists();
@@ -461,17 +507,6 @@ export default function ReturnWorkspacePage() {
                 </TabsList>
               </div>
 
-              {(addDocumentsMutation.isPending ||
-                extractSubstanceFormMutation.isPending) &&
-              activeTab === "files" ? (
-                <div className="mt-4 rounded-[1rem] border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-700 dark:text-blue-400">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="size-4 animate-spin" />
-                    Processing uploaded files...
-                  </div>
-                </div>
-              ) : null}
-
               <ReturnFormTab
                 draftForm={draftForm}
                 setDraftForm={setDraftForm}
@@ -515,6 +550,12 @@ export default function ReturnWorkspacePage() {
                 onDismissAssignment={() => setUploadedFileUrls(null)}
                 onRunAiExtraction={() => {
                   void handleRunAiExtraction();
+                }}
+                onRemoveDocument={(fileUrl) => {
+                  void handleRemoveDocument(fileUrl);
+                }}
+                onUnassignFinancialStatements={(fileUrl) => {
+                  void handleUnassignFinancialStatements(fileUrl);
                 }}
               />
             </Tabs>

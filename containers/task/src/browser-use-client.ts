@@ -87,6 +87,7 @@ export interface CreateTaskRequest {
   thinking?: boolean;
   vision?: boolean | "auto";
   systemPromptExtension?: string;
+  includedFileNames?: string[];
 }
 
 export interface SessionView {
