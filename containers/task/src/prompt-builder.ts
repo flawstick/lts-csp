@@ -59,6 +59,7 @@ interface PromptBuilderOptions {
   returnLink?: string;
   overrideSaved?: boolean;
   financialStatementsFile?: SessionInputFile | null;
+  financialStatementsUrl?: string | null;
 }
 
 /**
@@ -74,6 +75,7 @@ export function buildSubstanceFormPrompt(
     returnLink,
     overrideSaved,
     financialStatementsFile,
+    financialStatementsUrl,
   } = options;
 
   const sections: string[] = [];
@@ -107,27 +109,29 @@ If prompted for CSP or secret credentials:
 
 **IF STUCK:** If you cannot complete a field or encounter an error you cannot resolve, pause the task and report the issue for user intervention.
 ${
-  financialStatementsFile
+  financialStatementsFile && financialStatementsUrl
     ? `
 
 ## FINANCIAL STATEMENTS PDF — CRITICAL: DO NOT SKIP THIS
-- A financial statements PDF has already been uploaded to your Browser Use session.
-- File name in session: "${financialStatementsFile.sessionFileName}"
-- Original file name: "${financialStatementsFile.originalName}"
+- File: "${financialStatementsFile.originalName}"
+- Download URL: ${financialStatementsUrl}
 
-**PORTAL FLOW FOR FINANCIAL STATEMENTS:**
-1. The portal will ask a question like "Are financial statements available online?" or "Have financial statements been filed online?" or similar.
-2. You MUST select **"No"** to this question. Selecting "Yes" or skipping will cause the upload section to be missed.
-3. After selecting "No", a file upload input will appear for you to upload the financial statements PDF.
-4. Use the **upload_file** action with the file named "${financialStatementsFile.sessionFileName}" to upload it.
-5. Do NOT skip this section. Do NOT select "Yes". Do NOT move past without uploading the file.
+**PORTAL FLOW FOR FINANCIAL STATEMENTS (Upload Accounts section):**
+1. When the portal asks if financial statements are available online, select **"No"**.
+2. A file upload input will appear.
+3. To upload the file, use **run_javascript** with this EXACT script:
 
-**IF THE UPLOAD FAILS:** STOP and report "REQUIRES_ATTENTION: Financial statements upload failed".
+fetch('${financialStatementsUrl}').then(r=>r.blob()).then(blob=>{const f=new File([blob],'${financialStatementsFile.originalName}',{type:'application/pdf'});const d=new DataTransfer();d.items.add(f);const i=document.querySelector('input[type="file"]');if(i){i.files=d.files;i.dispatchEvent(new Event('change',{bubbles:true}))}})
+
+4. After running the script, verify the file name appears next to the upload input.
+5. If run_javascript is not available, try **upload_file** with path "${financialStatementsFile.sessionFileName}" instead.
+6. Do NOT skip this section. Do NOT select "Yes". Do NOT move past without uploading the file.
+7. If neither approach works, STOP and report "REQUIRES_ATTENTION: Financial statements upload failed".
 `
     : `
 
 ## FINANCIAL STATEMENTS PDF
-- No financial statements PDF was uploaded to this session.
+- No financial statements PDF was provided.
 - If the portal requires a financial statements upload, STOP and report "REQUIRES_ATTENTION: No financial statements PDF available for upload".
 `
 }
@@ -281,7 +285,7 @@ ${field("Profit Before Tax Allocation", form.profitAllocation)}
 - Net Book Value and Total Profit: if the value is negative (a loss), enter **0**. The portal does not accept negative values.
 - Profit Before Tax Allocation is REQUIRED — must be either "Investment" or "Business".
 - Accounts Preparer Name/Qualification is the ACCOUNTANT who prepared the financial statements, NOT LTS Tax.
-- **FINANCIAL STATEMENTS UPLOAD:** When the portal asks if financial statements are available online, select **"No"** and then upload the PDF file using the upload_file action. See the FINANCIAL STATEMENTS PDF section above for details. DO NOT SKIP THIS.
+- **FINANCIAL STATEMENTS UPLOAD:** When the portal asks if financial statements are available online, select **"No"** and then upload the PDF using the run_javascript method described in the FINANCIAL STATEMENTS PDF section above. DO NOT SKIP THIS.
 `;
 }
 

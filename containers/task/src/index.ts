@@ -58,6 +58,7 @@ type TaxReturnAttachedFile = {
 type BrowserSessionInputFile = {
   originalName: string;
   sessionFileName: string;
+  url: string;
   category?: string;
   role?: string;
 };
@@ -229,6 +230,7 @@ async function uploadFinancialStatementsFile(
   return {
     originalName: selectedFile.name,
     sessionFileName,
+    url: selectedFile.url,
     category: selectedFile.category,
     role: selectedFile.role,
   };
@@ -325,6 +327,7 @@ async function main() {
       returnLink: taxReturn.link || undefined,
       overrideSaved: OVERRIDE_SAVED,
       financialStatementsFile,
+      financialStatementsUrl: financialStatementsFile?.url ?? null,
     });
 
     // Publish live URL immediately
@@ -364,9 +367,6 @@ async function main() {
         entityName: taxReturn.entityName,
         taxYear: String(taxReturn.taxYear),
       },
-      ...(financialStatementsFile && {
-        includedFileNames: [financialStatementsFile.sessionFileName],
-      }),
     });
 
     await log("Task created", { taskId: taskResponse.id });
