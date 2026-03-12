@@ -5,9 +5,8 @@ import {
   CalendarClock,
   Sparkles,
 } from "lucide-react";
-import { motion } from "motion/react";
-
 import { Button } from "@/components/ui/button";
+import Magnet from "@/components/Magnet";
 
 import {
   STATUS_CLASS,
@@ -76,18 +75,12 @@ export function ReturnWorkspaceHeader({
           </p>
         </div>
 
-        <Button asChild className="px-5">
-          <motion.button
-            type="button"
-            onClick={onOpenFinishSheet}
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            transition={{ type: "spring", stiffness: 380, damping: 24 }}
-          >
+        <Magnet padding={60} magnetStrength={3} wrapperClassName="cursor-pointer">
+          <Button className="px-5" onClick={onOpenFinishSheet}>
             <Sparkles className="size-4" />
             Guided finish
-          </motion.button>
-        </Button>
+          </Button>
+        </Magnet>
       </div>
     </div>
   );
