@@ -168,6 +168,12 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
               Failed
             </Badge>
           )
+        case "dismissed":
+          return (
+            <Badge variant="outline" className="text-zinc-500 px-1.5">
+              Dismissed
+            </Badge>
+          )
         default:
           return (
             <Badge variant="outline" className="text-muted-foreground px-1.5">

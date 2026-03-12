@@ -43,6 +43,13 @@
       "when": 1773305074756,
       "tag": "0005_flippant_inhumans",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1773316311483,
+      "tag": "0006_sour_jean_grey",
+      "breakpoints": true
     }
   ]
 }

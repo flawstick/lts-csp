@@ -51,7 +51,7 @@ import Link from "next/link"
 import { api } from "@/trpc/react"
 import { Skeleton } from "@/components/ui/skeleton"
 
-type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | undefined
+type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | "dismissed" | undefined
 
 export default function ReturnsPage() {
   const params = useParams()
@@ -107,6 +107,14 @@ export default function ReturnsPage() {
       setSelected(new Set())
       refetch()
     },
+  })
+
+  const dismissMutation = api.taxReturn.dismissReturn.useMutation({
+    onSuccess: () => refetch(),
+  })
+
+  const undismissMutation = api.taxReturn.undismissReturn.useMutation({
+    onSuccess: () => refetch(),
   })
 
   const { data: activeJob } = api.taxReturn.getActiveSyncJob.useQuery(undefined, {
@@ -194,6 +202,8 @@ export default function ReturnsPage() {
         return <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20 shadow-none hover:bg-orange-500/20">Review Required</Badge>
       case "failed":
         return <Badge className="bg-red-500/10 text-red-600 border-red-500/20 shadow-none hover:bg-red-500/20">Failed</Badge>
+      case "dismissed":
+        return <Badge className="bg-zinc-500/10 text-zinc-500 border-zinc-500/20 shadow-none hover:bg-zinc-500/20">Dismissed</Badge>
       default:
         return <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20 shadow-none hover:bg-yellow-500/20">Pending</Badge>
     }
@@ -310,6 +320,7 @@ export default function ReturnsPage() {
                     <SelectItem value="review_required">Review Required</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
                     <SelectItem value="failed">Failed</SelectItem>
+                    <SelectItem value="dismissed">Dismissed</SelectItem>
                   </SelectContent>
                 </Select>
                 {selected.size > 0 && (
@@ -427,7 +438,18 @@ export default function ReturnsPage() {
                                   </DropdownMenuItem>
                                 )}
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem 
+                                {item.status !== "dismissed" && item.status !== "completed" ? (
+                                  <DropdownMenuItem onClick={() => dismissMutation.mutate({ taxReturnId: item.id })}>
+                                    <X className="mr-2 h-4 w-4" />
+                                    Dismiss
+                                  </DropdownMenuItem>
+                                ) : item.status === "dismissed" ? (
+                                  <DropdownMenuItem onClick={() => undismissMutation.mutate({ taxReturnId: item.id })}>
+                                    <RefreshCw className="mr-2 h-4 w-4" />
+                                    Restore
+                                  </DropdownMenuItem>
+                                ) : null}
+                                <DropdownMenuItem
                                   onClick={() => handleDeleteSingle(item.id)}
                                 >
                                   <Trash className="mr-2 h-4 w-4" />

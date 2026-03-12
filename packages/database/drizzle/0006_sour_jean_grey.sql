@@ -1,0 +1,1 @@
+ALTER TYPE "public"."tax_return_status" ADD VALUE 'dismissed';

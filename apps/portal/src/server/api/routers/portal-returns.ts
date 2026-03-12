@@ -1345,4 +1345,76 @@ ${cigaOptionsText}
         task: createdTask ?? null,
       };
     }),
+
+  dismissReturn: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        taxReturnId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      const returnRecord = await ctx.db.query.taxReturns.findFirst({
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
+      });
+
+      if (!returnRecord) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
+      }
+
+      if (returnRecord.status === "completed") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Cannot dismiss a completed return.",
+        });
+      }
+
+      await ctx.db
+        .update(taxReturns)
+        .set({ status: "dismissed", updatedAt: new Date() })
+        .where(eq(taxReturns.id, input.taxReturnId));
+
+      return { success: true };
+    }),
+
+  undismissReturn: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        taxReturnId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      await ctx.db
+        .update(taxReturns)
+        .set({ status: "pending", updatedAt: new Date() })
+        .where(
+          and(
+            eq(taxReturns.id, input.taxReturnId),
+            eq(taxReturns.orgId, input.orgId),
+          ),
+        );
+
+      return { success: true };
+    }),
 });

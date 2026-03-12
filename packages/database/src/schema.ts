@@ -69,6 +69,7 @@ export const taxReturnStatusEnum = pgEnum("tax_return_status", [
   "completed",
   "failed",
   "review_required",
+  "dismissed",
 ]);
 
 export const invitationStatusEnum = pgEnum("invitation_status", [

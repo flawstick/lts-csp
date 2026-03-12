@@ -4,6 +4,8 @@ import {
   Building2,
   CalendarClock,
   Sparkles,
+  XCircle,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
@@ -21,6 +23,9 @@ type ReturnWorkspaceHeaderProps = {
   selectedReturn: PortalReturnRecord;
   selectedStatus: ReturnStatusTone;
   onOpenFinishSheet: () => void;
+  onDismiss?: () => void;
+  onUndismiss?: () => void;
+  isDismissing?: boolean;
 };
 
 export function ReturnWorkspaceHeader({
@@ -28,6 +33,9 @@ export function ReturnWorkspaceHeader({
   selectedReturn,
   selectedStatus,
   onOpenFinishSheet,
+  onDismiss,
+  onUndismiss,
+  isDismissing,
 }: ReturnWorkspaceHeaderProps) {
   return (
     <div className="px-6 py-6">
@@ -76,6 +84,19 @@ export function ReturnWorkspaceHeader({
           </p>
         </div>
 
+        <div className="flex items-center gap-2">
+          {selectedStatus === "dismissed" && onUndismiss ? (
+            <Button variant="outline" onClick={onUndismiss} disabled={isDismissing}>
+              <RotateCcw className="size-4" />
+              Restore
+            </Button>
+          ) : selectedStatus !== "completed" && onDismiss ? (
+            <Button variant="outline" onClick={onDismiss} disabled={isDismissing}>
+              <XCircle className="size-4" />
+              Dismiss
+            </Button>
+          ) : null}
+
         <Magnet padding={60} magnetStrength={3} wrapperClassName="cursor-pointer" innerClassName="cursor-pointer">
           <HoverCard openDelay={300} closeDelay={100}>
             <HoverCardTrigger asChild>
@@ -106,6 +127,7 @@ export function ReturnWorkspaceHeader({
             </HoverCardContent>
           </HoverCard>
         </Magnet>
+        </div>
       </div>
     </div>
   );

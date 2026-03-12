@@ -3,7 +3,8 @@ export type ReturnStatusTone =
   | "in_progress"
   | "completed"
   | "failed"
-  | "review_required";
+  | "review_required"
+  | "dismissed";
 export type TaskKind = "review" | "active" | "esr" | "documents";
 export type TaskFilter = "all" | TaskKind;
 export type StatusFilter = "all" | ReturnStatusTone;
@@ -33,6 +34,7 @@ export const STATUS_LABEL: Record<ReturnStatusTone, string> = {
   completed: "Completed",
   failed: "Failed",
   review_required: "Review Required",
+  dismissed: "Dismissed",
 };
 
 export const STATUS_CLASS: Record<ReturnStatusTone, string> = {
@@ -46,6 +48,8 @@ export const STATUS_CLASS: Record<ReturnStatusTone, string> = {
     "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200",
   review_required:
     "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200",
+  dismissed:
+    "border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-500/20 dark:bg-zinc-500/10 dark:text-zinc-400",
 };
 
 export const TASK_LABEL: Record<TaskKind, string> = {
@@ -71,6 +75,7 @@ export const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "in_progress", label: "In Progress" },
   { value: "failed", label: "Failed" },
   { value: "review_required", label: "Review Required" },
+  { value: "dismissed", label: "Dismissed" },
 ];
 
 export function normalizeStatus(status: string): ReturnStatusTone {
@@ -78,6 +83,7 @@ export function normalizeStatus(status: string): ReturnStatusTone {
   if (status === "in_progress") return "in_progress";
   if (status === "completed") return "completed";
   if (status === "failed") return "failed";
+  if (status === "dismissed") return "dismissed";
   return "review_required";
 }
 

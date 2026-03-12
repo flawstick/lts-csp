@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
 import {
@@ -283,6 +284,7 @@ export const taxReturnRouter = createTRPCRouter({
             "review_required",
             "completed",
             "failed",
+            "dismissed",
           ])
           .optional(),
         search: z.string().optional(),
@@ -1129,6 +1131,54 @@ export const taxReturnRouter = createTRPCRouter({
           },
         })
         .where(eq(jobs.id, input.jobId));
+
+      return { success: true };
+    }),
+
+  dismissReturn: publicProcedure
+    .input(
+      z.object({
+        taxReturnId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const returnRecord = await ctx.db.query.taxReturns.findFirst({
+        where: eq(taxReturns.id, input.taxReturnId),
+      });
+
+      if (!returnRecord) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
+      }
+
+      if (returnRecord.status === "completed") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Cannot dismiss a completed return.",
+        });
+      }
+
+      await ctx.db
+        .update(taxReturns)
+        .set({ status: "dismissed", updatedAt: new Date() })
+        .where(eq(taxReturns.id, input.taxReturnId));
+
+      return { success: true };
+    }),
+
+  undismissReturn: publicProcedure
+    .input(
+      z.object({
+        taxReturnId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db
+        .update(taxReturns)
+        .set({ status: "pending", updatedAt: new Date() })
+        .where(eq(taxReturns.id, input.taxReturnId));
 
       return { success: true };
     }),

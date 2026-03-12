@@ -56,6 +56,20 @@ export default function ReturnWorkspacePage() {
     { enabled: !!orgId },
   );
 
+  const dismissMutation = api.portalReturns.dismissReturn.useMutation({
+    onSuccess: () => {
+      void utils.portalReturns.listByOrg.invalidate({ orgId });
+      toast.success("Return dismissed");
+    },
+  });
+
+  const undismissMutation = api.portalReturns.undismissReturn.useMutation({
+    onSuccess: () => {
+      void utils.portalReturns.listByOrg.invalidate({ orgId });
+      toast.success("Return restored");
+    },
+  });
+
   const selectedReturn = useMemo(
     () => (returnsQuery.data ?? []).find((row) => row.id === returnId) ?? null,
     [returnId, returnsQuery.data],
@@ -456,6 +470,9 @@ export default function ReturnWorkspacePage() {
             onOpenFinishSheet={() => {
               router.push(`/org/${orgId}/returns/${returnId}/guided-finish`);
             }}
+            onDismiss={() => dismissMutation.mutate({ orgId, taxReturnId: returnId })}
+            onUndismiss={() => undismissMutation.mutate({ orgId, taxReturnId: returnId })}
+            isDismissing={dismissMutation.isPending || undismissMutation.isPending}
           />
         </div>
 

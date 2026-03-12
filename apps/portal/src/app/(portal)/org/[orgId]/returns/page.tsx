@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { api } from "@/trpc/react";
 
-type ReturnStatusTone = "pending" | "in_progress" | "completed" | "failed" | "review_required";
+type ReturnStatusTone = "pending" | "in_progress" | "completed" | "failed" | "review_required" | "dismissed";
 type StatusFilter = "all" | ReturnStatusTone;
 type SortKey = "entity" | "year" | "status" | "updated";
 type SortDirection = "asc" | "desc";
@@ -24,6 +24,7 @@ const STATUS_LABEL: Record<ReturnStatusTone, string> = {
   completed: "Completed",
   failed: "Failed",
   review_required: "Review Required",
+  dismissed: "Dismissed",
 };
 
 const STATUS_CLASS: Record<ReturnStatusTone, string> = {
@@ -32,6 +33,7 @@ const STATUS_CLASS: Record<ReturnStatusTone, string> = {
   completed: "border-emerald-500/35 bg-emerald-500/10 text-emerald-700",
   failed: "border-rose-500/35 bg-rose-500/10 text-rose-700",
   review_required: "border-violet-500/35 bg-violet-500/10 text-violet-700",
+  dismissed: "border-zinc-500/35 bg-zinc-500/10 text-zinc-500",
 };
 
 function normalizeStatus(status: string): ReturnStatusTone {
@@ -39,6 +41,7 @@ function normalizeStatus(status: string): ReturnStatusTone {
   if (status === "in_progress") return "in_progress";
   if (status === "completed") return "completed";
   if (status === "failed") return "failed";
+  if (status === "dismissed") return "dismissed";
   return "review_required";
 }
 
@@ -190,6 +193,7 @@ export default function OrgReturnsPage() {
             <option value="completed">Completed</option>
             <option value="failed">Failed</option>
             <option value="review_required">Review Required</option>
+            <option value="dismissed">Dismissed</option>
           </select>
 
           <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => toggleSort("updated")}>

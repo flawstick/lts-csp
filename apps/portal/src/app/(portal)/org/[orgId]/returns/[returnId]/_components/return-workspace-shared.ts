@@ -16,7 +16,8 @@ export type ReturnStatusTone =
   | "in_progress"
   | "completed"
   | "failed"
-  | "review_required";
+  | "review_required"
+  | "dismissed";
 
 export type WorkspaceTab = "form" | "files";
 export type SectionId = (typeof FORM_SECTIONS)[number]["id"];
@@ -39,6 +40,7 @@ export const STATUS_LABEL: Record<ReturnStatusTone, string> = {
   completed: "Completed",
   failed: "Failed",
   review_required: "Review Required",
+  dismissed: "Dismissed",
 };
 
 export const STATUS_CLASS: Record<ReturnStatusTone, string> = {
@@ -47,6 +49,7 @@ export const STATUS_CLASS: Record<ReturnStatusTone, string> = {
   completed: "bg-emerald-500/15 text-emerald-700 ring-emerald-500/30",
   failed: "bg-rose-500/15 text-rose-700 ring-rose-500/30",
   review_required: "bg-violet-500/15 text-violet-700 ring-violet-500/30",
+  dismissed: "bg-zinc-500/15 text-zinc-500 ring-zinc-500/30",
 };
 
 const SUBSTANCE_FORM_KEYS = new Set<keyof SubstanceFormData>(
@@ -72,6 +75,7 @@ export function normalizeStatus(status: string): ReturnStatusTone {
   if (status === "in_progress") return "in_progress";
   if (status === "completed") return "completed";
   if (status === "failed") return "failed";
+  if (status === "dismissed") return "dismissed";
   return "review_required";
 }
 
