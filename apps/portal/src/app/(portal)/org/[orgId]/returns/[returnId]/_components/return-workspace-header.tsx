@@ -75,8 +75,8 @@ export function ReturnWorkspaceHeader({
           </p>
         </div>
 
-        <Magnet padding={60} magnetStrength={3} wrapperClassName="cursor-pointer">
-          <Button className="px-5" onClick={onOpenFinishSheet}>
+        <Magnet padding={60} magnetStrength={3} wrapperClassName="cursor-pointer" innerClassName="cursor-pointer">
+          <Button className="cursor-pointer px-5" onClick={onOpenFinishSheet}>
             <Sparkles className="size-4" />
             Guided finish
           </Button>
