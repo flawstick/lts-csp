@@ -228,6 +228,74 @@ export const portalAccessRouter = createTRPCRouter({
       };
     }),
 
+  getOrg: protectedProcedure
+    .input(z.object({ orgId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+
+      // Verify membership
+      const membership = await ctx.db.query.portalMemberships.findFirst({
+        where: and(
+          eq(portalMemberships.accountId, account.id),
+          eq(portalMemberships.orgId, input.orgId),
+          eq(portalMemberships.status, "active"),
+        ),
+      });
+
+      if (!membership) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this organization" });
+      }
+
+      const org = await ctx.db.query.organisations.findFirst({
+        where: eq(organisations.id, input.orgId),
+      });
+
+      if (!org) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Organization not found" });
+      }
+
+      return {
+        id: org.id,
+        name: org.name,
+        accountName: org.accountName,
+        slug: org.slug,
+        logoUrl: org.logoUrl,
+        role: membership.role,
+      };
+    }),
+
+  updateAccountName: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        accountName: z.string().max(256).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+
+      // Only admins can update
+      const membership = await ctx.db.query.portalMemberships.findFirst({
+        where: and(
+          eq(portalMemberships.accountId, account.id),
+          eq(portalMemberships.orgId, input.orgId),
+          eq(portalMemberships.status, "active"),
+        ),
+      });
+
+      if (membership?.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can update settings" });
+      }
+
+      const [updated] = await ctx.db
+        .update(organisations)
+        .set({ accountName: input.accountName })
+        .where(eq(organisations.id, input.orgId))
+        .returning();
+
+      return { accountName: updated?.accountName ?? null };
+    }),
+
   requestAccess: protectedProcedure.mutation(async ({ ctx }) => {
     if (!ctx.user.email) {
       throw new TRPCError({ code: "UNAUTHORIZED", message: "Unauthorized" });

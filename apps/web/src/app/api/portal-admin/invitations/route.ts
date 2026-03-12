@@ -33,6 +33,27 @@ async function requireGlobalAdmin() {
   return { account };
 }
 
+export async function GET(request: Request) {
+  const auth = await requireGlobalAdmin();
+  if ("error" in auth) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const orgId = searchParams.get("orgId");
+
+  const where = orgId
+    ? eq(portalInvitations.orgId, orgId)
+    : undefined;
+
+  const invitations = await db.query.portalInvitations.findMany({
+    where,
+    orderBy: (portalInvitations, { desc }) => [desc(portalInvitations.createdAt)],
+  });
+
+  return NextResponse.json(invitations);
+}
+
 export async function POST(request: Request) {
   const auth = await requireGlobalAdmin();
   if ("error" in auth) {

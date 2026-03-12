@@ -5,6 +5,7 @@ import {
   FolderOpen,
   LayoutDashboard,
   Search,
+  Settings,
   SquareCheck,
   Users,
 } from "lucide-react";
@@ -262,16 +263,27 @@ export function buildPortalNavigationModel({
     const basePrefix = isOrgScoped ? `/org/${segments[1]}` : "";
     const contentSegments = isOrgScoped ? segments.slice(2) : segments;
 
-    contentSegments.forEach((segment, index) => {
-      const partialPath = contentSegments.slice(0, index + 1).join("/");
+    // Settings is a standalone page, not nested under dashboard
+    if (contentSegments.length === 1 && contentSegments[0] === "settings") {
       breadcrumbs.push({
-        key: `${segment}-${index}`,
-        title: titleFromSegment(segment),
-        icon: LayoutDashboard,
-        href: `${basePrefix}/${partialPath}`,
+        key: "settings",
+        title: "Settings",
+        icon: Settings,
+        href: `${basePrefix}/settings`,
         isCurrent: false,
       });
-    });
+    } else {
+      contentSegments.forEach((segment, index) => {
+        const partialPath = contentSegments.slice(0, index + 1).join("/");
+        breadcrumbs.push({
+          key: `${segment}-${index}`,
+          title: titleFromSegment(segment),
+          icon: LayoutDashboard,
+          href: `${basePrefix}/${partialPath}`,
+          isCurrent: false,
+        });
+      });
+    }
   }
 
   if (breadcrumbs.length === 0) {

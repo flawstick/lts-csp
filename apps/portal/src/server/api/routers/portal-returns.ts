@@ -1,3 +1,4 @@
+import { env } from "@/env";
 import { TRPCError } from "@trpc/server";
 import type { User } from "@supabase/supabase-js";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
@@ -645,15 +646,22 @@ export const portalReturnsRouter = createTRPCRouter({
         return existing;
       }
 
+      // Get org for account name (used as preparedBy default)
+      const org = await ctx.db.query.organisations.findFirst({
+        where: eq(organisations.id, input.orgId),
+      });
+      const preparedByName = org?.accountName ?? org?.name ?? "LTS Tax Limited";
+
       const [created] = await ctx.db
         .insert(substanceForms)
         .values({
           taxReturnId: input.taxReturnId,
           entityName: returnRecord.entityName,
           taxReferenceNumber: returnRecord.externalId ?? undefined,
-          accountingPeriodStart: `${returnRecord.taxYear}-01-01`,
-          accountingPeriodEnd: `${returnRecord.taxYear}-12-31`,
-          missingFields: getMissingFields({}),
+          accountingPeriodStart: `${Number(returnRecord.taxYear) - 1}-04-06`,
+          accountingPeriodEnd: `${returnRecord.taxYear}-04-05`,
+          preparedBy: preparedByName,
+          missingFields: getMissingFields({ preparedBy: preparedByName }),
           lastEditedBy: account.id,
         })
         .returning();
@@ -1006,7 +1014,13 @@ export const portalReturnsRouter = createTRPCRouter({
         });
       }
 
-      const apiKey = process.env.AI_GATEWAY_API_KEY;
+      // Get org for account name (used as preparedBy default)
+      const org = await ctx.db.query.organisations.findFirst({
+        where: eq(organisations.id, input.orgId),
+      });
+      const preparedByName = org?.accountName ?? org?.name ?? "LTS Tax Limited";
+
+      const apiKey = env.AI_GATEWAY_API_KEY;
       if (!apiKey) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -1027,11 +1041,13 @@ export const portalReturnsRouter = createTRPCRouter({
             taxReferenceNumber: returnRecord.externalId ?? undefined,
             accountingPeriodStart: `${returnRecord.taxYear}-01-01`,
             accountingPeriodEnd: `${returnRecord.taxYear}-12-31`,
+            preparedBy: preparedByName,
             isGuernseyFiFatca: "No",
             isGuernseyFiCrs: "No",
             isRegisteredOnIgor: "No",
             isConstituentEntity: "No",
             missingFields: getMissingFields({
+              preparedBy: preparedByName,
               isConstituentEntity: "No",
             }),
             lastEditedBy: account.id,
@@ -1165,10 +1181,13 @@ Use these strict output rules:
 - If total profit is negative (a loss), return "0". The portal does not accept negative values.
 - If net book value is negative, return "0".
 - profitAllocation is REQUIRED — always pick "Investment" or "Business".
-- economicClassificationCode is REQUIRED for 2025 returns.
+- accountingPeriodStart is ALWAYS "${Number(returnRecord.taxYear) - 1}-04-06" and accountingPeriodEnd is ALWAYS "${returnRecord.taxYear}-04-05". The Guernsey tax year runs 6 April to 5 April. Do NOT extract different dates from the documents.
+- economicClassificationCode is REQUIRED for 2025 returns. Always try to extract this.
 - isConstituentEntity (CbCR) is REQUIRED for 2025 returns — default to "No" if not stated.
 - accountsPreparerName is the ACCOUNTANT who prepared the financial accounts, NOT "LTS Tax Limited".
 - entityActivity: always try to extract the nature of the entity's activity (e.g., "Property Holdings").
+- relevantActivity is REQUIRED — pick the single most applicable option. If none apply, use "None of the above".
+- allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey — always try to extract from minutes or directors reports.
 - If the entity has no relevant activity ("None of the above"), leave adequacy, CIGA, employees, outsourcing, and beneficial ownership sections empty.
 
 For CIGA, use these activity mappings:
@@ -1198,6 +1217,10 @@ ${cigaOptionsText}
 
       const extractedData = result.object;
 
+      // Force correct accounting period (Guernsey tax year: 6 April to 5 April)
+      extractedData.accountingPeriodStart = `${Number(returnRecord.taxYear) - 1}-04-06`;
+      extractedData.accountingPeriodEnd = `${returnRecord.taxYear}-04-05`;
+
       // Clamp negative financial values to "0"
       if (extractedData.totalProfit) {
         const num = parseFloat(extractedData.totalProfit.replace(/[^0-9.-]/g, ""));
@@ -1209,13 +1232,11 @@ ${cigaOptionsText}
       }
 
       // Default profitAllocation to "Investment" if not extracted
-      if (!extractedData.profitAllocation) {
-        extractedData.profitAllocation = "Investment";
-      }
+      extractedData.profitAllocation ??= "Investment";
 
       // FATCA/CRS defaults
-      if (!extractedData.isGuernseyFiFatca) extractedData.isGuernseyFiFatca = "No";
-      if (!extractedData.isGuernseyFiCrs) extractedData.isGuernseyFiCrs = "No";
+      extractedData.isGuernseyFiFatca ??= "No";
+      extractedData.isGuernseyFiCrs ??= "No";
 
       // IGOR: "Yes" if FI under FATCA or CRS, "No" otherwise
       if (!extractedData.isRegisteredOnIgor) {
@@ -1226,8 +1247,11 @@ ${cigaOptionsText}
         }
       }
 
+      // Default preparedBy to org account name if not extracted
+      extractedData.preparedBy ??= preparedByName;
+
       // CbCR default
-      if (!extractedData.isConstituentEntity) extractedData.isConstituentEntity = "No";
+      extractedData.isConstituentEntity ??= "No";
 
       const merged = { ...form, ...extractedData } as SubstanceFormData;
       const missingFields = getMissingFields(merged);

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronsUpDown, LogOut, MessageSquarePlus } from "lucide-react";
+import Link from "next/link";
+import { ChevronsUpDown, LogOut, MessageSquarePlus, Settings } from "lucide-react";
+
+import { SidebarIcon } from "@/components/ui/animated-icons";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { SidebarIcon } from "@/components/ui/animated-icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +29,7 @@ type SidebarFooterSectionProps = {
   email?: string | null;
   fullName?: string | null;
   avatarUrl?: string | null;
+  settingsHref?: string | null;
   onLogout: () => Promise<void>;
 };
 
@@ -41,7 +44,7 @@ function getInitials(name: string | null | undefined) {
     .toUpperCase();
 }
 
-export function SidebarFooterSection({ email, fullName, avatarUrl, onLogout }: SidebarFooterSectionProps) {
+export function SidebarFooterSection({ email, fullName, avatarUrl, settingsHref, onLogout }: SidebarFooterSectionProps) {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   return (
@@ -64,6 +67,27 @@ export function SidebarFooterSection({ email, fullName, avatarUrl, onLogout }: S
       <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
 
       <SidebarMenu className="group-data-[collapsible=icon]:items-center">
+        {settingsHref ? (
+          <SidebarMenuItem className="group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center">
+            <SidebarMenuButton
+              asChild
+              tooltip="Settings"
+              className="h-9 rounded-lg text-[15px] transition hover:bg-sidebar-accent/80"
+            >
+              <Link
+                href={settingsHref}
+                className="flex w-full min-w-0 items-center gap-2 overflow-hidden transition-[gap] duration-200 ease-linear group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0"
+              >
+                <span className="flex shrink-0 items-center justify-center">
+                  <SidebarIcon icon={Settings} iconKey="settings" size={18} className="size-4.5 shrink-0" />
+                </span>
+                <span className="min-w-0 max-w-[10rem] truncate whitespace-nowrap transition-[max-width,opacity,margin] duration-200 ease-linear group-data-[collapsible=icon]:max-w-0 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:ml-0">
+                  Settings
+                </span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ) : null}
         <SidebarMenuItem className="group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

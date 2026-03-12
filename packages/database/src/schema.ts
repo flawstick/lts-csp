@@ -176,6 +176,7 @@ export const organisations = createTable(
   (d) => ({
     id: uuid().primaryKey().defaultRandom(),
     name: varchar({ length: 256 }).notNull(),
+    accountName: varchar("account_name", { length: 256 }),
     slug: varchar({ length: 128 }).notNull().unique(),
     logoUrl: text("logo_url"),
     createdAt: timestamp("created_at", { withTimezone: true })

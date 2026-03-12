@@ -47,7 +47,8 @@ export type SidebarIconKey =
   | "marketing"
   | "logout"
   | "invite"
-  | "access";
+  | "access"
+  | "settings";
 
 type SidebarIconProps = {
   icon: LucideIcon;
@@ -67,6 +68,7 @@ const ICON_PRESETS: Partial<Record<SidebarIconKey, AnimatedPreset>> = {
   create: PlusIcon as AnimatedPreset,
   invite: MessageSquareIcon as AnimatedPreset,
   access: SettingsIcon as AnimatedPreset,
+  settings: SettingsIcon as AnimatedPreset,
 };
 
 export function SidebarIcon({
@@ -149,6 +151,7 @@ export function SidebarIcon({
     if (iconKey === "logout") return "swing" as const;
     if (iconKey === "invite") return "tilt" as const;
     if (iconKey === "access") return "swing" as const;
+    if (iconKey === "settings") return "swing" as const;
     return "pulse" as const;
   }, [iconKey]);
 

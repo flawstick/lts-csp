@@ -48,6 +48,8 @@ export default function GuidedFinishPage() {
   const [workspaceMessage, setWorkspaceMessage] = useState<string | null>(null);
 
   const utils = api.useUtils();
+  const orgQuery = api.portalAccess.getOrg.useQuery({ orgId }, { enabled: !!orgId });
+
   const returnsQuery = api.portalReturns.listByOrg.useQuery(
     { orgId },
     { enabled: !!orgId },
@@ -101,8 +103,14 @@ export default function GuidedFinishPage() {
   );
 
   useEffect(() => {
-    setDraftForm(sanitizeFormData(substanceFormQuery.data));
-  }, [substanceFormQuery.data, selectedReturn?.id]);
+    const sanitized = sanitizeFormData(substanceFormQuery.data);
+    // Auto-fill preparedBy from org accounting name if empty
+    if (!sanitized.preparedBy) {
+      const accountingName = orgQuery.data?.accountName ?? orgQuery.data?.name;
+      if (accountingName) sanitized.preparedBy = accountingName;
+    }
+    setDraftForm(sanitized);
+  }, [substanceFormQuery.data, selectedReturn?.id, orgQuery.data]);
 
   const visibleSections = useMemo(
     () =>
@@ -263,7 +271,12 @@ export default function GuidedFinishPage() {
   const handleComplete = async () => {
     try {
       showMessage("Saving guided return...");
-      await persistFormData(draftForm);
+      const finalData = { ...draftForm };
+      if (!finalData.preparedBy) {
+        const accountingName = orgQuery.data?.accountName ?? orgQuery.data?.name;
+        if (accountingName) finalData.preparedBy = accountingName;
+      }
+      await persistFormData(finalData);
 
       if (selectedFinancialFiles.length && selectedReturn) {
         const assignedIndex =

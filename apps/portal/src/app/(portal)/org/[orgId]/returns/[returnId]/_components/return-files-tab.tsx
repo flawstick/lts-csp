@@ -121,7 +121,6 @@ export function ReturnFilesTab({
     } else {
       onAssignFinancialStatements(selectedRadio);
     }
-    setSelectedRadio("__none__");
   };
 
   return (

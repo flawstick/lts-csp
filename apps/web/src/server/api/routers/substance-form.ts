@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
-import { substanceForms, taxReturns } from "@repo/database";
+import { organisations, substanceForms, taxReturns } from "@repo/database";
 import { eq } from "drizzle-orm";
 import { createGateway } from "@ai-sdk/gateway";
 import { generateObject } from "ai";
@@ -186,6 +186,14 @@ export const substanceFormRouter = createTRPCRouter({
         throw new Error("Tax return not found");
       }
 
+      // Get org for account name (used as preparedBy default)
+      const org = taxReturn.orgId
+        ? await ctx.db.query.organisations.findFirst({
+            where: eq(organisations.id, taxReturn.orgId),
+          })
+        : null;
+      const preparedByName = org?.accountName || org?.name || "LTS Tax Limited";
+
       // Check if form already exists
       const existing = await ctx.db.query.substanceForms.findFirst({
         where: eq(substanceForms.taxReturnId, input.taxReturnId),
@@ -203,17 +211,17 @@ export const substanceFormRouter = createTRPCRouter({
           entityName: taxReturn.entityName,
           taxReferenceNumber: taxReturn.externalId ?? undefined,
           // Calculate accounting period from tax year
-          accountingPeriodStart: `${taxReturn.taxYear}-01-01`,
-          accountingPeriodEnd: `${taxReturn.taxYear}-12-31`,
+          accountingPeriodStart: `${Number(taxReturn.taxYear) - 1}-04-06`,
+          accountingPeriodEnd: `${taxReturn.taxYear}-04-05`,
           // Set defaults
-          preparedBy: "LTS Tax Limited",
+          preparedBy: preparedByName,
           profitAllocation: "Investment",
           isGuernseyFiFatca: "No",
           isGuernseyFiCrs: "No",
           isRegisteredOnIgor: "No",
           isConstituentEntity: "No",
           missingFields: getMissingFields({
-            preparedBy: "LTS Tax Limited",
+            preparedBy: preparedByName,
             profitAllocation: "Investment",
             isConstituentEntity: "No",
           }),
@@ -283,6 +291,14 @@ export const substanceFormRouter = createTRPCRouter({
       if (!taxReturn) {
         throw new Error("Tax return not found");
       }
+
+      // Get org for account name (used as preparedBy default)
+      const org = taxReturn.orgId
+        ? await ctx.db.query.organisations.findFirst({
+            where: eq(organisations.id, taxReturn.orgId),
+          })
+        : null;
+      const preparedByName = org?.accountName || org?.name || "LTS Tax Limited";
 
       // Get existing form or create one
       let form = await ctx.db.query.substanceForms.findFirst({
@@ -486,12 +502,15 @@ Only extract information that is explicitly stated or can be clearly inferred.
 Do not make up or guess values - leave fields empty if information is not available.
 
 IMPORTANT RULES:
+- accountingPeriodStart is ALWAYS "${Number(taxReturn.taxYear) - 1}-04-06" and accountingPeriodEnd is ALWAYS "${taxReturn.taxYear}-04-05". The Guernsey tax year runs 6 April to 5 April. Do NOT extract different dates from the documents.
 - If total profit is negative (a loss), return "0". The portal does not accept negative values.
 - If net book value is negative, return "0".
 - profitAllocation is REQUIRED — always pick "Investment" or "Business" based on the entity's income type.
-- economicClassificationCode is REQUIRED for 2025 returns.
+- economicClassificationCode is REQUIRED for 2025 returns. Always try to extract this.
 - isConstituentEntity (CbCR) is REQUIRED for 2025 returns — default to "No" if not stated.
 - accountsPreparerName is the ACCOUNTANT who prepared the financial accounts, NOT "LTS Tax Limited".
+- relevantActivity is REQUIRED — pick the single most applicable option. If none apply, use "None of the above".
+- allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey — always try to extract from minutes or directors reports.
 - If the entity has no relevant activity ("None of the above"), leave sections 6B, 7, 8, 9, and 10 empty.`;
 
       console.log("[AI Extraction] Calling generateObject with", fileContents.length, "file(s) and", textContents.length, "text content(s)");
@@ -529,9 +548,13 @@ IMPORTANT RULES:
 
       // Apply defaults for fields that should have default values
 
-      // Default preparedBy to "LTS Tax Limited" if not extracted
+      // Force correct accounting period (Guernsey tax year: 6 April to 5 April)
+      extractedData.accountingPeriodStart = `${Number(taxReturn.taxYear) - 1}-04-06`;
+      extractedData.accountingPeriodEnd = `${taxReturn.taxYear}-04-05`;
+
+      // Default preparedBy to org account name if not extracted
       if (!extractedData.preparedBy) {
-        extractedData.preparedBy = "LTS Tax Limited";
+        extractedData.preparedBy = preparedByName;
       }
 
       // Default profitAllocation to "Investment" if not extracted

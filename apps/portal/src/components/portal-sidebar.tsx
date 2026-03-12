@@ -113,6 +113,7 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
         `/org/${linkOrgId}`,
         `/org/${linkOrgId}/returns`,
         `/org/${linkOrgId}/tasks`,
+        `/org/${linkOrgId}/settings`,
       );
     }
 
@@ -178,6 +179,7 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
         email={membershipsQuery.data?.account.email ?? null}
         fullName={membershipsQuery.data?.account.fullName ?? null}
         avatarUrl={membershipsQuery.data?.account.avatarUrl ?? null}
+        settingsHref={(linkOrgId ?? activeOrg?.orgId) ? `/org/${linkOrgId ?? activeOrg?.orgId}/settings` : null}
         onLogout={logout}
       />
 

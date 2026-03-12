@@ -37,9 +37,11 @@ export async function PATCH(
     }
 
     const { orgId } = await params;
-    const { name, slug } = await request.json();
+    const body = await request.json();
+    const { name, slug, accountName } = body as { name?: string; slug?: string; accountName?: string | null };
 
-    if (!name || !slug) {
+    // If name/slug provided, validate them
+    if ((name !== undefined || slug !== undefined) && (!name || !slug)) {
       return NextResponse.json(
         { error: "Name and slug are required" },
         { status: 400 }
@@ -47,20 +49,34 @@ export async function PATCH(
     }
 
     // Check if slug is taken by another org
-    const existing = await db.query.organisations.findFirst({
-      where: eq(organisations.slug, slug),
-    });
+    if (slug) {
+      const existing = await db.query.organisations.findFirst({
+        where: eq(organisations.slug, slug),
+      });
 
-    if (existing && existing.id !== orgId) {
+      if (existing && existing.id !== orgId) {
+        return NextResponse.json(
+          { error: "Slug already taken by another organization" },
+          { status: 400 }
+        );
+      }
+    }
+
+    const updates: Record<string, unknown> = {};
+    if (name !== undefined) updates.name = name;
+    if (slug !== undefined) updates.slug = slug;
+    if (accountName !== undefined) updates.accountName = accountName;
+
+    if (Object.keys(updates).length === 0) {
       return NextResponse.json(
-        { error: "Slug already taken by another organization" },
+        { error: "No fields to update" },
         { status: 400 }
       );
     }
 
     const [updatedOrg] = await db
       .update(organisations)
-      .set({ name, slug })
+      .set(updates)
       .where(eq(organisations.id, orgId))
       .returning();
 

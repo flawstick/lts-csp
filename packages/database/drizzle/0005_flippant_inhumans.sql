@@ -1,0 +1,1 @@
+ALTER TABLE "lts_organisation" ADD COLUMN "account_name" varchar(256);

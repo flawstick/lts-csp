@@ -71,6 +71,7 @@ import { cn } from "@/lib/utils";
 interface Organisation {
   id: string;
   name: string;
+  accountName: string | null;
   slug: string;
   logoUrl: string | null;
   createdAt: string;
@@ -570,6 +571,14 @@ export default function Page() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  router.push(`/settings/${org.id}`)
+                                }
+                              >
+                                <Edit className="mr-2 h-4 w-4" />
+                                Manage
+                              </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() =>
                                   router.push(`/org/${org.id}`)
