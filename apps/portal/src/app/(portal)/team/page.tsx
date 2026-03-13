@@ -394,14 +394,12 @@ function OrgTeamSection({
               >
                 <div className="flex items-center gap-3">
                   <Avatar size="default">
-                    {member.avatarUrl ? (
-                      <AvatarImage src={member.avatarUrl} alt={member.fullName ?? ""} />
-                    ) : null}
+                    <AvatarImage src={member.avatarUrl ?? `https://avatar.vercel.sh/${member.email ?? member.id}`} alt={member.fullName ?? member.email ?? ""} />
                     <AvatarFallback>{getInitials(member.fullName)}</AvatarFallback>
                   </Avatar>
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">
-                      {member.fullName ?? "Unnamed user"}
+                      {member.fullName ?? member.email ?? "Unnamed user"}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {member.joinedAt
@@ -465,7 +463,7 @@ function OrgTeamSection({
                           onClick={() =>
                             setConfirmRemove({
                               id: member.id,
-                              name: member.fullName ?? "this member",
+                              name: member.fullName ?? member.email ?? "this member",
                             })
                           }
                         >
@@ -569,13 +567,11 @@ function OrgTeamSection({
               >
                 <div className="flex items-center gap-3">
                   <Avatar size="default">
-                    {member.avatarUrl ? (
-                      <AvatarImage src={member.avatarUrl} alt={member.fullName ?? ""} />
-                    ) : null}
+                    <AvatarImage src={member.avatarUrl ?? `https://avatar.vercel.sh/${member.email ?? member.id}`} alt={member.fullName ?? member.email ?? ""} />
                     <AvatarFallback>{getInitials(member.fullName)}</AvatarFallback>
                   </Avatar>
                   <p className="truncate text-sm">
-                    {member.fullName ?? "Unnamed user"}
+                    {member.fullName ?? member.email ?? "Unnamed user"}
                   </p>
                 </div>
                 <StatusBadge status="suspended" />

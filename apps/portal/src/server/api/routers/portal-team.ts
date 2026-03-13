@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, desc } from "drizzle-orm";
+import { and, eq, desc, sql } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { z } from "zod";
 
@@ -52,6 +52,7 @@ export const portalTeamRouter = createTRPCRouter({
           fullName: accounts.fullName,
           avatarUrl: accounts.avatarUrl,
           userId: accounts.userId,
+          email: sql<string | null>`(select email from auth.users where id = ${accounts.userId})`,
         })
         .from(portalMemberships)
         .innerJoin(accounts, eq(portalMemberships.accountId, accounts.id))

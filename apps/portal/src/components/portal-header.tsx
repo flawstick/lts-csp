@@ -117,9 +117,7 @@ export function PortalHeader() {
                 <AvatarGroup>
                   {activeMembers.slice(0, AVATAR_LIMIT).map((member) => (
                     <Avatar key={member.id} size="sm">
-                      {member.avatarUrl ? (
-                        <AvatarImage src={member.avatarUrl} alt={member.fullName ?? ""} />
-                      ) : null}
+                      <AvatarImage src={member.avatarUrl ?? `https://avatar.vercel.sh/${member.email ?? member.id}`} alt={member.fullName ?? member.email ?? ""} />
                       <AvatarFallback className="text-[10px]">
                         {initials(member.fullName)}
                       </AvatarFallback>
@@ -152,7 +150,7 @@ export function PortalHeader() {
                       </AvatarFallback>
                     </Avatar>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-medium">{member.fullName ?? "Unknown"}</p>
+                      <p className="truncate text-xs font-medium">{member.fullName ?? member.email ?? "Unknown"}</p>
                       <p className="truncate text-[11px] text-muted-foreground capitalize">{member.role}</p>
                     </div>
                   </div>
