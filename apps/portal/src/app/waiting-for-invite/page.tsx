@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useRef } from "react";
-import { Building2, Loader2, Mail, XCircle } from "lucide-react";
+import { Building2, Loader2, LogOut, Mail, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -12,6 +12,7 @@ import { ShieldCheckIcon, type ShieldCheckIconHandle } from "@/components/ui/shi
 import { LockIcon, type LockIconHandle } from "@/components/ui/lock";
 import { FileTextIcon, type FileTextIconHandle } from "@/components/ui/file-text";
 import { EyeIcon, type EyeIconHandle } from "@/components/ui/eye";
+import { createClient } from "@/lib/supabase/client";
 import { api } from "@/trpc/react";
 
 const Grainient = dynamic(() => import("@/components/Grainient"), {
@@ -52,7 +53,7 @@ export default function WaitingForInvitePage() {
   });
 
   const invitations = invitationsQuery.data?.invitations ?? [];
-  const isLoading = invitationsQuery.isLoading;
+  const isLoading = invitationsQuery.isLoading || invitationsQuery.isFetching;
 
   return (
     <div className="grid h-svh overflow-hidden lg:grid-cols-2">
@@ -62,7 +63,22 @@ export default function WaitingForInvitePage() {
             <img src="/logo.png" alt="LTS Tax" width={20} height={20} />
             LTS Client Portal
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              onClick={async () => {
+                const supabase = createClient();
+                await supabase.auth.signOut();
+                router.push("/login");
+                router.refresh();
+              }}
+            >
+              <LogOut className="size-4" />
+            </Button>
+          </div>
         </div>
         <div className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-sm">
