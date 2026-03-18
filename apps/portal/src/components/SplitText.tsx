@@ -113,6 +113,7 @@ const SplitText: React.FC<SplitTextProps> = ({
         reduceWhiteSpace: false,
         onSplit: (self: any) => {
           assignTargets(self);
+          el.style.visibility = 'visible';
           tweenRef.current = gsap.fromTo(
             targets,
             { ...from },
@@ -130,6 +131,7 @@ const SplitText: React.FC<SplitTextProps> = ({
               },
               onComplete: () => {
                 animationCompletedRef.current = true;
+                el.style.visibility = 'visible';
                 onCompleteRef.current?.();
               },
               willChange: 'transform, opacity',
@@ -189,7 +191,8 @@ const SplitText: React.FC<SplitTextProps> = ({
     const style: React.CSSProperties = {
       textAlign,
       wordWrap: 'break-word',
-      willChange: 'transform, opacity'
+      willChange: 'transform, opacity',
+      visibility: 'hidden',
     };
     const classes = `split-parent overflow-hidden inline-block whitespace-normal ${className}`;
     const Tag = (tag || 'p') as React.ElementType;
