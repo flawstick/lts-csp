@@ -61,7 +61,7 @@ function applySavedOrder(
   try {
     const raw = localStorage.getItem(getStorageKey(orgId));
     if (!raw) return jurisdictions;
-    const savedIds: string[] = JSON.parse(raw);
+    const savedIds: string[] = JSON.parse(raw) as string[];
     const map = new Map(jurisdictions.map((j) => [j.jurisdictionId, j]));
     const ordered: SidebarJurisdiction[] = [];
     for (const id of savedIds) {

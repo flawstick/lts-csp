@@ -251,12 +251,12 @@ export function buildPortalNavigationModel({
       trailingSegments.forEach((segment, index) => {
         const partialPath = trailingSegments.slice(0, index + 1).join("/");
         const useEntityName =
-          activeNavItem.key === "returns" &&
-          index === 0 &&
-          returnEntityName;
+          activeNavItem.key === "returns" && index === 0
+            ? returnEntityName
+            : undefined;
         breadcrumbs.push({
           key: `${activeNavItem.key}-${index}-${segment}`,
-          title: useEntityName || titleFromSegment(segment),
+          title: useEntityName ?? titleFromSegment(segment),
           icon: useEntityName ? FileSpreadsheet : LayoutDashboard,
           href: `${activeNavItem.href}/${partialPath}`,
           isCurrent: false,

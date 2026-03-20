@@ -109,7 +109,7 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
     let saved: string[] | null = null;
     try {
       const raw = localStorage.getItem(openJurisdictionsStorageKey);
-      if (raw) saved = JSON.parse(raw);
+      if (raw) saved = JSON.parse(raw) as string[];
     } catch {
       // ignore
     }

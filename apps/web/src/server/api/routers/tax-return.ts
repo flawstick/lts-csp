@@ -87,6 +87,119 @@ function resolveJurisdictionFallbackCredentials(
   return null;
 }
 
+function getBrowserUseSessionId(
+  resultData: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!resultData) {
+    return null;
+  }
+
+  const browserUseSessionId = resultData.browserUseSessionId;
+  if (typeof browserUseSessionId === "string" && browserUseSessionId.trim()) {
+    return browserUseSessionId.trim();
+  }
+
+  const sessionId = resultData.sessionId;
+  if (typeof sessionId === "string" && sessionId.trim()) {
+    return sessionId.trim();
+  }
+
+  return null;
+}
+
+async function stopBrowserUseSession(
+  sessionId: string,
+  strategy: "task" | "session",
+): Promise<void> {
+  const apiKey = process.env.BROWSER_USE_API_KEY?.trim();
+  if (!apiKey) {
+    return;
+  }
+
+  const response = await fetch(
+    `https://api.browser-use.com/api/v3/sessions/${sessionId}/stop`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "X-Browser-Use-API-Key": apiKey,
+      },
+      body: JSON.stringify({ strategy }),
+    },
+  );
+
+  if (!response.ok && response.status !== 404) {
+    throw new Error(
+      `Browser Use stop failed: ${response.status} ${response.statusText}`,
+    );
+  }
+}
+
+async function getBrowserUseSessionStatus(
+  sessionId: string,
+): Promise<string | null> {
+  const apiKey = process.env.BROWSER_USE_API_KEY?.trim();
+  if (!apiKey) {
+    return null;
+  }
+
+  const response = await fetch(
+    `https://api.browser-use.com/api/v3/sessions/${sessionId}`,
+    {
+      headers: {
+        "X-Browser-Use-API-Key": apiKey,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Browser Use session lookup failed: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const data = (await response.json()) as { status?: string };
+  return typeof data.status === "string" ? data.status : null;
+}
+
+async function waitForBrowserUseSessionToPause(
+  sessionId: string,
+  timeoutMs = 10_000,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  let lastStatus: string | null = null;
+
+  while (Date.now() < deadline) {
+    lastStatus = await getBrowserUseSessionStatus(sessionId);
+    if (lastStatus !== "running") {
+      return lastStatus;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  return lastStatus;
+}
+
+const persistedOptionalString = z
+  .string()
+  .nullish()
+  .transform((value) => (typeof value === "string" ? value : undefined));
+
+const persistedOptionalNumber = z
+  .number()
+  .nullish()
+  .transform((value) => (typeof value === "number" ? value : undefined));
+
+const persistedStepSchema = z.object({
+  stepNumber: persistedOptionalNumber.optional(),
+  goal: persistedOptionalString.optional(),
+  memory: persistedOptionalString.optional(),
+  url: persistedOptionalString.optional(),
+  message: persistedOptionalString.optional(),
+});
+
 export const taxReturnRouter = createTRPCRouter({
   sync: publicProcedure
     .input(z.object({ token: z.string() }))
@@ -632,17 +745,17 @@ export const taxReturnRouter = createTRPCRouter({
         throw new Error("Organisation or jurisdiction not found");
       }
 
-      const jurisdictionSetting = await ctx.db.query.jurisdictionSettings.findFirst(
-        {
+      const jurisdictionSetting =
+        await ctx.db.query.jurisdictionSettings.findFirst({
           where: and(
             eq(jurisdictionSettings.orgId, org.id),
             eq(jurisdictionSettings.jurisdictionId, jurisdiction.id),
           ),
-        },
-      );
-      const credentials = decodePortalCredentials(
-        jurisdictionSetting?.portalCredentialsEncrypted,
-      ) ?? resolveJurisdictionFallbackCredentials(jurisdiction.code);
+        });
+      const credentials =
+        decodePortalCredentials(
+          jurisdictionSetting?.portalCredentialsEncrypted,
+        ) ?? resolveJurisdictionFallbackCredentials(jurisdiction.code);
 
       // Create job record
       const [job] = await ctx.db
@@ -888,7 +1001,9 @@ export const taxReturnRouter = createTRPCRouter({
         taxReturn.jurisdiction?.code !== "JE" ||
         taxReturn.returnType !== "company"
       ) {
-        throw new Error("Jersey company form is only available for Jersey company returns");
+        throw new Error(
+          "Jersey company form is only available for Jersey company returns",
+        );
       }
 
       const existing = await ctx.db.query.jerseyCompanyReturnForms.findFirst({
@@ -1254,6 +1369,7 @@ export const taxReturnRouter = createTRPCRouter({
           taskId: input.taskId,
           jobNumber,
           status: "pending",
+          aiModel: "bu-max",
           cloudwatchLogGroup: "/ecs/lts-browser-task",
         })
         .returning();
@@ -1331,6 +1447,16 @@ export const taxReturnRouter = createTRPCRouter({
         })
         .where(eq(jobs.id, input.jobId));
 
+      const sessionId = getBrowserUseSessionId(job.resultData);
+      if (sessionId) {
+        try {
+          await stopBrowserUseSession(sessionId, "task");
+          await waitForBrowserUseSessionToPause(sessionId);
+        } catch (error) {
+          console.error("Failed to stop Browser Use task immediately:", error);
+        }
+      }
+
       return { success: true };
     }),
 
@@ -1358,6 +1484,19 @@ export const taxReturnRouter = createTRPCRouter({
           completedAt: new Date(),
         })
         .where(eq(jobs.id, input.jobId));
+
+      const sessionId = getBrowserUseSessionId(job.resultData);
+      if (sessionId) {
+        try {
+          await stopBrowserUseSession(sessionId, "session");
+          await waitForBrowserUseSessionToPause(sessionId);
+        } catch (error) {
+          console.error(
+            "Failed to stop Browser Use session immediately:",
+            error,
+          );
+        }
+      }
 
       return { success: true };
     }),
@@ -1426,18 +1565,8 @@ export const taxReturnRouter = createTRPCRouter({
             }),
           )
           .optional(),
-        steps: z
-          .array(
-            z.object({
-              stepNumber: z.number().optional(),
-              goal: z.string().optional(),
-              memory: z.string().optional(),
-              url: z.string().optional(),
-              message: z.string().optional(),
-            }),
-          )
-          .optional(),
-        liveUrl: z.string().optional(),
+        steps: z.array(persistedStepSchema).optional(),
+        liveUrl: persistedOptionalString.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
