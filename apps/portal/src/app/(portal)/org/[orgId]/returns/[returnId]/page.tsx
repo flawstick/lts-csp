@@ -45,11 +45,15 @@ export default function ReturnWorkspacePage() {
   const [savingSection, setSavingSection] = useState(false);
   const [isSectionDialogOpen, setIsSectionDialogOpen] = useState(false);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
-  const [uploadedFileUrls, setUploadedFileUrls] = useState<
-    Array<{ name: string; url: string; type: string }> | null
-  >(null);
+  const [isAiExtractionRunning, setIsAiExtractionRunning] = useState(false);
+  const [uploadedFileUrls, setUploadedFileUrls] = useState<Array<{
+    name: string;
+    url: string;
+    type: string;
+  }> | null>(null);
 
   const recentTrackedRef = useRef<string | null>(null);
+  const aiExtractionLockRef = useRef(false);
 
   const utils = api.useUtils();
   const returnsQuery = api.portalReturns.listByOrg.useQuery(
@@ -188,6 +192,8 @@ export default function ReturnWorkspacePage() {
   );
 
   const selectedFiles = asVaultFiles(selectedReturn?.files);
+  const isAiExtractionPending =
+    isAiExtractionRunning || extractSubstanceFormMutation.isPending;
   const selectedStatus = selectedReturn
     ? normalizeStatus(selectedReturn.status)
     : "pending";
@@ -208,12 +214,13 @@ export default function ReturnWorkspacePage() {
       message.toLowerCase().includes("running") ||
       message.toLowerCase().includes("processing");
     if (isError) {
-      toast.error(message);
+      toast.dismiss("return-action");
+      toast.error(message, { id: "return-action" });
     } else if (isLoading) {
-      toast.loading(message);
+      toast.loading(message, { id: "return-action" });
     } else {
-      toast.dismiss();
-      toast.success(message);
+      toast.dismiss("return-action");
+      toast.success(message, { id: "return-action", duration: 3000 });
     }
   };
 
@@ -288,13 +295,22 @@ export default function ReturnWorkspacePage() {
   };
 
   const handleRunAiExtraction = async () => {
-    if (!selectedReturn) return;
+    if (
+      !selectedReturn ||
+      aiExtractionLockRef.current ||
+      extractSubstanceFormMutation.isPending
+    ) {
+      return;
+    }
 
     const extractionUrls = selectedFiles.map((file) => file.url);
     if (!extractionUrls.length) {
       showMessage("Upload ESR or financial files before running extraction.");
       return;
     }
+
+    aiExtractionLockRef.current = true;
+    setIsAiExtractionRunning(true);
 
     try {
       showMessage("Running AI extraction across workspace files...");
@@ -313,6 +329,9 @@ export default function ReturnWorkspacePage() {
           ? error.message
           : "Unable to run AI extraction right now.",
       );
+    } finally {
+      aiExtractionLockRef.current = false;
+      setIsAiExtractionRunning(false);
     }
   };
 
@@ -476,132 +495,135 @@ export default function ReturnWorkspacePage() {
         onUndismiss={() =>
           undismissMutation.mutate({ orgId, taxReturnId: selectedReturn.id })
         }
-        isDismissing={
-          dismissMutation.isPending || undismissMutation.isPending
-        }
+        isDismissing={dismissMutation.isPending || undismissMutation.isPending}
       />
     );
   }
 
   return (
-      <main className="mx-auto max-w-6xl space-y-5 pb-8">
-        <div className="portal-card overflow-hidden rounded-[1.95rem]">
-          <ReturnWorkspaceHeader
-            activeSectionTitle={activeSection?.title ?? null}
-            selectedReturn={selectedReturn}
-            selectedStatus={selectedStatus}
-            onOpenFinishSheet={() => {
-              router.push(`/org/${orgId}/returns/${returnId}/guided-finish`);
-            }}
-            onDismiss={() => dismissMutation.mutate({ orgId, taxReturnId: returnId })}
-            onUndismiss={() => undismissMutation.mutate({ orgId, taxReturnId: returnId })}
-            isDismissing={dismissMutation.isPending || undismissMutation.isPending}
-          />
-        </div>
+    <main className="mx-auto max-w-6xl space-y-5 pb-8">
+      <div className="portal-card overflow-hidden rounded-[1.95rem]">
+        <ReturnWorkspaceHeader
+          activeSectionTitle={activeSection?.title ?? null}
+          selectedReturn={selectedReturn}
+          selectedStatus={selectedStatus}
+          onOpenFinishSheet={() => {
+            router.push(`/org/${orgId}/returns/${returnId}/guided-finish`);
+          }}
+          onDismiss={() =>
+            dismissMutation.mutate({ orgId, taxReturnId: returnId })
+          }
+          onUndismiss={() =>
+            undismissMutation.mutate({ orgId, taxReturnId: returnId })
+          }
+          isDismissing={
+            dismissMutation.isPending || undismissMutation.isPending
+          }
+        />
+      </div>
 
-        <div className="portal-card overflow-hidden rounded-[1.95rem]">
-          <div className="px-5 py-5">
-            <Tabs
-              value={activeTab}
-              onValueChange={(value) => setActiveTab(value as WorkspaceTab)}
-              className="mt-0"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="space-y-1">
-                  <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+      <div className="portal-card overflow-hidden rounded-[1.95rem]">
+        <div className="px-5 py-5">
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as WorkspaceTab)}
+            className="mt-0"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+                  {activeTab === "form" ? "Structured ESR" : "Return documents"}
+                </p>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h2 className="text-xl font-semibold tracking-tight">
                     {activeTab === "form"
-                      ? "Structured ESR"
-                      : "Return documents"}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    <h2 className="text-xl font-semibold tracking-tight">
-                      {activeTab === "form"
-                        ? "Substance Form"
-                        : "Files & Documents"}
-                    </h2>
-                    {activeTab === "form" ? (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ring-1",
-                          Boolean(substanceFormQuery.data?.isComplete)
-                            ? "bg-emerald-500/15 text-emerald-700 ring-emerald-500/30 dark:text-emerald-400"
-                            : "bg-violet-500/15 text-violet-700 ring-violet-500/30 dark:text-violet-400",
-                        )}
-                      >
-                        {Boolean(substanceFormQuery.data?.isComplete)
-                          ? "Complete"
-                          : "In progress"}
-                      </span>
-                    ) : null}
-                  </div>
-                  <p className="text-muted-foreground text-sm">
-                    {activeTab === "form"
-                      ? "Review extracted answers, edit the ESR sections, and finish the remaining required fields."
-                      : "Upload the ESR, assign the financial statements PDF, and manage supporting return documents."}
-                  </p>
+                      ? "Substance Form"
+                      : "Files & Documents"}
+                  </h2>
+                  {activeTab === "form" ? (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ring-1",
+                        Boolean(substanceFormQuery.data?.isComplete)
+                          ? "bg-emerald-500/15 text-emerald-700 ring-emerald-500/30 dark:text-emerald-400"
+                          : "bg-violet-500/15 text-violet-700 ring-violet-500/30 dark:text-violet-400",
+                      )}
+                    >
+                      {Boolean(substanceFormQuery.data?.isComplete)
+                        ? "Complete"
+                        : "In progress"}
+                    </span>
+                  ) : null}
                 </div>
-
-                <TabsList className="w-fit border-none bg-transparent p-0">
-                  <TabsTrigger value="form">Substance Form</TabsTrigger>
-                  <TabsTrigger value="files">Files & Documents</TabsTrigger>
-                </TabsList>
+                <p className="text-muted-foreground text-sm">
+                  {activeTab === "form"
+                    ? "Review extracted answers, edit the ESR sections, and finish the remaining required fields."
+                    : "Upload the ESR, assign the financial statements PDF, and manage supporting return documents."}
+                </p>
               </div>
 
-              <ReturnFormTab
-                draftForm={draftForm}
-                setDraftForm={setDraftForm}
-                visibleSections={visibleSections}
-                activeSection={activeSection}
-                activeSectionId={activeSectionId}
-                setActiveSectionId={setActiveSectionId}
-                substanceForm={substanceFormQuery.data ?? null}
-                isSubstanceFormLoading={substanceFormQuery.isLoading}
-                draftMissingFields={draftMissingFields}
-                isSectionDialogOpen={isSectionDialogOpen}
-                setIsSectionDialogOpen={setIsSectionDialogOpen}
-                savingSection={savingSection}
-                isUpdating={updateSubstanceFormMutation.isPending}
-                isInitializing={createSubstanceFormMutation.isPending}
-                onInitForm={() => {
-                  void handleInitForm();
-                }}
-                onSaveSection={() => {
-                  void handleSaveSection();
-                }}
-                onClearForm={() => {
-                  void handleClearForm();
-                }}
-              />
+              <TabsList className="w-fit border-none bg-transparent p-0">
+                <TabsTrigger value="form">Substance Form</TabsTrigger>
+                <TabsTrigger value="files">Files & Documents</TabsTrigger>
+              </TabsList>
+            </div>
 
-              <ReturnFilesTab
-                selectedReturnId={selectedReturn.id}
-                selectedFiles={selectedFiles}
-                hasFinancialStatements={selectedFiles.some((f) => f.role === "financial_statements")}
-                isUploading={isUploadingFiles}
-                isExtractPending={extractSubstanceFormMutation.isPending}
-                isAssignPending={assignDocumentRoleMutation.isPending}
-                uploadedFileUrls={uploadedFileUrls}
-                onUploadFiles={(files) => {
-                  void handleUploadFiles(files);
-                }}
-                onAssignFinancialStatements={(fileUrl) => {
-                  void handleAssignFinancialStatements(fileUrl);
-                }}
-                onDismissAssignment={() => setUploadedFileUrls(null)}
-                onRunAiExtraction={() => {
-                  void handleRunAiExtraction();
-                }}
-                onRemoveDocument={(fileUrl) => {
-                  void handleRemoveDocument(fileUrl);
-                }}
-                onUnassignFinancialStatements={(fileUrl) => {
-                  void handleUnassignFinancialStatements(fileUrl);
-                }}
-              />
-            </Tabs>
+            <ReturnFormTab
+              draftForm={draftForm}
+              setDraftForm={setDraftForm}
+              visibleSections={visibleSections}
+              activeSection={activeSection}
+              activeSectionId={activeSectionId}
+              setActiveSectionId={setActiveSectionId}
+              substanceForm={substanceFormQuery.data ?? null}
+              isSubstanceFormLoading={substanceFormQuery.isLoading}
+              draftMissingFields={draftMissingFields}
+              isSectionDialogOpen={isSectionDialogOpen}
+              setIsSectionDialogOpen={setIsSectionDialogOpen}
+              savingSection={savingSection}
+              isUpdating={updateSubstanceFormMutation.isPending}
+              isInitializing={createSubstanceFormMutation.isPending}
+              onInitForm={() => {
+                void handleInitForm();
+              }}
+              onSaveSection={() => {
+                void handleSaveSection();
+              }}
+              onClearForm={() => {
+                void handleClearForm();
+              }}
+            />
 
-          </div>
+            <ReturnFilesTab
+              selectedReturnId={selectedReturn.id}
+              selectedFiles={selectedFiles}
+              hasFinancialStatements={selectedFiles.some(
+                (f) => f.role === "financial_statements",
+              )}
+              isUploading={isUploadingFiles}
+              isExtractPending={isAiExtractionPending}
+              isAssignPending={assignDocumentRoleMutation.isPending}
+              uploadedFileUrls={uploadedFileUrls}
+              onUploadFiles={(files) => {
+                void handleUploadFiles(files);
+              }}
+              onAssignFinancialStatements={(fileUrl) => {
+                void handleAssignFinancialStatements(fileUrl);
+              }}
+              onDismissAssignment={() => setUploadedFileUrls(null)}
+              onRunAiExtraction={() => {
+                void handleRunAiExtraction();
+              }}
+              onRemoveDocument={(fileUrl) => {
+                void handleRemoveDocument(fileUrl);
+              }}
+              onUnassignFinancialStatements={(fileUrl) => {
+                void handleUnassignFinancialStatements(fileUrl);
+              }}
+            />
+          </Tabs>
         </div>
-      </main>
+      </div>
+    </main>
   );
 }
