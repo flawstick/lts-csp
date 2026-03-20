@@ -25,6 +25,7 @@ import {
 import {
   CIGA_BY_ACTIVITY,
   getMissingFields,
+  relevantActivityEnum,
   substanceFormSchema,
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
@@ -45,6 +46,23 @@ const portalFileSchema = z.object({
 });
 
 const DEFAULT_CERTIFICATE_TYPE = "Certificate 3";
+
+const RELEVANT_ACTIVITY_OPTIONS = relevantActivityEnum.options;
+type RelevantActivityOption = (typeof RELEVANT_ACTIVITY_OPTIONS)[number];
+type ExtractionContextSource =
+  | {
+      entityActivity?: string | null;
+      relevantActivity?: string | null;
+      economicClassificationCode?: string | null;
+      cigaPerformed?: string | null;
+      cigaDetails?: string | null;
+    }
+  | null
+  | undefined;
+
+const ECONOMIC_CLASSIFICATION_CODE_PATTERN = /\b\d{1,3}(?:\.\d{1,3})+\b/;
+const ECONOMIC_CLASSIFICATION_CODE_CONTEXT_PATTERN =
+  /\b\d{1,3}(?:\.\d{1,3}){2,}\b/;
 
 function normalizeTaxReferenceNumber(input: {
   taxReferenceNumber?: string | null;
@@ -72,6 +90,182 @@ function normalizeTaxReferenceNumber(input: {
   return normalizedTaxReference ?? undefined;
 }
 
+const RELEVANT_ACTIVITY_CONTEXT_RULES: Array<{
+  activity: RelevantActivityOption;
+  patterns: RegExp[];
+}> = [
+  {
+    activity: "Self-managed fund",
+    patterns: [
+      /\bself[- ]managed fund\b/i,
+      /\bself managed collective investment\b/i,
+    ],
+  },
+  {
+    activity: "Fund management",
+    patterns: [
+      /\bfund management\b/i,
+      /\binvestment management\b/i,
+      /\bportfolio management\b/i,
+    ],
+  },
+  {
+    activity: "Intellectual Property Holding Company",
+    patterns: [
+      /\bintellectual property\b/i,
+      /\broyalt(?:y|ies)\b/i,
+      /\blicen[cs](?:e|ing)\b/i,
+      /\bpatent\b/i,
+      /\btrademark\b/i,
+    ],
+  },
+  {
+    activity: "Pure Equity Holding Company",
+    patterns: [
+      /\bpure equity\b/i,
+      /\bequity holding\b/i,
+      /\bshareholding\b/i,
+      /\bdividend income\b/i,
+      /\bshares in subsidiaries\b/i,
+    ],
+  },
+  {
+    activity: "Banking",
+    patterns: [
+      /\bbanking\b/i,
+      /\bdeposit(?: |-)?taking\b/i,
+      /\bcredit institution\b/i,
+      /\bloan book\b/i,
+    ],
+  },
+  {
+    activity: "Insurance",
+    patterns: [/\binsurance\b/i, /\breinsurance\b/i, /\bund(er)?writing\b/i],
+  },
+  {
+    activity: "Financing and leasing",
+    patterns: [
+      /\bfinancing\b/i,
+      /\bleasing\b/i,
+      /\blease agreements?\b/i,
+      /\blending\b/i,
+      /\bcredit facilities?\b/i,
+    ],
+  },
+  {
+    activity: "Distribution and Service Centre",
+    patterns: [
+      /\bdistribution and service centre\b/i,
+      /\bservice centre\b/i,
+      /\bdistribution centre\b/i,
+      /\bprocurement services\b/i,
+      /\badministrative services to group\b/i,
+    ],
+  },
+  {
+    activity: "Headquarters",
+    patterns: [
+      /\bheadquarters\b/i,
+      /\bhead office\b/i,
+      /\bgroup headquarters\b/i,
+    ],
+  },
+  {
+    activity: "Shipping",
+    patterns: [/\bshipping\b/i, /\bmaritime\b/i, /\bvessel\b/i, /\bcharter\b/i],
+  },
+];
+
+function normalizeEconomicClassificationCode(value?: string | null) {
+  if (!value) return undefined;
+  const match = ECONOMIC_CLASSIFICATION_CODE_PATTERN.exec(value);
+  return match?.[0];
+}
+
+function findEconomicClassificationCodeFromContext(
+  ...contexts: Array<string | null | undefined>
+) {
+  const combined = contexts
+    .filter(
+      (context): context is string => !!context && context.trim().length > 0,
+    )
+    .join("\n");
+
+  if (!combined) {
+    return undefined;
+  }
+
+  const labeledMatch =
+    /(?:economic classification code|company activity code|activity code|classification code|economic code)[^0-9]{0,50}(\d{1,3}(?:\.\d{1,3})+\b)/i.exec(
+      combined,
+    );
+
+  if (labeledMatch?.[1]) {
+    return labeledMatch[1];
+  }
+
+  return ECONOMIC_CLASSIFICATION_CODE_CONTEXT_PATTERN.exec(combined)?.[0];
+}
+
+function inferRelevantActivityFromContext(
+  ...contexts: Array<string | null | undefined>
+): RelevantActivityOption | undefined {
+  const snippets = contexts.filter(
+    (context): context is string =>
+      typeof context === "string" && context.trim().length > 0,
+  );
+
+  for (const snippet of snippets) {
+    const exact = RELEVANT_ACTIVITY_OPTIONS.find(
+      (option) => snippet.trim().toLowerCase() === option.toLowerCase(),
+    );
+    if (exact) {
+      return exact;
+    }
+  }
+
+  const combined = snippets.join("\n");
+  if (!combined) {
+    return undefined;
+  }
+
+  for (const rule of RELEVANT_ACTIVITY_CONTEXT_RULES) {
+    if (rule.patterns.some((pattern) => pattern.test(combined))) {
+      return rule.activity;
+    }
+  }
+
+  return undefined;
+}
+
+function buildExistingExtractionContext(form: ExtractionContextSource) {
+  if (!form) {
+    return "";
+  }
+
+  const lines = [
+    form.entityActivity
+      ? `- Existing entityActivity: ${form.entityActivity}`
+      : null,
+    form.relevantActivity
+      ? `- Existing relevantActivity: ${form.relevantActivity}`
+      : null,
+    form.economicClassificationCode
+      ? `- Existing economicClassificationCode: ${form.economicClassificationCode}`
+      : null,
+    form.cigaPerformed
+      ? `- Existing cigaPerformed: ${form.cigaPerformed}`
+      : null,
+    form.cigaDetails ? `- Existing cigaDetails: ${form.cigaDetails}` : null,
+  ].filter(Boolean);
+
+  if (!lines.length) {
+    return "";
+  }
+
+  return `Use this saved form context as prior context when the new files are ambiguous or incomplete:\n${lines.join("\n")}`;
+}
+
 const aiExtractionSchema = z.object({
   entityName: z.string().optional(),
   entityType: z.enum(["Company", "Partnership"]).optional(),
@@ -91,7 +285,9 @@ const aiExtractionSchema = z.object({
   economicClassificationCode: z
     .string()
     .optional()
-    .describe("REQUIRED for 2025 returns — Company Activity Code dropdown"),
+    .describe(
+      'REQUIRED for 2025 returns — Company Activity Code dropdown. It usually looks like a dotted numeric code such as "10.5.4". Return only the dotted code.',
+    ),
   certificateType: z
     .string()
     .optional()
@@ -149,7 +345,10 @@ const aiExtractionSchema = z.object({
       "Pure Equity Holding Company",
       "None of the above",
     ])
-    .optional(),
+    .optional()
+    .describe(
+      "Primary relevant activity from the dropdown options. Use existing form context and the entity activity/business description if the documents are ambiguous.",
+    ),
   hasMultipleRelevantActivities: z.enum(["Yes", "No"]).optional(),
   hasIntellectualPropertyHolding: z.enum(["Yes", "No"]).optional(),
   isHighRiskIpEntity: z.enum(["Yes", "No"]).optional(),
@@ -1374,6 +1573,13 @@ export const portalReturnsRouter = createTRPCRouter({
         form = created ?? undefined;
       }
 
+      if (!form) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to initialize the Guernsey substance form.",
+        });
+      }
+
       type FileContent = { type: "file"; data: string; mediaType: string };
       type TextContent = { type: "text"; text: string };
 
@@ -1484,11 +1690,14 @@ export const portalReturnsRouter = createTRPCRouter({
             `${activity}:\n  - ${options.join("\n  - ")}`,
         )
         .join("\n\n");
+      const existingContextText = buildExistingExtractionContext(form);
 
       const prompt = `You are extracting data for a Guernsey Economic Substance Register form.
 
 Read all attached files and return values only when they are explicitly stated or clearly inferable.
 If a value is unknown, leave it empty.
+
+${existingContextText ? `=== EXISTING FORM CONTEXT ===\n${existingContextText}\n` : ""}
 
 Use these strict output rules:
 - Dates: YYYY-MM-DD
@@ -1501,12 +1710,12 @@ Use these strict output rules:
 - If net book value is negative, return "0".
 - profitAllocation is REQUIRED — always pick "Investment" or "Business".
 - accountingPeriodStart is ALWAYS "${Number(returnRecord.taxYear) - 1}-04-06" and accountingPeriodEnd is ALWAYS "${returnRecord.taxYear}-04-05". The Guernsey tax year runs 6 April to 5 April. Do NOT extract different dates from the documents.
-- economicClassificationCode is REQUIRED for 2025 returns. Always try to extract this.
+- economicClassificationCode is REQUIRED for 2025 returns. It usually looks like a dotted numeric code such as "10.5.4". Look specifically for dot-separated numeric codes near labels like "Economic Classification Code" or "Company Activity Code", and return only the dotted code.
 - isConstituentEntity (CbCR) is REQUIRED for 2025 returns — default to "No" if not stated.
 - accountsPreparerName is the ACCOUNTANT who prepared the financial accounts, NOT "LTS Tax Limited".
 - entityActivity: always try to extract the nature of the entity's activity (e.g., "Property Holdings").
-- relevantActivity is REQUIRED — pick the single most applicable option. If none apply, use "None of the above".
-- allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey — always try to extract from minutes or directors reports.
+- relevantActivity is REQUIRED — pick the single most applicable option. Use the saved form context plus the entity activity/business description if the new documents are ambiguous. If the existing saved form already identifies the relevant activity and the new files do not clearly contradict it, keep that activity.
+- allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey are helpful but not required. Extract them when the documents state them, otherwise leave them empty.
 - If the entity has no relevant activity ("None of the above"), leave adequacy, CIGA, employees, outsourcing, and beneficial ownership sections empty.
 
 For CIGA, use these activity mappings:
@@ -1519,22 +1728,39 @@ ${cigaOptionsText}
         ...textContents,
       ];
 
-      const result = await generateObject({
-        model,
-        output: "object",
-        schema: aiExtractionSchema,
-        schemaName: "PortalGuernseySubstanceForm",
-        schemaDescription:
-          "Guernsey Economic Substance Register form extraction for portal clients",
-        messages: [
-          {
-            role: "user",
-            content: messageContent,
-          },
-        ],
-      });
+      const MAX_RETRIES = 2;
+      let result: Awaited<ReturnType<typeof generateObject<typeof aiExtractionSchema>>>;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          result = await generateObject({
+            model,
+            output: "object",
+            schema: aiExtractionSchema,
+            schemaName: "PortalGuernseySubstanceForm",
+            schemaDescription:
+              "Guernsey Economic Substance Register form extraction for portal clients",
+            messages: [
+              {
+                role: "user",
+                content: messageContent,
+              },
+            ],
+          });
+          break;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "";
+          const isTransient =
+            msg.includes("input stream") ||
+            msg.includes("ECONNRESET") ||
+            msg.includes("socket hang up");
+          if (!isTransient || attempt >= MAX_RETRIES) throw err;
+          // Brief pause before retry
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
 
       const extractedData = result.object;
+      const extractedTextContext = textContents.map((content) => content.text);
 
       // Force correct accounting period (Guernsey tax year: 6 April to 5 April)
       extractedData.accountingPeriodStart = `${Number(returnRecord.taxYear) - 1}-04-06`;
@@ -1584,6 +1810,38 @@ ${cigaOptionsText}
 
       // CbCR default
       extractedData.isConstituentEntity ??= "No";
+
+      extractedData.economicClassificationCode =
+        normalizeEconomicClassificationCode(
+          extractedData.economicClassificationCode,
+        ) ??
+        findEconomicClassificationCodeFromContext(
+          extractedData.entityActivity,
+          form.entityActivity,
+          ...extractedTextContext,
+        ) ??
+        normalizeEconomicClassificationCode(form.economicClassificationCode);
+
+      const contextualRelevantActivity = inferRelevantActivityFromContext(
+        extractedData.relevantActivity,
+        form.relevantActivity,
+        extractedData.entityActivity,
+        form.entityActivity,
+        extractedData.cigaPerformed,
+        extractedData.cigaDetails,
+        form.cigaPerformed,
+        form.cigaDetails,
+        ...extractedTextContext,
+      );
+
+      if (
+        !extractedData.relevantActivity ||
+        (extractedData.relevantActivity === "None of the above" &&
+          contextualRelevantActivity &&
+          contextualRelevantActivity !== "None of the above")
+      ) {
+        extractedData.relevantActivity = contextualRelevantActivity;
+      }
 
       const merged = { ...form, ...extractedData } as SubstanceFormData;
       const missingFields = getMissingFields(merged);
