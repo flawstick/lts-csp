@@ -11,6 +11,7 @@ import { TasksTableView } from "./tasks-table-view";
 import {
   PAGE_SIZE,
   classifyTaskKind,
+  fileCount,
   normalizeStatus,
   toTimestamp,
   type SortDirection,
@@ -28,6 +29,7 @@ export function OrgTasksTable({ orgId }: Props) {
   const [query, setQuery] = useState("");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [jurisdictionFilter, setJurisdictionFilter] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("updated");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [page, setPage] = useState(1);
@@ -40,7 +42,19 @@ export function OrgTasksTable({ orgId }: Props) {
   );
 
   const tasks = useMemo(
-    () => (returnsQuery.data ?? []).filter((row) => row.status !== "completed"),
+    () =>
+      (returnsQuery.data ?? []).filter((row) => {
+        if (row.status === "completed") return false;
+        // If pending but has docs and ESR is complete, nothing left to do — hide it
+        if (
+          row.status === "pending" &&
+          fileCount(row.files) > 0 &&
+          row.isSubstanceComplete
+        ) {
+          return false;
+        }
+        return true;
+      }),
     [returnsQuery.data],
   );
 
@@ -61,6 +75,18 @@ export function OrgTasksTable({ orgId }: Props) {
     [tasks],
   );
 
+  const jurisdictions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of tasks) {
+      if (!map.has(row.jurisdictionCode)) {
+        map.set(row.jurisdictionCode, row.jurisdictionName);
+      }
+    }
+    return Array.from(map, ([code, name]) => ({ code, name })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }, [tasks]);
+
   const filteredRows = useMemo(() => {
     const term = deferredQuery.trim().toLowerCase();
 
@@ -74,6 +100,13 @@ export function OrgTasksTable({ orgId }: Props) {
         }
 
         if (statusFilter !== "all" && normalizedStatus !== statusFilter) {
+          return false;
+        }
+
+        if (
+          jurisdictionFilter !== "all" &&
+          row.jurisdictionCode !== jurisdictionFilter
+        ) {
           return false;
         }
 
@@ -114,7 +147,7 @@ export function OrgTasksTable({ orgId }: Props) {
           (toTimestamp(left.updatedAt) - toTimestamp(right.updatedAt))
         );
       });
-  }, [deferredQuery, sortDirection, sortKey, statusFilter, taskFilter, tasks]);
+  }, [deferredQuery, jurisdictionFilter, sortDirection, sortKey, statusFilter, taskFilter, tasks]);
 
   const totalCount = filteredRows.length;
   const pageCount = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -127,10 +160,13 @@ export function OrgTasksTable({ orgId }: Props) {
 
   useEffect(() => {
     setPage(1);
-  }, [deferredQuery, taskFilter, statusFilter, sortKey, sortDirection]);
+  }, [deferredQuery, taskFilter, statusFilter, jurisdictionFilter, sortKey, sortDirection]);
 
   const hasFilters =
-    query.trim().length > 0 || taskFilter !== "all" || statusFilter !== "all";
+    query.trim().length > 0 ||
+    taskFilter !== "all" ||
+    statusFilter !== "all" ||
+    jurisdictionFilter !== "all";
 
   const toggleSort = (key: SortKey) => {
     setSortDirection((currentDirection) => {
@@ -182,6 +218,9 @@ export function OrgTasksTable({ orgId }: Props) {
         onTaskFilterChange={setTaskFilter}
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
+        jurisdictionFilter={jurisdictionFilter}
+        onJurisdictionFilterChange={setJurisdictionFilter}
+        jurisdictions={jurisdictions}
         filteredCount={totalCount}
         totalCount={tasks.length}
         taskCounts={taskCounts}
@@ -190,6 +229,7 @@ export function OrgTasksTable({ orgId }: Props) {
           setQuery("");
           setTaskFilter("all");
           setStatusFilter("all");
+          setJurisdictionFilter("all");
         }}
       />
 

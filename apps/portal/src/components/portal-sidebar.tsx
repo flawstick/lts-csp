@@ -1,11 +1,14 @@
 "use client";
 
 import type { ComponentProps } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/client";
-import { buildPortalNavigationModel, getPortalOrgIdFromPathname } from "@/lib/portal-navigation";
+import {
+  buildPortalNavigationModel,
+  getPortalOrgIdFromPathname,
+} from "@/lib/portal-navigation";
 import { api } from "@/trpc/react";
 import {
   Sidebar,
@@ -20,6 +23,11 @@ import { SidebarNavMain } from "@/components/_components/sidebar/sidebar-nav-mai
 import { SidebarOrgSwitcher } from "@/components/_components/sidebar/sidebar-org-switcher";
 import type { SidebarMembership } from "@/components/_components/sidebar/types";
 
+function getPortalReturnIdFromPathname(pathname: string) {
+  const match = /^\/org\/[^/]+\/returns\/([^/]+)(?:\/|$)/.exec(pathname);
+  return match?.[1] ?? null;
+}
+
 export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
   const router = useRouter();
@@ -27,7 +35,14 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
 
   const membershipsQuery = api.portalAccess.getMyMemberships.useQuery();
 
-  const currentOrgId = useMemo(() => getPortalOrgIdFromPathname(pathname), [pathname]);
+  const currentOrgId = useMemo(
+    () => getPortalOrgIdFromPathname(pathname),
+    [pathname],
+  );
+  const currentReturnId = useMemo(
+    () => getPortalReturnIdFromPathname(pathname),
+    [pathname],
+  );
 
   const memberships = useMemo<SidebarMembership[]>(() => {
     return (membershipsQuery.data?.memberships ?? []).map((membership) => ({
@@ -42,15 +57,19 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
   const activeOrg = useMemo(() => {
     if (!memberships.length) return null;
     if (!currentOrgId) return memberships[0] ?? null;
-    return memberships.find((membership) => membership.orgId === currentOrgId) ?? memberships[0] ?? null;
+    return (
+      memberships.find((membership) => membership.orgId === currentOrgId) ??
+      memberships[0] ??
+      null
+    );
   }, [currentOrgId, memberships]);
 
   const linkOrgId = currentOrgId;
   const returnsUrl = linkOrgId ? `/org/${linkOrgId}/returns` : "/returns";
 
   const sidebarDataQuery = api.portalReturns.sidebarJurisdictions.useQuery(
-    { orgId: activeOrg?.orgId },
-    { enabled: !!activeOrg },
+    { orgId: activeOrg?.orgId, focusReturnId: currentReturnId ?? undefined },
+    { enabled: !!activeOrg, placeholderData: (prev) => prev },
   );
 
   const sidebarOrgId = sidebarDataQuery.data?.orgId ?? activeOrg?.orgId ?? null;
@@ -58,39 +77,86 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
     () => sidebarDataQuery.data?.jurisdictions ?? [],
     [sidebarDataQuery.data?.jurisdictions],
   );
+  const focusedJurisdictionId = useMemo(
+    () =>
+      jurisdictions.find((jurisdiction) => jurisdiction.hasFocusReturn)
+        ?.jurisdictionId ?? null,
+    [jurisdictions],
+  );
 
+  const openJurisdictionsStorageKey = `open-jurisdictions${sidebarOrgId ? `-${sidebarOrgId}` : ""}`;
   const [openJurisdictions, setOpenJurisdictions] = useState<string[]>([]);
+  const [restoredFromStorage, setRestoredFromStorage] = useState(false);
+  const hasRestoredRef = useRef(false);
 
+  // Persist open state to localStorage on every change (skip initial empty state)
+  const persistOpenState = useCallback(
+    (ids: string[]) => {
+      try {
+        localStorage.setItem(openJurisdictionsStorageKey, JSON.stringify(ids));
+      } catch {
+        // ignore
+      }
+    },
+    [openJurisdictionsStorageKey],
+  );
+
+  // Restore from localStorage once on mount when jurisdictions arrive
   useEffect(() => {
-    if (!jurisdictions.length) {
-      setOpenJurisdictions((previous) => (previous.length ? [] : previous));
-      return;
+    if (hasRestoredRef.current || !jurisdictions.length) return;
+    hasRestoredRef.current = true;
+
+    let saved: string[] | null = null;
+    try {
+      const raw = localStorage.getItem(openJurisdictionsStorageKey);
+      if (raw) saved = JSON.parse(raw);
+    } catch {
+      // ignore
     }
 
-    setOpenJurisdictions((previous) => {
-      const validIds = new Set(jurisdictions.map((jurisdiction) => jurisdiction.jurisdictionId));
-      const stillExisting = previous.filter((item) => validIds.has(item));
+    if (saved && saved.length > 0) {
+      // Filter to only valid jurisdiction IDs
+      const validIds = new Set(jurisdictions.map((j) => j.jurisdictionId));
+      const restored = saved.filter((id) => validIds.has(id));
 
-      if (!stillExisting.length) {
-        const firstJurisdictionId = jurisdictions[0]?.jurisdictionId;
-        if (!firstJurisdictionId) {
-          return previous.length ? [] : previous;
-        }
-
-        if (previous.length === 1 && previous[0] === firstJurisdictionId) {
-          return previous;
-        }
-
-        return [firstJurisdictionId];
+      // Also include focused jurisdiction if navigating to a specific return
+      if (focusedJurisdictionId && !restored.includes(focusedJurisdictionId)) {
+        restored.unshift(focusedJurisdictionId);
       }
 
-      const unchanged =
-        stillExisting.length === previous.length &&
-        stillExisting.every((jurisdictionId, index) => jurisdictionId === previous[index]);
+      setOpenJurisdictions(restored.length > 0 ? restored : [jurisdictions[0]?.jurisdictionId ?? ""]);
+    } else {
+      // No saved state — open focused or first
+      const defaultId = focusedJurisdictionId ?? jurisdictions[0]?.jurisdictionId;
+      setOpenJurisdictions(defaultId ? [defaultId] : []);
+    }
 
-      return unchanged ? previous : stillExisting;
+    setRestoredFromStorage(true);
+  }, [jurisdictions, focusedJurisdictionId, openJurisdictionsStorageKey]);
+
+  // When jurisdictions change (e.g. org switch), prune invalid IDs
+  useEffect(() => {
+    if (!restoredFromStorage || !jurisdictions.length) return;
+
+    setOpenJurisdictions((previous) => {
+      const validIds = new Set(jurisdictions.map((j) => j.jurisdictionId));
+      const stillValid = previous.filter((id) => validIds.has(id));
+      if (stillValid.length === previous.length) return previous;
+      return stillValid;
     });
-  }, [jurisdictions]);
+  }, [jurisdictions, restoredFromStorage]);
+
+  // Ensure focused jurisdiction is open when navigating to a return
+  useEffect(() => {
+    if (!focusedJurisdictionId || !restoredFromStorage) return;
+
+    setOpenJurisdictions((previous) => {
+      if (previous.includes(focusedJurisdictionId)) return previous;
+      const next = [focusedJurisdictionId, ...previous];
+      persistOpenState(next);
+      return next;
+    });
+  }, [focusedJurisdictionId, restoredFromStorage, persistOpenState]);
 
   const navItems = useMemo(
     () =>
@@ -142,16 +208,20 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
 
   const toggleJurisdiction = (jurisdictionId: string) => {
     setOpenJurisdictions((previous) => {
-      if (previous.includes(jurisdictionId)) {
-        return previous.filter((item) => item !== jurisdictionId);
-      }
-
-      return [...previous, jurisdictionId];
+      const next = previous.includes(jurisdictionId)
+        ? previous.filter((item) => item !== jurisdictionId)
+        : [...previous, jurisdictionId];
+      persistOpenState(next);
+      return next;
     });
   };
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-sidebar-border/70 bg-sidebar" {...props}>
+    <Sidebar
+      collapsible="icon"
+      className="border-sidebar-border/70 bg-sidebar border-r"
+      {...props}
+    >
       <SidebarHeader className="px-2.5 py-3 transition-[padding] duration-200 ease-linear group-data-[collapsible=icon]:px-0">
         <SidebarMenu>
           <SidebarOrgSwitcher
@@ -166,7 +236,7 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
       <SidebarContent className="px-2.5 transition-[padding] duration-200 ease-linear group-data-[collapsible=icon]:px-0">
         <SidebarNavMain items={navItems} />
         <SidebarJurisdictions
-          isLoading={sidebarDataQuery.isLoading}
+          isLoading={sidebarDataQuery.isLoading || !sidebarDataQuery.isFetched || !restoredFromStorage}
           jurisdictions={jurisdictions}
           openJurisdictions={openJurisdictions}
           onToggleJurisdiction={toggleJurisdiction}
@@ -179,7 +249,11 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
         email={membershipsQuery.data?.account.email ?? null}
         fullName={membershipsQuery.data?.account.fullName ?? null}
         avatarUrl={membershipsQuery.data?.account.avatarUrl ?? null}
-        settingsHref={(linkOrgId ?? activeOrg?.orgId) ? `/org/${linkOrgId ?? activeOrg?.orgId}/settings` : null}
+        settingsHref={
+          (linkOrgId ?? activeOrg?.orgId)
+            ? `/org/${linkOrgId ?? activeOrg?.orgId}/settings`
+            : null
+        }
         onLogout={logout}
       />
 

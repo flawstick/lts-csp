@@ -1,158 +1,191 @@
-import * as cheerio from "cheerio";
 import { db, schema } from "@repo/database";
 import { eq } from "drizzle-orm";
-import { authenticate } from "./auth";
+import { syncGuernseyReturns } from "./guernsey";
+import { syncJerseyReturns } from "./jersey";
+import { createLogger } from "./logger";
+import type { SyncedTaxReturn, SyncedReturnType } from "./types";
 
-const ITEMS_PER_PAGE = 50;
-const MAX_PAGES = 100;
-const BASE_URL = "https://my.gov.gg/revenue/employee-assigned-cases";
+const JOB_ID = process.env.TAX_SYNC_JOB_ID || "";
+const ORG_ID = process.env.ORG_ID || "";
+const JURISDICTION_CODE = (process.env.JURISDICTION_CODE || "GG").trim().toUpperCase();
 
-let sessionCookies: string = "";
+function resolveCredentials(): { username: string; password: string } | null {
+  const genericUsername = process.env.PORTAL_USERNAME?.trim();
+  const genericPassword = process.env.PORTAL_PASSWORD?.trim();
 
-const getHeaders = () => ({
-  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Cookie": sessionCookies,
-  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-});
+  if (genericUsername && genericPassword) {
+    return {
+      username: genericUsername,
+      password: genericPassword,
+    };
+  }
 
-const log = (msg: string) => console.log(`[TAX-SYNC] ${msg}`);
+  if (JURISDICTION_CODE === "GG") {
+    const username = process.env.MYGOV_USERNAME?.trim();
+    const password = process.env.MYGOV_PASSWORD?.trim();
+    return username && password ? { username, password } : null;
+  }
 
-async function fetchPage(page: number): Promise<string> {
-  const url = `${BASE_URL}?taxReferenceType=All&year=All&formStatus=All&items_per_page=${ITEMS_PER_PAGE}&page=${page}`;
-  const res = await fetch(url, { headers: getHeaders() });
-  if (!res.ok) throw new Error(`Page ${page} failed: ${res.status}`);
-  return res.text();
+  if (JURISDICTION_CODE === "JE") {
+    const username = process.env.JSYTAX_USERNAME?.trim();
+    const password = process.env.JSYTAX_PASSWORD?.trim();
+    return username && password ? { username, password } : null;
+  }
+
+  return null;
 }
 
-function parseReturns(html: string) {
-  const $ = cheerio.load(html);
-  const returns: any[] = [];
+function summarizeReturns(returns: SyncedTaxReturn[]) {
+  const byStatus = returns.reduce<Record<string, number>>((acc, current) => {
+    acc[current.status] = (acc[current.status] ?? 0) + 1;
+    return acc;
+  }, {});
 
-  $("table tbody tr").each((_, row) => {
-    const $row = $(row);
-    const entityName = $row.find(".views-field-taxReferenceOwnerName").text().replace(/\s+/g, " ").trim();
-    const trn = $row.find(".views-field-taxReferenceNumber").text().replace(/\s+/g, " ").trim();
-    const yearStr = $row.find(".views-field-year").text().replace(/\s+/g, " ").trim();
-    const statusText = $row.find(".views-field-formStatus").text().replace(/\s+/g, " ").trim();
-    const clientLink = $row.find(".views-field-taxReferenceOwnerName a").attr("href");
-    const caseLink = $row.find(".views-field-nothing a").attr("href");
+  const byReturnType = returns.reduce<Record<SyncedReturnType | string, number>>(
+    (acc, current) => {
+      acc[current.returnType] = (acc[current.returnType] ?? 0) + 1;
+      return acc;
+    },
+    {},
+  );
 
-    if (entityName && trn) {
-      let status: "pending" | "completed" | "in_progress" = "pending";
-      if (statusText.includes("Submitted")) status = "completed";
-      else if (statusText.includes("Prepared")) status = "in_progress";
+  return {
+    total: returns.length,
+    byStatus,
+    byReturnType,
+  };
+}
 
-      returns.push({
-        externalId: `${trn}-${yearStr}`,
-        entityName,
-        taxYear: parseInt(yearStr) || 2024,
-        status,
-        link: caseLink ? `https://my.gov.gg${caseLink}` : "",
-        pdfUrl: `https://my.gov.gg/revenue/pdf/${trn}/${yearStr}/instructions.pdf`,
-        metadata: { source: "Guernsey Tax Portal", clientProfileUrl: clientLink, rawStatus: statusText }
-      });
-    }
-  });
+async function markJob(
+  values: Partial<typeof schema.taxSyncJobs.$inferInsert>,
+): Promise<void> {
+  if (!JOB_ID) {
+    return;
+  }
 
-  return returns;
+  await db
+    .update(schema.taxSyncJobs)
+    .set(values)
+    .where(eq(schema.taxSyncJobs.id, JOB_ID));
 }
 
 async function main() {
-  const jobId = process.env.TAX_SYNC_JOB_ID;
-  log(`Starting sync${jobId ? ` (job: ${jobId})` : ""}...`);
+  const logger = createLogger(JURISDICTION_CODE);
+
+  logger.info("Worker starting", {
+    jobId: JOB_ID || null,
+    orgId: ORG_ID || null,
+    jurisdictionCode: JURISDICTION_CODE,
+  });
 
   try {
-    // Update job status to running
-    if (jobId) {
-      await db.update(schema.taxSyncJobs)
-        .set({ status: "running", startedAt: new Date() })
-        .where(eq(schema.taxSyncJobs.id, jobId));
+    if (!ORG_ID) {
+      throw new Error("ORG_ID environment variable is required");
     }
 
-    // Authenticate to get session cookies
-    const username = process.env.MYGOV_USERNAME;
-    const password = process.env.MYGOV_PASSWORD;
-
-    if (!username || !password) {
-      throw new Error("MYGOV_USERNAME and MYGOV_PASSWORD environment variables are required");
+    const credentials = resolveCredentials();
+    if (!credentials) {
+      throw new Error(
+        `No portal credentials available for ${JURISDICTION_CODE}. Expected PORTAL_USERNAME/PORTAL_PASSWORD or jurisdiction-specific env vars.`,
+      );
     }
 
-    log("Authenticating with MyGov portal...");
-    const authResult = await authenticate(username, password);
-    sessionCookies = authResult.cookies;
-    log(`Session established, expires at ${authResult.expiresAt.toISOString()}`);
+    await markJob({
+      status: "running",
+      startedAt: new Date(),
+      errorMessage: null,
+    });
 
-    const allReturns: any[] = [];
+    const organisation = await db.query.organisations.findFirst({
+      where: eq(schema.organisations.id, ORG_ID),
+    });
+    const jurisdiction = await db.query.jurisdictions.findFirst({
+      where: eq(schema.jurisdictions.code, JURISDICTION_CODE),
+    });
 
-    let pagesFetched = 0;
+    if (!organisation || !jurisdiction) {
+      throw new Error("Organisation or jurisdiction not found");
+    }
 
-    for (let page = 0; page < MAX_PAGES; page++) {
-      log(`Fetching page ${page + 1}...`);
-      const html = await fetchPage(page);
-      const returns = parseReturns(html);
-      log(`Page ${page + 1}: ${returns.length} returns`);
+    let syncedReturns: SyncedTaxReturn[];
 
-      if (returns.length === 0) {
+    switch (JURISDICTION_CODE) {
+      case "GG":
+        syncedReturns = await syncGuernseyReturns({
+          username: credentials.username,
+          password: credentials.password,
+          logger,
+        });
         break;
-      }
-
-      allReturns.push(...returns);
-      pagesFetched = page + 1;
+      case "JE":
+        syncedReturns = await syncJerseyReturns({
+          username: credentials.username,
+          password: credentials.password,
+          logger,
+        });
+        break;
+      default:
+        throw new Error(`Unsupported jurisdiction: ${JURISDICTION_CODE}`);
     }
 
-    if (pagesFetched === MAX_PAGES) {
-      log(`Reached pagination safety cap at ${MAX_PAGES} pages`);
+    const summary = summarizeReturns(syncedReturns);
+    logger.info("Sync summary", summary);
+
+    for (const syncedReturn of syncedReturns) {
+      await db
+        .insert(schema.taxReturns)
+        .values({
+          orgId: organisation.id,
+          jurisdictionId: jurisdiction.id,
+          entityName: syncedReturn.entityName,
+          taxYear: syncedReturn.taxYear,
+          status: syncedReturn.status,
+          returnType: syncedReturn.returnType,
+          externalId: syncedReturn.externalId,
+          link: syncedReturn.link,
+          pdfUrl: syncedReturn.pdfUrl ?? null,
+          metadata: syncedReturn.metadata,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.taxReturns.jurisdictionId,
+            schema.taxReturns.externalId,
+            schema.taxReturns.taxYear,
+            schema.taxReturns.returnType,
+          ],
+          set: {
+            entityName: syncedReturn.entityName,
+            status: syncedReturn.status,
+            link: syncedReturn.link,
+            pdfUrl: syncedReturn.pdfUrl ?? null,
+            metadata: syncedReturn.metadata,
+            updatedAt: new Date(),
+          },
+        });
     }
 
-    log(`Total: ${allReturns.length} returns across ${pagesFetched} pages`);
+    await markJob({
+      status: "completed",
+      completedAt: new Date(),
+      returnsFound: syncedReturns.length,
+      errorMessage: null,
+    });
 
-    // Update database
-    if (allReturns.length > 0) {
-      const orgId = process.env.ORG_ID;
-      if (!orgId) {
-        throw new Error("ORG_ID environment variable is required");
-      }
-
-      const org = await db.query.organisations.findFirst({
-        where: eq(schema.organisations.id, orgId)
-      });
-      const jurisdiction = await db.query.jurisdictions.findFirst({
-        where: eq(schema.jurisdictions.name, "Guernsey")
-      });
-
-      if (!org || !jurisdiction) {
-        throw new Error("Organisation or Guernsey Jurisdiction not found");
-      }
-
-      for (const ret of allReturns) {
-        await db.insert(schema.taxReturns)
-          .values({ ...ret, orgId: org.id, jurisdictionId: jurisdiction.id })
-          .onConflictDoUpdate({
-            target: schema.taxReturns.externalId,
-            set: { status: ret.status, link: ret.link, pdfUrl: ret.pdfUrl, updatedAt: new Date() }
-          });
-      }
-
-      log(`Synced ${allReturns.length} returns to DB`);
-
-      // Update job status
-      if (jobId) {
-        await db.update(schema.taxSyncJobs)
-          .set({ status: "completed", completedAt: new Date(), returnsFound: allReturns.length })
-          .where(eq(schema.taxSyncJobs.id, jobId));
-      }
-    }
-
-    log("Done!");
+    logger.info("Worker completed", {
+      returnsFound: syncedReturns.length,
+    });
     process.exit(0);
   } catch (error) {
-    log(`Error: ${error}`);
-    if (jobId) {
-      await db.update(schema.taxSyncJobs)
-        .set({ status: "failed", completedAt: new Date(), errorMessage: String(error) })
-        .where(eq(schema.taxSyncJobs.id, jobId));
-    }
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("Worker failed", {
+      error: message,
+    });
+
+    await markJob({
+      status: "failed",
+      completedAt: new Date(),
+      errorMessage: message,
+    });
     process.exit(1);
   }
 }

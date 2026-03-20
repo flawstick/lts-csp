@@ -9,12 +9,14 @@ import {
   Loader2,
 } from "lucide-react";
 
-import { uploadPortalFile } from "@/lib/portal-upload";
 import {
-  FORM_SECTIONS,
-  getMissingFields,
-  type SubstanceFormData,
-} from "@/lib/schemas/substance-form";
+  createEmptyJerseyCompanyReturnFormData,
+  getJerseyCompanyReturnMissingFields,
+  type JerseyCompanyReturnFormData,
+} from "@repo/database/jersey-company-return";
+
+import { uploadPortalFile } from "@/lib/portal-upload";
+import { sanitizeJerseyCompanyReturnData } from "@/lib/schemas/jersey-company-return";
 import { api } from "@/trpc/react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -23,14 +25,16 @@ import { cn } from "@/lib/utils";
 import {
   asVaultFiles,
   isPdfLike,
-  sanitizeFormData,
 } from "../_components/return-workspace-shared";
 
-import { buildSteps, FINAL_STEP_ID } from "./_components/guided-sidebar";
-import { GuidedSidebar } from "./_components/guided-sidebar";
-import { GuidedStepContent } from "./_components/guided-step-content";
+import {
+  buildJerseySteps,
+  FINAL_STEP_ID,
+  JerseyGuidedSidebar,
+} from "./_components/jersey-guided-sidebar";
+import { JerseyGuidedStepContent } from "./_components/jersey-guided-step-content";
 
-export default function GuidedFinishPage() {
+export default function JerseyGuidedFinishPage() {
   const params = useParams<{ orgId: string; returnId: string }>();
   const orgId = params.orgId;
   const returnId = params.returnId;
@@ -44,11 +48,12 @@ export default function GuidedFinishPage() {
   const [financialStatementsIndex, setFinancialStatementsIndex] = useState<
     number | null
   >(null);
-  const [draftForm, setDraftForm] = useState<Partial<SubstanceFormData>>({});
+  const [draftForm, setDraftForm] = useState<Partial<JerseyCompanyReturnFormData>>(
+    createEmptyJerseyCompanyReturnFormData(),
+  );
   const [workspaceMessage, setWorkspaceMessage] = useState<string | null>(null);
 
   const utils = api.useUtils();
-  const orgQuery = api.portalAccess.getOrg.useQuery({ orgId }, { enabled: !!orgId });
 
   const returnsQuery = api.portalReturns.listByOrg.useQuery(
     { orgId },
@@ -60,11 +65,21 @@ export default function GuidedFinishPage() {
     [returnId, returnsQuery.data],
   );
 
-  const createSubstanceFormMutation =
-    api.portalReturns.createSubstanceForm.useMutation({
+  const formQuery = api.portalReturns.getJerseyCompanyReturnForm.useQuery(
+    {
+      orgId,
+      taxReturnId: selectedReturn?.id ?? "",
+    },
+    {
+      enabled: !!selectedReturn,
+    },
+  );
+
+  const createFormMutation =
+    api.portalReturns.createJerseyCompanyReturnForm.useMutation({
       onSuccess: () => {
         if (!selectedReturn) return;
-        void utils.portalReturns.getSubstanceForm.invalidate({
+        void utils.portalReturns.getJerseyCompanyReturnForm.invalidate({
           orgId,
           taxReturnId: selectedReturn.id,
         });
@@ -72,11 +87,11 @@ export default function GuidedFinishPage() {
       },
     });
 
-  const updateSubstanceFormMutation =
-    api.portalReturns.updateSubstanceForm.useMutation({
+  const updateFormMutation =
+    api.portalReturns.updateJerseyCompanyReturnForm.useMutation({
       onSuccess: () => {
         if (!selectedReturn) return;
-        void utils.portalReturns.getSubstanceForm.invalidate({
+        void utils.portalReturns.getJerseyCompanyReturnForm.invalidate({
           orgId,
           taxReturnId: selectedReturn.id,
         });
@@ -92,57 +107,70 @@ export default function GuidedFinishPage() {
     },
   );
 
-  const substanceFormQuery = api.portalReturns.getSubstanceForm.useQuery(
-    {
-      orgId,
-      taxReturnId: selectedReturn?.id ?? "",
-    },
-    {
-      enabled: !!selectedReturn,
-    },
-  );
+  const hasSyncedFormRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const sanitized = sanitizeFormData(substanceFormQuery.data);
-    // Auto-fill preparedBy from org accounting name if empty
-    if (!sanitized.preparedBy) {
-      const accountingName = orgQuery.data?.accountName ?? orgQuery.data?.name;
-      if (accountingName) sanitized.preparedBy = accountingName;
-    }
-    setDraftForm(sanitized);
-  }, [substanceFormQuery.data, selectedReturn?.id, orgQuery.data]);
+    if (!formQuery.data || !selectedReturn?.id) return;
+    // Only sync from server on first load or when switching to a different return
+    if (hasSyncedFormRef.current === selectedReturn.id) return;
+    hasSyncedFormRef.current = selectedReturn.id;
+    setDraftForm(sanitizeJerseyCompanyReturnData(formQuery.data));
+  }, [formQuery.data, selectedReturn?.id]);
 
-  const visibleSections = useMemo(
-    () =>
-      FORM_SECTIONS.filter((section) => {
-        if (!("conditional" in section) || !section.conditional) {
-          return true;
-        }
-        return section.conditional(draftForm);
-      }),
+  const normalizedDraft = useMemo(
+    () => sanitizeJerseyCompanyReturnData(draftForm),
     [draftForm],
   );
 
-  const draftMissingFields = useMemo(
-    () => getMissingFields(draftForm),
-    [draftForm],
+  const missingFields = useMemo(
+    () => getJerseyCompanyReturnMissingFields(normalizedDraft),
+    [normalizedDraft],
   );
+
+  const missingBySection = useMemo(() => {
+    return {
+      section1: missingFields.filter((field) => field.startsWith("section1.")),
+      economicSubstance: missingFields.filter((field) =>
+        field.startsWith("economicSubstance."),
+      ),
+      scheduleA: missingFields.filter((field) => field.startsWith("scheduleA.")),
+      distributions: missingFields.filter((field) =>
+        field.startsWith("distributions."),
+      ),
+      compliance: missingFields.filter((field) =>
+        field.startsWith("compliance."),
+      ),
+      additionalInfo: missingFields.filter((field) =>
+        field.startsWith("additionalInfo."),
+      ),
+    };
+  }, [missingFields]);
 
   const selectedFiles = asVaultFiles(selectedReturn?.files);
   const assignedFinancialStatementsFile =
     selectedFiles.find((file) => file.role === "financial_statements") ?? null;
 
-  const steps = useMemo(() => buildSteps(visibleSections), [visibleSections]);
+  const steps = useMemo(() => buildJerseySteps(), []);
 
   const initialStepId = useMemo(() => {
-    const firstMissingSection = visibleSections.find((section) =>
-      section.fields.some((field) => draftMissingFields.includes(field)),
-    );
+    // Find first section with missing fields
+    const sectionOrder = [
+      "section1",
+      "economicSubstance",
+      "scheduleA",
+      "distributions",
+      "compliance",
+      "additionalInfo",
+    ];
 
-    if (firstMissingSection) return firstMissingSection.id;
+    for (const sectionId of sectionOrder) {
+      const sectionMissing = missingBySection[sectionId as keyof typeof missingBySection] ?? [];
+      if (sectionMissing.length > 0) return sectionId;
+    }
+
     if (!assignedFinancialStatementsFile) return FINAL_STEP_ID;
-    return visibleSections[0]?.id ?? FINAL_STEP_ID;
-  }, [assignedFinancialStatementsFile, draftMissingFields, visibleSections]);
+    return "section1";
+  }, [assignedFinancialStatementsFile, missingBySection]);
 
   useEffect(() => {
     if (!activeStepId) setActiveStepId(initialStepId);
@@ -175,8 +203,8 @@ export default function GuidedFinishPage() {
     0,
   );
   const activeStep = steps[activeStepIndex] ?? steps[0];
-  const isSaving = updateSubstanceFormMutation.isPending;
-  const isInitializing = createSubstanceFormMutation.isPending;
+  const isSaving = updateFormMutation.isPending;
+  const isInitializing = createFormMutation.isPending;
   const isUploading = addDocumentsMutation.isPending;
   const isBusy = isSaving || isInitializing || isUploading;
   const totalSteps = steps.length;
@@ -187,22 +215,10 @@ export default function GuidedFinishPage() {
         selectedFinancialFiles[financialStatementsIndex]),
   );
 
-  const missingFieldsByStep = useMemo(() => {
-    return new Map<string, string[]>(
-      visibleSections.map((section) => [
-        section.id,
-        section.fields.filter((field) => draftMissingFields.includes(field)),
-      ]),
-    );
-  }, [draftMissingFields, visibleSections]);
-
-  const sectionStepIndexByField = useMemo(() => {
-    return new Map<string, string>(
-      visibleSections.flatMap((section) =>
-        section.fields.map((field) => [field, section.id] as const),
-      ),
-    );
-  }, [visibleSections]);
+  const selectedFinancialStatementsName =
+    financialStatementsIndex !== null
+      ? (selectedFinancialFiles[financialStatementsIndex]?.name ?? null)
+      : null;
 
   const resolvedActiveStep =
     activeStep ??
@@ -210,34 +226,29 @@ export default function GuidedFinishPage() {
       id: FINAL_STEP_ID,
       kind: "upload" as const,
       title: "Financial Pack",
-      description: "Upload signed financial statements for the filing.",
+      description: "Upload signed financial statements for the Jersey filing.",
     });
-
-  const selectedFinancialStatementsName =
-    financialStatementsIndex !== null
-      ? (selectedFinancialFiles[financialStatementsIndex]?.name ?? null)
-      : null;
 
   const showMessage = (message: string) => setWorkspaceMessage(message);
 
-  const ensureSubstanceFormExists = async () => {
-    if (!selectedReturn || substanceFormQuery.data) return;
-    await createSubstanceFormMutation.mutateAsync({
+  const ensureFormExists = async () => {
+    if (!selectedReturn || formQuery.data) return;
+    await createFormMutation.mutateAsync({
       orgId,
       taxReturnId: selectedReturn.id,
     });
   };
 
   const persistFormData = async (
-    data: Partial<SubstanceFormData>,
+    data: Partial<JerseyCompanyReturnFormData>,
     successMessage?: string,
   ) => {
     if (!selectedReturn) return;
-    await ensureSubstanceFormExists();
-    await updateSubstanceFormMutation.mutateAsync({
+    await ensureFormExists();
+    await updateFormMutation.mutateAsync({
       orgId,
       taxReturnId: selectedReturn.id,
-      data: sanitizeFormData(data),
+      data: sanitizeJerseyCompanyReturnData(data),
     });
     if (successMessage) showMessage(successMessage);
   };
@@ -271,12 +282,7 @@ export default function GuidedFinishPage() {
   const handleComplete = async () => {
     try {
       showMessage("Saving guided return...");
-      const finalData = { ...draftForm };
-      if (!finalData.preparedBy) {
-        const accountingName = orgQuery.data?.accountName ?? orgQuery.data?.name;
-        if (accountingName) finalData.preparedBy = accountingName;
-      }
-      await persistFormData(finalData);
+      await persistFormData(draftForm);
 
       if (selectedFinancialFiles.length && selectedReturn) {
         const assignedIndex =
@@ -340,7 +346,6 @@ export default function GuidedFinishPage() {
                 </div>
               </div>
             </div>
-            {/* Footer skeleton */}
             <div className="border-t border-border/60 bg-card px-6 py-3">
               <div className="flex items-center justify-between">
                 <Skeleton className="h-8 w-24 rounded-md" />
@@ -361,7 +366,7 @@ export default function GuidedFinishPage() {
               </div>
             </div>
             <div className="flex-1 space-y-1 p-3">
-              {Array.from({ length: 8 }).map((_, i) => (
+              {Array.from({ length: 7 }).map((_, i) => (
                 <div key={`step-skel-${i}`} className="flex items-center gap-3 rounded-lg px-3 py-2.5">
                   <Skeleton className="size-5 rounded-full" />
                   <div className="flex-1">
@@ -407,18 +412,16 @@ export default function GuidedFinishPage() {
     <div className="-m-4 sm:-m-6 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden">
       <div className="relative grid h-full min-h-0 lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-h-0 flex-col">
-          <GuidedStepContent
+          <JerseyGuidedStepContent
             contentRef={contentRef}
             resolvedActiveStep={resolvedActiveStep}
             activeStepIndex={activeStepIndex}
             totalSteps={totalSteps}
             entityName={selectedReturn.entityName}
-            taxYear={selectedReturn.taxYear}
             draftForm={draftForm}
             setDraftForm={setDraftForm}
-            draftMissingFields={draftMissingFields}
-            missingFieldsByStep={missingFieldsByStep}
-            sectionStepIndexByField={sectionStepIndexByField}
+            missingFields={missingFields}
+            missingBySection={missingBySection}
             selectedFinancialFiles={selectedFinancialFiles}
             setSelectedFinancialFiles={setSelectedFinancialFiles}
             financialStatementsIndex={financialStatementsIndex}
@@ -493,7 +496,7 @@ export default function GuidedFinishPage() {
                     onClick={() => {
                       void handleComplete();
                     }}
-                    disabled={draftMissingFields.length > 0 || isBusy}
+                    disabled={missingFields.length > 0 || isBusy}
                     className="h-8"
                   >
                     {isBusy ? (
@@ -511,18 +514,17 @@ export default function GuidedFinishPage() {
           </div>
         </div>
 
-        <GuidedSidebar
+        <JerseyGuidedSidebar
           steps={steps}
           activeStepId={resolvedActiveStep.id}
           entityName={selectedReturn.entityName}
           draftForm={draftForm}
-          draftMissingFields={draftMissingFields}
-          visibleSections={visibleSections}
+          missingFields={missingFields}
+          missingBySection={missingBySection}
           progressRatio={progressRatio}
           uploadReady={uploadReady}
           assignedFinancialStatementsFile={assignedFinancialStatementsFile}
           selectedFinancialStatementsName={selectedFinancialStatementsName}
-          missingFieldsByStep={missingFieldsByStep}
           onStepChange={handleStepChange}
         />
       </div>

@@ -50,6 +50,7 @@ export async function POST(_request: Request) {
       ecsResult = await launchTaxSync({
         jobId: job.id,
         orgId: org.id,
+        jurisdictionCode: jurisdiction.code,
       })
 
       if (ecsResult.taskArn) {

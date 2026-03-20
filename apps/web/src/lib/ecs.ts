@@ -108,6 +108,9 @@ export async function getTaskStatus(taskArn: string) {
 export interface LaunchTaxSyncParams {
   jobId: string;
   orgId: string;
+  jurisdictionCode: string;
+  portalUsername?: string;
+  portalPassword?: string;
 }
 
 export async function launchTaxSync(params: LaunchTaxSyncParams) {
@@ -132,7 +135,14 @@ export async function launchTaxSync(params: LaunchTaxSyncParams) {
           environment: [
             { name: "TAX_SYNC_JOB_ID", value: params.jobId },
             { name: "ORG_ID", value: params.orgId },
+            { name: "JURISDICTION_CODE", value: params.jurisdictionCode },
             { name: "DATABASE_URL", value: env.DATABASE_URL },
+            ...(params.portalUsername
+              ? [{ name: "PORTAL_USERNAME", value: params.portalUsername }]
+              : []),
+            ...(params.portalPassword
+              ? [{ name: "PORTAL_PASSWORD", value: params.portalPassword }]
+              : []),
           ],
         },
       ],

@@ -1,18 +1,50 @@
 "use client";
 
-import Link from "next/link";
-import { useParams } from "next/navigation";
-import { ArrowUpDown, ExternalLink, Search } from "lucide-react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { ArrowUpDown, EllipsisVertical, ExternalLink, Search, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { api } from "@/trpc/react";
 
-type ReturnStatusTone = "pending" | "in_progress" | "completed" | "failed" | "review_required" | "dismissed";
+type ReturnStatusTone =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "failed"
+  | "review_required"
+  | "dismissed";
 type StatusFilter = "all" | ReturnStatusTone;
+type JurisdictionFilter = string;
 type SortKey = "entity" | "year" | "status" | "updated";
 type SortDirection = "asc" | "desc";
 
@@ -35,6 +67,16 @@ const STATUS_CLASS: Record<ReturnStatusTone, string> = {
   review_required: "border-violet-500/35 bg-violet-500/10 text-violet-700",
   dismissed: "border-zinc-500/35 bg-zinc-500/10 text-zinc-500",
 };
+
+const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
+  { value: "all", label: "All statuses" },
+  { value: "pending", label: "Pending" },
+  { value: "in_progress", label: "In Progress" },
+  { value: "completed", label: "Completed" },
+  { value: "failed", label: "Failed" },
+  { value: "review_required", label: "Review Required" },
+  { value: "dismissed", label: "Dismissed" },
+];
 
 function normalizeStatus(status: string): ReturnStatusTone {
   if (status === "pending") return "pending";
@@ -66,22 +108,81 @@ function fileCount(files: unknown) {
 export default function OrgReturnsPage() {
   const params = useParams<{ orgId: string }>();
   const orgId = params.orgId;
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const utils = api.useUtils();
+
+  const dismissMutation = api.portalReturns.dismissReturn.useMutation({
+    onSuccess: () => {
+      void utils.portalReturns.listByOrg.invalidate({ orgId });
+      toast.success("Return dismissed");
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const undismissMutation = api.portalReturns.undismissReturn.useMutation({
+    onSuccess: () => {
+      void utils.portalReturns.listByOrg.invalidate({ orgId });
+      toast.success("Return restored");
+    },
+    onError: (error) => toast.error(error.message),
+  });
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const jurisdictionFilter: JurisdictionFilter = searchParams.get("jurisdiction") ?? "all";
+  const setJurisdictionFilter = (value: JurisdictionFilter) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value === "all") {
+      params.delete("jurisdiction");
+    } else {
+      params.set("jurisdiction", value);
+    }
+    const qs = params.toString();
+    router.replace(`/org/${orgId}/returns${qs ? `?${qs}` : ""}`, { scroll: false });
+  };
   const [sortKey, setSortKey] = useState<SortKey>("updated");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [page, setPage] = useState(1);
 
-  const returnsQuery = api.portalReturns.listByOrg.useQuery({ orgId }, { enabled: !!orgId });
+  const returnsQuery = api.portalReturns.listByOrg.useQuery(
+    { orgId },
+    { enabled: !!orgId },
+  );
 
   const returns = useMemo(() => returnsQuery.data ?? [], [returnsQuery.data]);
+  const jurisdictionFilterOptions = useMemo(() => {
+    const uniqueJurisdictions = new Map<string, string>();
+
+    for (const row of returns) {
+      if (!uniqueJurisdictions.has(row.jurisdictionCode)) {
+        uniqueJurisdictions.set(row.jurisdictionCode, row.jurisdictionName);
+      }
+    }
+
+    return [
+      { value: "all", label: "All jurisdictions" },
+      ...Array.from(uniqueJurisdictions.entries())
+        .sort((left, right) => left[1].localeCompare(right[1]))
+        .map(([code, name]) => ({
+          value: code,
+          label: `${name} (${code})`,
+        })),
+    ];
+  }, [returns]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
 
     return returns
       .filter((row) => {
+        if (
+          jurisdictionFilter !== "all" &&
+          row.jurisdictionCode !== jurisdictionFilter
+        ) {
+          return false;
+        }
+
         const status = normalizeStatus(row.status);
         if (statusFilter !== "all" && status !== statusFilter) {
           return false;
@@ -111,12 +212,24 @@ export default function OrgReturnsPage() {
         }
 
         if (sortKey === "status") {
-          return direction * normalizeStatus(a.status).localeCompare(normalizeStatus(b.status));
+          return (
+            direction *
+            normalizeStatus(a.status).localeCompare(normalizeStatus(b.status))
+          );
         }
 
-        return direction * (toTimestamp(a.updatedAt) - toTimestamp(b.updatedAt));
+        return (
+          direction * (toTimestamp(a.updatedAt) - toTimestamp(b.updatedAt))
+        );
       });
-  }, [query, returns, sortDirection, sortKey, statusFilter]);
+  }, [
+    jurisdictionFilter,
+    query,
+    returns,
+    sortDirection,
+    sortKey,
+    statusFilter,
+  ]);
 
   const totalCount = filtered.length;
   const pageCount = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -150,24 +263,33 @@ export default function OrgReturnsPage() {
         <div className="flex flex-wrap items-end justify-between gap-3 border-b p-4">
           <div>
             <h1 className="text-xl font-semibold">Returns</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Open a return to manage ESR uploads, AI extraction, and the substance form.
+            <p className="text-muted-foreground mt-1 text-sm">
+              Open a return to manage return uploads, Jersey or Guernsey form
+              data, and filing readiness.
             </p>
           </div>
 
           <div className="flex items-center gap-2 text-xs">
-            <span className="rounded-lg border bg-muted/40 px-2.5 py-1.5 text-muted-foreground">
-              {returnsQuery.isLoading ? <Skeleton className="h-4 w-14" /> : `${returns.length} total`}
+            <span className="bg-muted/40 text-muted-foreground rounded-lg border px-2.5 py-1.5">
+              {returnsQuery.isLoading ? (
+                <Skeleton className="h-4 w-14" />
+              ) : (
+                `${returns.length} total`
+              )}
             </span>
             <span className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-emerald-700">
-              {returnsQuery.isLoading ? <Skeleton className="h-4 w-20" /> : `${readyCount} ESR ready`}
+              {returnsQuery.isLoading ? (
+                <Skeleton className="h-4 w-20" />
+              ) : (
+                `${readyCount} form ready`
+              )}
             </span>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 p-4">
+        <div className="bg-muted/20 flex flex-wrap items-center gap-2 border-b p-4">
           <div className="relative w-full max-w-sm">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
             <Input
               value={query}
               onChange={(event) => {
@@ -179,24 +301,56 @@ export default function OrgReturnsPage() {
             />
           </div>
 
-          <select
+          <Select
             value={statusFilter}
-            onChange={(event) => {
-              setStatusFilter(event.target.value as StatusFilter);
+            onValueChange={(value) => {
+              setStatusFilter(value as StatusFilter);
               setPage(1);
             }}
-            className="h-9 rounded-md border bg-background px-2.5 text-sm"
           >
-            <option value="all">All statuses</option>
-            <option value="pending">Pending</option>
-            <option value="in_progress">In Progress</option>
-            <option value="completed">Completed</option>
-            <option value="failed">Failed</option>
-            <option value="review_required">Review Required</option>
-            <option value="dismissed">Dismissed</option>
-          </select>
+            <SelectTrigger
+              aria-label="Filter returns by status"
+              className="bg-background h-9 w-[180px]"
+            >
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent align="end">
+              {STATUS_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => toggleSort("updated")}>
+          <Select
+            value={jurisdictionFilter}
+            onValueChange={(value) => {
+              setJurisdictionFilter(value);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger
+              aria-label="Filter returns by jurisdiction"
+              className="bg-background h-9 w-[220px]"
+            >
+              <SelectValue placeholder="All jurisdictions" />
+            </SelectTrigger>
+            <SelectContent align="end">
+              {jurisdictionFilterOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => toggleSort("updated")}
+          >
             <ArrowUpDown className="size-4" />
             Sort: {sortKey}
           </Button>
@@ -207,14 +361,22 @@ export default function OrgReturnsPage() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-sm">
                 <thead>
-                  <tr className="border-b text-muted-foreground">
+                  <tr className="text-muted-foreground border-b">
                     <th className="px-4 py-3 text-left font-medium">Entity</th>
-                    <th className="px-4 py-3 text-left font-medium">Jurisdiction</th>
-                    <th className="px-4 py-3 text-left font-medium">Tax Year</th>
-                    <th className="px-4 py-3 text-left font-medium">Filing Status</th>
-                    <th className="px-4 py-3 text-left font-medium">ESR</th>
+                    <th className="px-4 py-3 text-left font-medium">
+                      Jurisdiction
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium">
+                      Tax Year
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium">
+                      Filing Status
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium">Form</th>
                     <th className="px-4 py-3 text-left font-medium">Updated</th>
-                    <th className="px-4 py-3 text-right font-medium">Open</th>
+                    <th className="w-12 px-4 py-3 text-right font-medium">
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -260,61 +422,98 @@ export default function OrgReturnsPage() {
           </div>
         ) : null}
 
-        {returnsQuery.error ? <p className="p-6 text-sm text-red-600">{returnsQuery.error.message}</p> : null}
+        {returnsQuery.error ? (
+          <p className="p-6 text-sm text-red-600">
+            {returnsQuery.error.message}
+          </p>
+        ) : null}
 
         {!returnsQuery.isLoading && !returnsQuery.error ? (
           <>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-sm">
                 <thead>
-                  <tr className="border-b text-muted-foreground">
+                  <tr className="text-muted-foreground border-b">
                     <th className="px-4 py-3 text-left font-medium">
-                      <button className="inline-flex items-center gap-1" onClick={() => toggleSort("entity")}>
+                      <button
+                        className="inline-flex items-center gap-1"
+                        onClick={() => toggleSort("entity")}
+                      >
                         Entity
                         <ArrowUpDown className="size-3.5" />
                       </button>
                     </th>
-                    <th className="px-4 py-3 text-left font-medium">Jurisdiction</th>
                     <th className="px-4 py-3 text-left font-medium">
-                      <button className="inline-flex items-center gap-1" onClick={() => toggleSort("year")}>
+                      Jurisdiction
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium">
+                      <button
+                        className="inline-flex items-center gap-1"
+                        onClick={() => toggleSort("year")}
+                      >
                         Tax Year
                         <ArrowUpDown className="size-3.5" />
                       </button>
                     </th>
                     <th className="px-4 py-3 text-left font-medium">
-                      <button className="inline-flex items-center gap-1" onClick={() => toggleSort("status")}>
+                      <button
+                        className="inline-flex items-center gap-1"
+                        onClick={() => toggleSort("status")}
+                      >
                         Filing Status
                         <ArrowUpDown className="size-3.5" />
                       </button>
                     </th>
-                    <th className="px-4 py-3 text-left font-medium">ESR</th>
+                    <th className="px-4 py-3 text-left font-medium">Form</th>
                     <th className="px-4 py-3 text-left font-medium">Updated</th>
-                    <th className="px-4 py-3 text-right font-medium">Open</th>
+                    <th className="w-12 px-4 py-3 text-right font-medium">
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row) => {
                     const status = normalizeStatus(row.status);
-                    const missingCount = Array.isArray(row.missingSubstanceFields)
+                    const missingCount = Array.isArray(
+                      row.missingSubstanceFields,
+                    )
                       ? row.missingSubstanceFields.length
                       : 0;
 
+                    const isDismissed = status === "dismissed";
+                    const returnHref = `/org/${orgId}/returns/${row.id}`;
+
                     return (
-                      <tr key={row.id} className="border-b/60 transition hover:bg-muted/25">
+                      <tr
+                        key={row.id}
+                        className="border-b/60 hover:bg-muted/25 cursor-pointer transition"
+                        onClick={() => router.push(returnHref)}
+                      >
                         <td className="px-4 py-3">
                           <div className="min-w-0">
-                            <p className="truncate font-medium">{row.entityName}</p>
-                            <p className="truncate text-xs text-muted-foreground">
-                              {row.externalId ? `External ID: ${row.externalId}` : `${fileCount(row.files)} file(s)`}
+                            <p className="truncate font-medium">
+                              {row.entityName}
+                            </p>
+                            <p className="text-muted-foreground truncate text-xs">
+                              {row.externalId
+                                ? `External ID: ${row.externalId}`
+                                : `${fileCount(row.files)} file(s)`}
                             </p>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                        <td className="text-muted-foreground px-4 py-3">
                           {row.jurisdictionName} ({row.jurisdictionCode})
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">{row.taxYear}</td>
+                        <td className="text-muted-foreground px-4 py-3">
+                          {row.taxYear}
+                        </td>
                         <td className="px-4 py-3">
-                          <span className={cn("inline-flex rounded-lg border px-2 py-1 text-xs font-medium", STATUS_CLASS[status])}>
+                          <span
+                            className={cn(
+                              "inline-flex rounded-lg border px-2 py-1 text-xs font-medium",
+                              STATUS_CLASS[status],
+                            )}
+                          >
                             {STATUS_LABEL[status]}
                           </span>
                         </td>
@@ -334,14 +533,70 @@ export default function OrgReturnsPage() {
                                 : "Pending"}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">{formatDateTime(row.updatedAt)}</td>
-                        <td className="px-4 py-3 text-right">
-                          <Button asChild size="sm" variant="outline" className="h-8 gap-1.5">
-                            <Link href={`/org/${orgId}/returns/${row.id}`}>
-                              Open
-                              <ExternalLink className="size-3.5" />
-                            </Link>
-                          </Button>
+                        <td className="text-muted-foreground px-4 py-3">
+                          {formatDateTime(row.updatedAt)}
+                        </td>
+                        <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                          <AlertDialog>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="size-8"
+                                >
+                                  <EllipsisVertical className="size-4" />
+                                  <span className="sr-only">Actions</span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuItem
+                                  className="cursor-pointer gap-2"
+                                  onClick={() => router.push(returnHref)}
+                                >
+                                  <ExternalLink className="size-3.5" />
+                                  Open
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                {isDismissed ? (
+                                  <DropdownMenuItem
+                                    className="cursor-pointer gap-2"
+                                    onClick={() => undismissMutation.mutate({ orgId, taxReturnId: row.id })}
+                                  >
+                                    Restore
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <AlertDialogTrigger asChild>
+                                    <DropdownMenuItem
+                                      variant="destructive"
+                                      className="cursor-pointer gap-2"
+                                      onSelect={(e) => e.preventDefault()}
+                                    >
+                                      <XCircle className="size-3.5" />
+                                      Dismiss
+                                    </DropdownMenuItem>
+                                  </AlertDialogTrigger>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Dismiss this return?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will mark <strong>{row.entityName}</strong> ({row.taxYear}) as dismissed. You can restore it later from the returns list.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  className={buttonVariants({ variant: "destructive" })}
+                                  onClick={() => dismissMutation.mutate({ orgId, taxReturnId: row.id })}
+                                >
+                                  Dismiss
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         </td>
                       </tr>
                     );
@@ -349,7 +604,10 @@ export default function OrgReturnsPage() {
 
                   {!rows.length ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
+                      <td
+                        colSpan={7}
+                        className="text-muted-foreground px-4 py-10 text-center"
+                      >
                         No returns match the current filters.
                       </td>
                     </tr>
@@ -360,7 +618,8 @@ export default function OrgReturnsPage() {
 
             <div className="flex items-center justify-between border-t p-4 text-sm">
               <p className="text-muted-foreground">
-                Showing {Math.min((currentPage - 1) * PAGE_SIZE + 1, totalCount)}-
+                Showing{" "}
+                {Math.min((currentPage - 1) * PAGE_SIZE + 1, totalCount)}-
                 {Math.min(currentPage * PAGE_SIZE, totalCount)} of {totalCount}
               </p>
 
@@ -369,18 +628,22 @@ export default function OrgReturnsPage() {
                   variant="outline"
                   size="sm"
                   disabled={currentPage <= 1}
-                  onClick={() => setPage((previous) => Math.max(1, previous - 1))}
+                  onClick={() =>
+                    setPage((previous) => Math.max(1, previous - 1))
+                  }
                 >
                   Prev
                 </Button>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-muted-foreground text-xs">
                   {currentPage} / {pageCount}
                 </span>
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={currentPage >= pageCount}
-                  onClick={() => setPage((previous) => Math.min(pageCount, previous + 1))}
+                  onClick={() =>
+                    setPage((previous) => Math.min(pageCount, previous + 1))
+                  }
                 >
                   Next
                 </Button>

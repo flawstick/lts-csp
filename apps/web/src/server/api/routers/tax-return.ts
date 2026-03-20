@@ -2,6 +2,11 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
 import {
+  createEmptyJerseyCompanyReturnFormData,
+  getJerseyCompanyReturnMissingFields,
+  isJerseyCompanyReturnComplete,
+  jerseyCompanyReturnForms,
+  jurisdictionSettings,
   taxReturns,
   jurisdictions,
   taxSyncJobs,
@@ -19,6 +24,10 @@ import {
 } from "@aws-sdk/client-cloudwatch-logs";
 import * as cheerio from "cheerio";
 import { launchTaxSync, launchBrowserTask } from "@/lib/ecs";
+import {
+  jerseyCompanyReturnFormSchema,
+  sanitizeJerseyCompanyReturnData,
+} from "@/lib/schemas/jersey-company-return";
 
 const taxReturnFileCategoryEnum = z.enum(taxReturnFileCategories);
 const taxReturnFileRoleEnum = z.enum(taxReturnFileRoles);
@@ -32,6 +41,51 @@ type TaxReturnFileRecord = {
   category?: z.infer<typeof taxReturnFileCategoryEnum>;
   role?: z.infer<typeof taxReturnFileRoleEnum>;
 };
+
+function decodePortalCredentials(
+  encrypted: string | null | undefined,
+): { username?: string; password?: string } | null {
+  if (!encrypted) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(encrypted, "base64").toString());
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    const row = parsed as Record<string, unknown>;
+    return {
+      username:
+        typeof row.username === "string" ? row.username.trim() : undefined,
+      password:
+        typeof row.password === "string" ? row.password.trim() : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveJurisdictionFallbackCredentials(
+  jurisdictionCode: string,
+): { username?: string; password?: string } | null {
+  const normalizedCode = jurisdictionCode.trim().toUpperCase();
+
+  if (normalizedCode === "GG") {
+    const username = process.env.MYGOV_USERNAME?.trim();
+    const password = process.env.MYGOV_PASSWORD?.trim();
+    return username || password ? { username, password } : null;
+  }
+
+  if (normalizedCode === "JE") {
+    const username = process.env.JSYTAX_USERNAME?.trim();
+    const password = process.env.JSYTAX_PASSWORD?.trim();
+    return username || password ? { username, password } : null;
+  }
+
+  return null;
+}
 
 export const taxReturnRouter = createTRPCRouter({
   sync: publicProcedure
@@ -119,6 +173,7 @@ export const taxReturnRouter = createTRPCRouter({
         with: {
           jurisdiction: true,
           substanceForm: true,
+          jerseyCompanyReturnForm: true,
           tasks: true,
         },
       });
@@ -277,6 +332,7 @@ export const taxReturnRouter = createTRPCRouter({
         orgId: z.string().uuid().optional(), // Optional for backwards compatibility, but should be provided
         page: z.number().min(1).default(1),
         pageSize: z.number().min(1).max(100).default(20),
+        jurisdictionCode: z.string().trim().min(2).max(8).optional(),
         status: z
           .enum([
             "pending",
@@ -291,7 +347,7 @@ export const taxReturnRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const { orgId, page, pageSize, status, search } = input;
+      const { orgId, page, pageSize, jurisdictionCode, status, search } = input;
       const offset = (page - 1) * pageSize;
 
       // Build where conditions
@@ -300,6 +356,10 @@ export const taxReturnRouter = createTRPCRouter({
       // Filter by orgId if provided
       if (orgId) {
         conditions.push(eq(taxReturns.orgId, orgId));
+      }
+
+      if (jurisdictionCode) {
+        conditions.push(eq(jurisdictions.code, jurisdictionCode));
       }
 
       if (status) {
@@ -322,6 +382,7 @@ export const taxReturnRouter = createTRPCRouter({
             entityName: taxReturns.entityName,
             taxYear: taxReturns.taxYear,
             status: taxReturns.status,
+            returnType: taxReturns.returnType,
             externalId: taxReturns.externalId,
             link: taxReturns.link,
             pdfUrl: taxReturns.pdfUrl,
@@ -343,6 +404,10 @@ export const taxReturnRouter = createTRPCRouter({
         ctx.db
           .select({ count: sql<number>`count(*)` })
           .from(taxReturns)
+          .leftJoin(
+            jurisdictions,
+            eq(taxReturns.jurisdictionId, jurisdictions.id),
+          )
           .where(whereClause),
       ]);
 
@@ -361,13 +426,27 @@ export const taxReturnRouter = createTRPCRouter({
   listSyncJobs: publicProcedure
     .input(
       z.object({
+        orgId: z.string().uuid().optional(),
         page: z.number().min(1).default(1),
         pageSize: z.number().min(1).max(100).default(20),
+        jurisdictionCode: z.string().trim().min(2).max(8).optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
-      const { page, pageSize } = input;
+      const { orgId, page, pageSize, jurisdictionCode } = input;
       const offset = (page - 1) * pageSize;
+      const conditions = [];
+
+      if (orgId) {
+        conditions.push(eq(taxSyncJobs.orgId, orgId));
+      }
+
+      if (jurisdictionCode) {
+        conditions.push(eq(jurisdictions.code, jurisdictionCode));
+      }
+
+      const whereClause =
+        conditions.length > 0 ? and(...conditions) : undefined;
 
       // Mark stale "running" jobs as failed (running for more than 10 minutes)
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
@@ -408,10 +487,18 @@ export const taxReturnRouter = createTRPCRouter({
             jurisdictions,
             eq(taxSyncJobs.jurisdictionId, jurisdictions.id),
           )
+          .where(whereClause)
           .orderBy(desc(taxSyncJobs.createdAt))
           .limit(pageSize)
           .offset(offset),
-        ctx.db.select({ count: sql<number>`count(*)` }).from(taxSyncJobs),
+        ctx.db
+          .select({ count: sql<number>`count(*)` })
+          .from(taxSyncJobs)
+          .leftJoin(
+            jurisdictions,
+            eq(taxSyncJobs.jurisdictionId, jurisdictions.id),
+          )
+          .where(whereClause),
       ]);
 
       const total = Number(countResult[0]?.count || 0);
@@ -527,19 +614,35 @@ export const taxReturnRouter = createTRPCRouter({
     }),
 
   startSyncJob: publicProcedure
-    .input(z.object({ orgId: z.string().uuid() }))
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        jurisdictionCode: z.string().trim().min(2).max(8).default("GG"),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
-      // Get org and jurisdiction
       const org = await ctx.db.query.organisations.findFirst({
         where: eq(organisations.id, input.orgId),
       });
       const jurisdiction = await ctx.db.query.jurisdictions.findFirst({
-        where: eq(jurisdictions.name, "Guernsey"),
+        where: eq(jurisdictions.code, input.jurisdictionCode),
       });
 
       if (!org || !jurisdiction) {
-        throw new Error("Organisation or Guernsey jurisdiction not found");
+        throw new Error("Organisation or jurisdiction not found");
       }
+
+      const jurisdictionSetting = await ctx.db.query.jurisdictionSettings.findFirst(
+        {
+          where: and(
+            eq(jurisdictionSettings.orgId, org.id),
+            eq(jurisdictionSettings.jurisdictionId, jurisdiction.id),
+          ),
+        },
+      );
+      const credentials = decodePortalCredentials(
+        jurisdictionSetting?.portalCredentialsEncrypted,
+      ) ?? resolveJurisdictionFallbackCredentials(jurisdiction.code);
 
       // Create job record
       const [job] = await ctx.db
@@ -554,10 +657,12 @@ export const taxReturnRouter = createTRPCRouter({
 
       if (!job) throw new Error("Failed to create job");
 
-      // Launch ECS task (auth handled by container via MYGOV_USERNAME/MYGOV_PASSWORD env vars)
       const result = await launchTaxSync({
         jobId: job.id,
         orgId: org.id,
+        jurisdictionCode: jurisdiction.code,
+        portalUsername: credentials?.username,
+        portalPassword: credentials?.password,
       });
 
       // Extract log stream from task ARN (task ID is at the end)
@@ -575,7 +680,11 @@ export const taxReturnRouter = createTRPCRouter({
         })
         .where(eq(taxSyncJobs.id, job.id));
 
-      return { jobId: job.id, taskArn: result.taskArn };
+      return {
+        jobId: job.id,
+        taskArn: result.taskArn,
+        jurisdictionCode: jurisdiction.code,
+      };
     }),
 
   getActiveSyncJob: publicProcedure.query(async ({ ctx }) => {
@@ -665,6 +774,7 @@ export const taxReturnRouter = createTRPCRouter({
         orgId: z.string().uuid().optional(), // Filter by org
         page: z.number().min(1).default(1),
         pageSize: z.number().min(1).max(100).default(20),
+        jurisdictionCode: z.string().trim().min(2).max(8).optional(),
         status: z
           .enum(["pending", "in_progress", "completed", "failed", "cancelled"])
           .optional(),
@@ -672,7 +782,7 @@ export const taxReturnRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const { orgId, page, pageSize, status, search } = input;
+      const { orgId, page, pageSize, jurisdictionCode, status, search } = input;
       const offset = (page - 1) * pageSize;
 
       const conditions = [];
@@ -680,6 +790,10 @@ export const taxReturnRouter = createTRPCRouter({
       // Filter by orgId if provided
       if (orgId) {
         conditions.push(eq(tasks.orgId, orgId));
+      }
+
+      if (jurisdictionCode) {
+        conditions.push(eq(jurisdictions.code, jurisdictionCode));
       }
 
       if (status) {
@@ -702,6 +816,10 @@ export const taxReturnRouter = createTRPCRouter({
             status: tasks.status,
             taskType: tasks.taskType,
             createdAt: tasks.createdAt,
+            jurisdiction: {
+              code: jurisdictions.code,
+              name: jurisdictions.name,
+            },
             taxReturn: {
               id: taxReturns.id,
               entityName: taxReturns.entityName,
@@ -716,6 +834,7 @@ export const taxReturnRouter = createTRPCRouter({
           })
           .from(tasks)
           .leftJoin(taxReturns, eq(tasks.taxReturnId, taxReturns.id))
+          .leftJoin(jurisdictions, eq(tasks.jurisdictionId, jurisdictions.id))
           .leftJoin(
             substanceForms,
             eq(taxReturns.id, substanceForms.taxReturnId),
@@ -727,6 +846,7 @@ export const taxReturnRouter = createTRPCRouter({
         ctx.db
           .select({ count: sql<number>`count(*)` })
           .from(tasks)
+          .leftJoin(jurisdictions, eq(tasks.jurisdictionId, jurisdictions.id))
           .where(whereClause),
       ]);
 
@@ -742,6 +862,132 @@ export const taxReturnRouter = createTRPCRouter({
       };
     }),
 
+  getJerseyCompanyReturnForm: publicProcedure
+    .input(z.object({ taxReturnId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const form = await ctx.db.query.jerseyCompanyReturnForms.findFirst({
+        where: eq(jerseyCompanyReturnForms.taxReturnId, input.taxReturnId),
+      });
+
+      return form ?? null;
+    }),
+
+  createJerseyCompanyReturnForm: publicProcedure
+    .input(z.object({ taxReturnId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const taxReturn = await ctx.db.query.taxReturns.findFirst({
+        where: eq(taxReturns.id, input.taxReturnId),
+        with: { jurisdiction: true },
+      });
+
+      if (!taxReturn) {
+        throw new Error("Tax return not found");
+      }
+
+      if (
+        taxReturn.jurisdiction?.code !== "JE" ||
+        taxReturn.returnType !== "company"
+      ) {
+        throw new Error("Jersey company form is only available for Jersey company returns");
+      }
+
+      const existing = await ctx.db.query.jerseyCompanyReturnForms.findFirst({
+        where: eq(jerseyCompanyReturnForms.taxReturnId, input.taxReturnId),
+      });
+
+      if (existing) {
+        return existing;
+      }
+
+      const initialData = createEmptyJerseyCompanyReturnFormData();
+      const missingFields = getJerseyCompanyReturnMissingFields(initialData);
+
+      const [created] = await ctx.db
+        .insert(jerseyCompanyReturnForms)
+        .values({
+          taxReturnId: input.taxReturnId,
+          section1: initialData.section1,
+          scheduleA: initialData.scheduleA,
+          distributions: initialData.distributions,
+          compliance: initialData.compliance,
+          economicSubstance: initialData.economicSubstance,
+          additionalInfo: initialData.additionalInfo,
+          missingFields,
+          isComplete: missingFields.length === 0,
+        })
+        .returning();
+
+      return created ?? null;
+    }),
+
+  updateJerseyCompanyReturnForm: publicProcedure
+    .input(
+      z.object({
+        taxReturnId: z.string().uuid(),
+        data: jerseyCompanyReturnFormSchema.partial(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.db.query.jerseyCompanyReturnForms.findFirst({
+        where: eq(jerseyCompanyReturnForms.taxReturnId, input.taxReturnId),
+      });
+
+      if (!existing) {
+        throw new Error("Jersey company return form has not been initialized");
+      }
+
+      const merged = sanitizeJerseyCompanyReturnData({
+        section1: {
+          ...(existing.section1 ?? {}),
+          ...(input.data.section1 ?? {}),
+        },
+        scheduleA: {
+          ...(existing.scheduleA ?? {}),
+          ...(input.data.scheduleA ?? {}),
+        },
+        distributions: {
+          ...(existing.distributions ?? {}),
+          ...(input.data.distributions ?? {}),
+        },
+        compliance: {
+          ...(existing.compliance ?? {}),
+          ...(input.data.compliance ?? {}),
+        },
+        economicSubstance: {
+          ...(existing.economicSubstance ?? {}),
+          ...(input.data.economicSubstance ?? {}),
+          relevantActivities:
+            input.data.economicSubstance?.relevantActivities ??
+            existing.economicSubstance?.relevantActivities ??
+            [],
+        },
+        additionalInfo: {
+          ...(existing.additionalInfo ?? {}),
+          ...(input.data.additionalInfo ?? {}),
+        },
+      });
+
+      const missingFields = getJerseyCompanyReturnMissingFields(merged);
+
+      const [updated] = await ctx.db
+        .update(jerseyCompanyReturnForms)
+        .set({
+          section1: merged.section1,
+          scheduleA: merged.scheduleA,
+          distributions: merged.distributions,
+          compliance: merged.compliance,
+          economicSubstance: merged.economicSubstance,
+          additionalInfo: merged.additionalInfo,
+          missingFields,
+          isComplete: isJerseyCompanyReturnComplete(merged),
+          lastEditedAt: new Date(),
+        })
+        .where(eq(jerseyCompanyReturnForms.taxReturnId, input.taxReturnId))
+        .returning();
+
+      return updated ?? null;
+    }),
+
   // Create a task for a tax return
   createTask: publicProcedure
     .input(z.object({ taxReturnId: z.string().uuid() }))
@@ -749,7 +995,11 @@ export const taxReturnRouter = createTRPCRouter({
       // Get the tax return with substance form
       const taxReturn = await ctx.db.query.taxReturns.findFirst({
         where: eq(taxReturns.id, input.taxReturnId),
-        with: { substanceForm: true },
+        with: {
+          jurisdiction: true,
+          substanceForm: true,
+          jerseyCompanyReturnForm: true,
+        },
       });
 
       if (!taxReturn) {
@@ -783,14 +1033,38 @@ export const taxReturnRouter = createTRPCRouter({
         })
         .returning();
 
-      // Create substance form for the tax return if it doesn't exist
-      if (!taxReturn.substanceForm) {
+      // Create Guernsey substance form for the tax return if it doesn't exist
+      if (
+        taxReturn.returnType === "economic_substance" &&
+        !taxReturn.substanceForm
+      ) {
         await ctx.db.insert(substanceForms).values({
           taxReturnId: input.taxReturnId,
           entityName: taxReturn.entityName,
           taxReferenceNumber: taxReturn.externalId ?? undefined,
           accountingPeriodStart: `${taxReturn.taxYear}-01-01`,
           accountingPeriodEnd: `${taxReturn.taxYear}-12-31`,
+        });
+      }
+
+      if (
+        taxReturn.jurisdiction?.code === "JE" &&
+        taxReturn.returnType === "company" &&
+        !taxReturn.jerseyCompanyReturnForm
+      ) {
+        const initialData = createEmptyJerseyCompanyReturnFormData();
+        const missingFields = getJerseyCompanyReturnMissingFields(initialData);
+
+        await ctx.db.insert(jerseyCompanyReturnForms).values({
+          taxReturnId: input.taxReturnId,
+          section1: initialData.section1,
+          scheduleA: initialData.scheduleA,
+          distributions: initialData.distributions,
+          compliance: initialData.compliance,
+          economicSubstance: initialData.economicSubstance,
+          additionalInfo: initialData.additionalInfo,
+          missingFields,
+          isComplete: missingFields.length === 0,
         });
       }
 
@@ -801,6 +1075,48 @@ export const taxReturnRouter = createTRPCRouter({
   canStartTask: publicProcedure
     .input(z.object({ taxReturnId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
+      const taxReturn = await ctx.db.query.taxReturns.findFirst({
+        where: eq(taxReturns.id, input.taxReturnId),
+        with: {
+          jurisdiction: true,
+          substanceForm: true,
+          jerseyCompanyReturnForm: true,
+        },
+      });
+
+      if (!taxReturn) {
+        throw new Error("Tax return not found");
+      }
+
+      if (
+        taxReturn.jurisdiction?.code === "JE" &&
+        taxReturn.returnType === "company"
+      ) {
+        const form = taxReturn.jerseyCompanyReturnForm;
+
+        if (!form) {
+          return {
+            canStart: false,
+            warning:
+              "Jersey return form not found. Complete the Jersey workflow first.",
+          };
+        }
+
+        if (!form.isComplete) {
+          return {
+            canStart: false,
+            warning: `Jersey return form incomplete. ${(form.missingFields as string[] | null)?.length ?? 0} fields missing.`,
+            missingFields: (form.missingFields as string[] | null) ?? [],
+          };
+        }
+
+        return {
+          canStart: false,
+          warning:
+            "Jersey browser automation has not been implemented yet. Use the Jersey form pages to prepare the filing.",
+        };
+      }
+
       const form = await ctx.db.query.substanceForms.findFirst({
         where: eq(substanceForms.taxReturnId, input.taxReturnId),
       });
@@ -837,6 +1153,7 @@ export const taxReturnRouter = createTRPCRouter({
             with: {
               jurisdiction: true,
               substanceForm: true,
+              jerseyCompanyReturnForm: true,
             },
           },
           jobs: {
@@ -865,6 +1182,7 @@ export const taxReturnRouter = createTRPCRouter({
                 with: {
                   jurisdiction: true,
                   substanceForm: true,
+                  jerseyCompanyReturnForm: true,
                 },
               },
             },
@@ -893,7 +1211,11 @@ export const taxReturnRouter = createTRPCRouter({
         where: eq(tasks.id, input.taskId),
         with: {
           taxReturn: {
-            with: { substanceForm: true },
+            with: {
+              jurisdiction: true,
+              substanceForm: true,
+              jerseyCompanyReturnForm: true,
+            },
           },
           jobs: true,
         },
@@ -905,6 +1227,15 @@ export const taxReturnRouter = createTRPCRouter({
 
       if (!task.taxReturn) {
         throw new Error("Task has no associated tax return");
+      }
+
+      if (
+        task.taxReturn.jurisdiction?.code === "JE" &&
+        task.taxReturn.returnType === "company"
+      ) {
+        throw new Error(
+          "Jersey browser automation is not implemented yet. Use the Jersey return form workflow instead.",
+        );
       }
 
       // Check for running jobs

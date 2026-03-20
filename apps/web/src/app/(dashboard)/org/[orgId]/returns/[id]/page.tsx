@@ -37,6 +37,7 @@ import {
   FORM_SECTIONS,
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
+import { JerseyCompanyReturnWorkspace } from "@/components/jersey-company-return-workspace";
 import { SubstanceFormEditor } from "@/components/substance-form-editor";
 import Link from "next/link";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -268,6 +269,13 @@ export default function ReturnDetailPage() {
         </Button>
       </div>
     );
+  }
+
+  if (
+    taxReturn.jurisdiction?.code === "JE" &&
+    taxReturn.returnType === "company"
+  ) {
+    return <JerseyCompanyReturnWorkspace orgId={orgId} taxReturn={taxReturn} />;
   }
 
   const files = (taxReturn.files ?? []) as FileInfo[];

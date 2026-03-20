@@ -52,6 +52,7 @@ import { api } from "@/trpc/react"
 import { Skeleton } from "@/components/ui/skeleton"
 
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | "dismissed" | undefined
+type JurisdictionFilter = "all" | "GG" | "JE"
 
 export default function ReturnsPage() {
   const params = useParams()
@@ -61,10 +62,12 @@ export default function ReturnsPage() {
 
   const [page, setPage] = React.useState(1)
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(initialStatus ?? undefined)
+  const [jurisdictionFilter, setJurisdictionFilter] = React.useState<JurisdictionFilter>("all")
   const [searchQuery, setSearchQuery] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [logsDialogOpen, setLogsDialogOpen] = React.useState(false)
   const [activeJobId, setActiveJobId] = React.useState<string | null>(null)
+  const [syncJurisdiction, setSyncJurisdiction] = React.useState<"GG" | "JE">("GG")
 
   // Selection State
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
@@ -84,7 +87,7 @@ export default function ReturnsPage() {
   React.useEffect(() => {
     setPage(1)
     setSelected(new Set()) // Clear selection on filter change
-  }, [statusFilter])
+  }, [jurisdictionFilter, statusFilter])
 
   const utils = api.useUtils()
 
@@ -93,6 +96,8 @@ export default function ReturnsPage() {
       orgId, // Filter by org from URL
       page,
       pageSize,
+      jurisdictionCode:
+        jurisdictionFilter === "all" ? undefined : jurisdictionFilter,
       status: statusFilter,
       search: debouncedSearch || undefined,
     },
@@ -148,7 +153,10 @@ export default function ReturnsPage() {
   }, [activeJob, activeJobId])
 
   const handleStartSync = () => {
-    startSyncMutation.mutate({ orgId })
+    startSyncMutation.mutate({
+      orgId,
+      jurisdictionCode: syncJurisdiction,
+    })
   }
 
   const handleDeleteSelected = () => {
@@ -268,6 +276,20 @@ export default function ReturnsPage() {
                   Manual Sync
                 </Link>
               </Button>
+              <Select
+                value={syncJurisdiction}
+                onValueChange={(value) =>
+                  setSyncJurisdiction(value as "GG" | "JE")
+                }
+              >
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Jurisdiction" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="GG">Guernsey</SelectItem>
+                  <SelectItem value="JE">Jersey</SelectItem>
+                </SelectContent>
+              </Select>
               {isJobRunning ? (
                 <Button variant="outline" onClick={() => setLogsDialogOpen(true)}>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -305,6 +327,22 @@ export default function ReturnsPage() {
                     </button>
                   )}
                 </div>
+                <div className="h-6 w-px bg-border" />
+                <Select
+                  value={jurisdictionFilter}
+                  onValueChange={(value) =>
+                    setJurisdictionFilter(value as JurisdictionFilter)
+                  }
+                >
+                  <SelectTrigger className="w-[160px] border-none shadow-none focus:ring-0 bg-muted">
+                    <SelectValue placeholder="All jurisdictions" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All jurisdictions</SelectItem>
+                    <SelectItem value="GG">Guernsey</SelectItem>
+                    <SelectItem value="JE">Jersey</SelectItem>
+                  </SelectContent>
+                </Select>
                 <div className="h-6 w-px bg-border" />
                 <Select
                   value={statusFilter ?? "all"}

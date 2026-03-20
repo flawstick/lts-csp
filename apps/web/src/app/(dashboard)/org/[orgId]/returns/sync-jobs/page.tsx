@@ -28,6 +28,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Loader2, ChevronLeft, ChevronRight, Terminal, ArrowLeft, Clock, CheckCircle2, XCircle, PlayCircle, Trash2 } from "@/lib/icons"
 import Link from "next/link"
@@ -36,15 +43,29 @@ import { formatDistanceToNow } from "date-fns"
 import { useParams } from "next/navigation"
 import { Skeleton } from "@/components/ui/skeleton"
 
+type JurisdictionFilter = "all" | "GG" | "JE"
+
 export default function SyncJobsPage() {
   const params = useParams()
   const orgId = params?.orgId as string
   const [page, setPage] = React.useState(1)
   const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null)
+  const [jurisdictionFilter, setJurisdictionFilter] =
+    React.useState<JurisdictionFilter>("all")
   const pageSize = 20
 
+  React.useEffect(() => {
+    setPage(1)
+  }, [jurisdictionFilter])
+
   const { data, isLoading } = api.taxReturn.listSyncJobs.useQuery(
-    { page, pageSize },
+    {
+      orgId,
+      page,
+      pageSize,
+      jurisdictionCode:
+        jurisdictionFilter === "all" ? undefined : jurisdictionFilter,
+    },
     { refetchOnWindowFocus: false, refetchInterval: 5000 }
   )
 
@@ -143,6 +164,21 @@ export default function SyncJobsPage() {
                 {data ? `${data.total} sync jobs recorded.` : "Loading..."}
               </p>
             </div>
+            <Select
+              value={jurisdictionFilter}
+              onValueChange={(value) =>
+                setJurisdictionFilter(value as JurisdictionFilter)
+              }
+            >
+              <SelectTrigger className="w-[170px]">
+                <SelectValue placeholder="All jurisdictions" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All jurisdictions</SelectItem>
+                <SelectItem value="GG">Guernsey</SelectItem>
+                <SelectItem value="JE">Jersey</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <Card>

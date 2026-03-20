@@ -29,5 +29,6 @@ export type SidebarJurisdiction = {
   code: string;
   name: string;
   totalReturns: number;
+  hasFocusReturn: boolean;
   returns: SidebarJurisdictionReturn[];
 };

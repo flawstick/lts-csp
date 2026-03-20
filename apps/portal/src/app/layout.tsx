@@ -28,13 +28,13 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={cn(geist.variable, raleway.variable)} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={cn(geist.variable, raleway.variable)}
+      suppressHydrationWarning
+    >
       <body>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-        >
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <TooltipProvider>
             <TRPCReactProvider>{children}</TRPCReactProvider>
           </TooltipProvider>

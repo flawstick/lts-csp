@@ -219,6 +219,7 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
 ]
 
 type FilterValue = "all" | "pending" | "review" | "completed"
+type JurisdictionFilter = "all" | "GG" | "JE"
 
 interface ReturnsDataTableProps {
   orgId: string
@@ -231,6 +232,8 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
   )
 
   const [filter, setFilter] = React.useState<FilterValue>("all")
+  const [jurisdictionFilter, setJurisdictionFilter] =
+    React.useState<JurisdictionFilter>("all")
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -241,7 +244,11 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
   })
 
   const filteredData = React.useMemo(() => {
-    const returns = data?.returns || []
+    const returns = (data?.returns || []).filter((row) =>
+      jurisdictionFilter === "all"
+        ? true
+        : row.jurisdiction?.code === jurisdictionFilter,
+    )
     switch (filter) {
       case "pending":
         return returns.filter(r => r.status === "pending")
@@ -252,16 +259,20 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
       default:
         return returns
     }
-  }, [data, filter])
+  }, [data, filter, jurisdictionFilter])
 
   const counts = React.useMemo(() => {
-    const returns = data?.returns || []
+    const returns = (data?.returns || []).filter((row) =>
+      jurisdictionFilter === "all"
+        ? true
+        : row.jurisdiction?.code === jurisdictionFilter,
+    )
     return {
       pending: returns.filter(r => r.status === "pending").length,
       review: returns.filter(r => r.status === "review_required").length,
       completed: returns.filter(r => r.status === "completed").length,
     }
-  }, [data])
+  }, [data, jurisdictionFilter])
 
   const columns = React.useMemo(() => createColumns(orgId), [orgId])
 
@@ -291,41 +302,61 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
   // Reset pagination when filter changes
   React.useEffect(() => {
     setPagination(p => ({ ...p, pageIndex: 0 }))
-  }, [filter])
+  }, [filter, jurisdictionFilter])
 
   return (
     <div className="w-full flex flex-col gap-6">
-      <div className="flex items-center justify-between px-4 lg:px-6">
-        <Select value={filter} onValueChange={(v) => setFilter(v as FilterValue)}>
-          <SelectTrigger
-            className="flex w-fit @4xl/main:hidden"
-            size="sm"
+      <div className="flex items-center justify-between gap-3 px-4 lg:px-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={filter}
+            onValueChange={(v) => setFilter(v as FilterValue)}
           >
-            <SelectValue placeholder="Select a view" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Returns</SelectItem>
-            <SelectItem value="pending">Pending ({counts.pending})</SelectItem>
-            <SelectItem value="review">Review ({counts.review})</SelectItem>
-            <SelectItem value="completed">Completed ({counts.completed})</SelectItem>
-          </SelectContent>
-        </Select>
-        <ToggleGroup
-          type="single"
-          value={filter}
-          onValueChange={(v) => v && setFilter(v as FilterValue)}
-          variant="outline"
-          className="hidden @4xl/main:flex"
-        >
-          <ToggleGroupItem value="all">All Returns</ToggleGroupItem>
-          <ToggleGroupItem value="pending">
-            Pending <Badge variant="secondary" className="ml-1">{counts.pending}</Badge>
-          </ToggleGroupItem>
-          <ToggleGroupItem value="review">
-            Review <Badge variant="secondary" className="ml-1">{counts.review}</Badge>
-          </ToggleGroupItem>
-          <ToggleGroupItem value="completed">Completed</ToggleGroupItem>
-        </ToggleGroup>
+            <SelectTrigger
+              className="flex w-fit @4xl/main:hidden"
+              size="sm"
+            >
+              <SelectValue placeholder="Select a view" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Returns</SelectItem>
+              <SelectItem value="pending">Pending ({counts.pending})</SelectItem>
+              <SelectItem value="review">Review ({counts.review})</SelectItem>
+              <SelectItem value="completed">Completed ({counts.completed})</SelectItem>
+            </SelectContent>
+          </Select>
+          <ToggleGroup
+            type="single"
+            value={filter}
+            onValueChange={(v) => v && setFilter(v as FilterValue)}
+            variant="outline"
+            className="hidden @4xl/main:flex"
+          >
+            <ToggleGroupItem value="all">All Returns</ToggleGroupItem>
+            <ToggleGroupItem value="pending">
+              Pending <Badge variant="secondary" className="ml-1">{counts.pending}</Badge>
+            </ToggleGroupItem>
+            <ToggleGroupItem value="review">
+              Review <Badge variant="secondary" className="ml-1">{counts.review}</Badge>
+            </ToggleGroupItem>
+            <ToggleGroupItem value="completed">Completed</ToggleGroupItem>
+          </ToggleGroup>
+          <Select
+            value={jurisdictionFilter}
+            onValueChange={(value) =>
+              setJurisdictionFilter(value as JurisdictionFilter)
+            }
+          >
+            <SelectTrigger size="sm" className="w-[170px]">
+              <SelectValue placeholder="All jurisdictions" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All jurisdictions</SelectItem>
+              <SelectItem value="GG">Guernsey</SelectItem>
+              <SelectItem value="JE">Jersey</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

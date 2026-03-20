@@ -49,6 +49,7 @@ type BuildPortalNavigationInput = {
   pathname: string;
   linkOrgId?: string | null;
   orgName?: string | null;
+  returnEntityName?: string | null;
 };
 
 const NAV_PRIORITY: PortalNavKey[] = [
@@ -186,6 +187,7 @@ function titleFromClientSlug(segment: string) {
 export function buildPortalNavigationModel({
   pathname,
   linkOrgId,
+  returnEntityName,
 }: BuildPortalNavigationInput): PortalNavigationModel {
   const normalizedPath = normalizePathname(pathname);
   const pathOrgId = getPortalOrgIdFromPathname(normalizedPath);
@@ -248,10 +250,14 @@ export function buildPortalNavigationModel({
     } else {
       trailingSegments.forEach((segment, index) => {
         const partialPath = trailingSegments.slice(0, index + 1).join("/");
+        const useEntityName =
+          activeNavItem.key === "returns" &&
+          index === 0 &&
+          returnEntityName;
         breadcrumbs.push({
           key: `${activeNavItem.key}-${index}-${segment}`,
-          title: titleFromSegment(segment),
-          icon: LayoutDashboard,
+          title: useEntityName || titleFromSegment(segment),
+          icon: useEntityName ? FileSpreadsheet : LayoutDashboard,
           href: `${activeNavItem.href}/${partialPath}`,
           isCurrent: false,
         });

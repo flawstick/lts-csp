@@ -98,10 +98,8 @@ export default function ReturnDocumentsPage() {
 
   return (
     <main className="mx-auto max-w-6xl space-y-3 pb-10">
-      <section className="portal-card relative overflow-hidden p-5">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.18),transparent_55%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,rgba(249,115,22,0.14),transparent_52%)]" />
-        <div className="relative space-y-2">
+      <section className="portal-card p-5">
+        <div className="space-y-2">
           <DocumentsBackLink
             href={client ? getClientHref(client.slug) : "/documents"}
             label="Back to return folders"

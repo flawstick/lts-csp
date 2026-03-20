@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileSpreadsheet, FolderOpen, Search } from "lucide-react";
+import { FileSpreadsheet, FolderOpen, Search, Sparkles } from "lucide-react";
 
-import { PORTAL_COMMAND_OPEN_EVENT } from "@/lib/portal-command";
+import { PORTAL_ASK_AI_OPEN_EVENT, PORTAL_COMMAND_OPEN_EVENT } from "@/lib/portal-command";
 import type { PortalNavItem } from "@/lib/portal-navigation";
 import { api } from "@/trpc/react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   CommandDialog,
   CommandEmpty,
@@ -48,6 +49,20 @@ function createClientSlug(orgId: string, clientName: string) {
   return `${normalizedName}-${orgPrefix}-${suffix}`;
 }
 
+function SkeletonItems({ count = 3 }: { count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+          <Skeleton className="size-4 shrink-0 rounded" />
+          <Skeleton className="h-3.5 flex-1 rounded" />
+          <Skeleton className="h-3 w-8 rounded" />
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -62,7 +77,7 @@ export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuP
     return () => window.clearTimeout(timeoutId);
   }, [commandQuery]);
 
-  const { data: returnsData } = api.portalReturns.listMyReturns.useQuery(undefined, {
+  const { data: returnsData, isLoading: isLoadingRecent } = api.portalReturns.listMyReturns.useQuery(undefined, {
     staleTime: 30_000,
     enabled: open && debouncedQuery.length === 0,
   });
@@ -128,6 +143,12 @@ export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuP
     router.push(href);
   };
 
+  const openAskAi = () => {
+    const prompt = commandQuery.trim();
+    setOpen(false);
+    window.dispatchEvent(new CustomEvent(PORTAL_ASK_AI_OPEN_EVENT, { detail: prompt || undefined }));
+  };
+
   const returnSearchResults = useMemo(
     () => (debouncedQuery.length > 0 ? searchedReturns ?? [] : []),
     [debouncedQuery.length, searchedReturns],
@@ -157,6 +178,12 @@ export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuP
 
     return Array.from(grouped.values()).sort((a, b) => a.name.localeCompare(b.name)).slice(0, 10);
   }, [debouncedQuery.length, returnSearchResults]);
+
+  const hasNoSearchResults =
+    debouncedQuery.length > 0 &&
+    !isSearchingReturns &&
+    returnSearchResults.length === 0 &&
+    folderSearchResults.length === 0;
 
   return (
     <>
@@ -188,9 +215,15 @@ export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuP
           value={commandQuery}
           onValueChange={setCommandQuery}
           placeholder="Search pages, returns, actions..."
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && commandQuery.trim() && hasNoSearchResults) {
+              e.preventDefault();
+              openAskAi();
+            }
+          }}
         />
         <CommandList>
-          <CommandEmpty>No matching command.</CommandEmpty>
+          <CommandEmpty className="hidden" />
 
           <CommandGroup heading="Navigation">
             {navigationItems.map((item) => {
@@ -222,15 +255,25 @@ export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuP
             </>
           ) : null}
 
-          {debouncedQuery.length > 0 ? (
+          {/* Ask AI — always visible */}
+          <CommandSeparator />
+          <CommandGroup heading="AI">
+            <CommandItem
+              value="ask ai assistant question help"
+              onSelect={openAskAi}
+            >
+              <Sparkles className="size-4" />
+              <span>Ask AI</span>
+              <CommandShortcut>Assistant</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
+
+          {commandQuery.trim().length > 0 ? (
             <>
               <CommandSeparator />
               <CommandGroup heading="Returns">
-                {isSearchingReturns ? (
-                  <CommandItem value={`searching ${debouncedQuery}`} disabled>
-                    <FileSpreadsheet className="size-4" />
-                    <span>Searching returns...</span>
-                  </CommandItem>
+                {isSearchingReturns || commandQuery.trim() !== debouncedQuery ? (
+                  <SkeletonItems count={3} />
                 ) : null}
                 {returnSearchResults.map((row) => (
                   <CommandItem
@@ -240,7 +283,7 @@ export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuP
                   >
                     <FileSpreadsheet className="size-4" />
                     <span className="truncate">{row.entityName}</span>
-                    <CommandShortcut>{row.jurisdictionCode}</CommandShortcut>
+                    <CommandShortcut>{row.taxYear} · {row.jurisdictionCode}</CommandShortcut>
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -264,23 +307,55 @@ export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuP
                 </>
               ) : null}
             </>
-          ) : recentReturns.length ? (
+          ) : (
             <>
               <CommandSeparator />
               <CommandGroup heading="Recent Returns">
-                {recentReturns.map((row) => (
-                  <CommandItem
-                    key={row.id}
-                    value={`${row.entityName} ${row.orgName} ${row.jurisdictionCode} ${row.jurisdictionName} ${row.taxYear} ${row.externalId ?? ""}`}
-                    onSelect={() => navigateTo(`/org/${row.orgId}/returns/${row.id}`)}
-                  >
-                    <FileSpreadsheet className="size-4" />
-                    <span className="truncate">{row.entityName}</span>
-                    <CommandShortcut>{row.jurisdictionCode}</CommandShortcut>
-                  </CommandItem>
-                ))}
+                {isLoadingRecent ? (
+                  <SkeletonItems count={4} />
+                ) : recentReturns.length ? (
+                  recentReturns.map((row) => (
+                    <CommandItem
+                      key={row.id}
+                      value={`${row.entityName} ${row.orgName} ${row.jurisdictionCode} ${row.jurisdictionName} ${row.taxYear} ${row.externalId ?? ""}`}
+                      onSelect={() => navigateTo(`/org/${row.orgId}/returns/${row.id}`)}
+                    >
+                      <FileSpreadsheet className="size-4" />
+                      <span className="truncate">{row.entityName}</span>
+                      <CommandShortcut>{row.taxYear} · {row.jurisdictionCode}</CommandShortcut>
+                    </CommandItem>
+                  ))
+                ) : (
+                  <div className="px-3 py-2.5 text-sm text-muted-foreground">No recent returns.</div>
+                )}
               </CommandGroup>
             </>
+          )}
+
+          {isSearchingReturns || commandQuery.trim() !== debouncedQuery ? (
+            <div className="px-2 py-2">
+              <SkeletonItems count={3} />
+            </div>
+          ) : null}
+
+          {hasNoSearchResults ? (
+            <div className="px-2 py-4">
+              <button
+                type="button"
+                onClick={openAskAi}
+                className="portal-card mx-auto flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:bg-muted/50"
+              >
+                <div className="flex size-8 items-center justify-center rounded-lg bg-amber-500/10">
+                  <Sparkles className="size-4 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Ask AI instead</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Get help with &ldquo;{commandQuery || "your question"}&rdquo;
+                  </p>
+                </div>
+              </button>
+            </div>
           ) : null}
         </CommandList>
       </CommandDialog>

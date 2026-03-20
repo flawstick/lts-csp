@@ -8,6 +8,18 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { buttonVariants } from "@/components/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import Magnet from "@/components/Magnet";
 
@@ -91,10 +103,31 @@ export function ReturnWorkspaceHeader({
               Restore
             </Button>
           ) : selectedStatus !== "completed" && onDismiss ? (
-            <Button variant="outline" onClick={onDismiss} disabled={isDismissing}>
-              <XCircle className="size-4" />
-              Dismiss
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" disabled={isDismissing}>
+                  <XCircle className="size-4" />
+                  Dismiss
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Dismiss this return?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will mark the return as dismissed. You can restore it later from the returns list.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className={buttonVariants({ variant: "destructive" })}
+                    onClick={onDismiss}
+                  >
+                    Dismiss
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           ) : null}
 
         <Magnet padding={60} magnetStrength={3} wrapperClassName="cursor-pointer" innerClassName="cursor-pointer">

@@ -5,6 +5,7 @@ import { eq, and, or, desc, asc, sql } from "drizzle-orm";
 import * as schema from "./schema";
 
 export * from "./schema";
+export * from "./jersey-company-return";
 export * from "./queries";
 export { schema };
 export { eq, and, or, desc, asc, sql };

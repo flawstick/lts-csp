@@ -58,13 +58,9 @@ export default function DocumentsPage() {
 
   return (
     <main className="mx-auto max-w-6xl space-y-3 pb-10">
-      <section className="portal-card relative overflow-hidden p-5">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.18),transparent_55%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,rgba(249,115,22,0.14),transparent_52%)]" />
-        <div className="relative">
-          <h1 className="text-xl font-semibold tracking-tight">Documents Explorer</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Open a client folder to browse yearly return folders and files.</p>
-        </div>
+      <section className="portal-card p-5">
+        <h1 className="text-xl font-semibold tracking-tight">Documents Explorer</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Open a client folder to browse yearly return folders and files.</p>
       </section>
 
       {!isLoading && !error ? (

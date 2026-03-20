@@ -13,6 +13,14 @@ import {
   pgEnum,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+import type {
+  JerseyCompanyReturnAdditionalInfoData,
+  JerseyCompanyReturnComplianceData,
+  JerseyCompanyReturnDistributionsData,
+  JerseyCompanyReturnScheduleAData,
+  JerseyCompanyReturnSection1Data,
+  JerseyEconomicSubstanceData,
+} from "./jersey-company-return";
 
 /**
  * Multi-project schema prefix
@@ -70,6 +78,15 @@ export const taxReturnStatusEnum = pgEnum("tax_return_status", [
   "failed",
   "review_required",
   "dismissed",
+]);
+
+export const taxReturnTypeEnum = pgEnum("tax_return_type", [
+  "economic_substance",
+  "company",
+  "personal",
+  "partnership",
+  "notification",
+  "other",
 ]);
 
 export const invitationStatusEnum = pgEnum("invitation_status", [
@@ -423,6 +440,9 @@ export const taxReturns = createTable(
     entityName: varchar("entity_name", { length: 256 }).notNull(),
     taxYear: integer("tax_year").notNull(),
     status: taxReturnStatusEnum().notNull().default("pending"),
+    returnType: taxReturnTypeEnum("return_type")
+      .notNull()
+      .default("economic_substance"),
     externalId: varchar("external_id", { length: 128 }), // For sync source
     link: text("link"), // Direct URL to the tax return page
     pdfUrl: text("pdf_url"), // Link to instruction PDF
@@ -447,7 +467,12 @@ export const taxReturns = createTable(
   }),
   (t) => [
     index("lts_tax_return_org_idx").on(t.orgId),
-    uniqueIndex("lts_tax_return_external_id_idx").on(t.externalId),
+    uniqueIndex("lts_tax_return_source_idx").on(
+      t.jurisdictionId,
+      t.externalId,
+      t.taxYear,
+      t.returnType,
+    ),
   ],
 );
 
@@ -792,6 +817,47 @@ export const substanceForms = createTable(
 );
 
 // ============================================================================
+// JERSEY RETURN FORMS - Jersey company return / economic substance workflow
+// ============================================================================
+
+export const jerseyCompanyReturnForms = createTable(
+  "jersey_company_return_form",
+  (d) => ({
+    id: uuid().primaryKey().defaultRandom(),
+    taxReturnId: uuid("tax_return_id")
+      .notNull()
+      .unique()
+      .references(() => taxReturns.id, { onDelete: "cascade" }),
+    section1: jsonb("section_1").$type<JerseyCompanyReturnSection1Data>(),
+    scheduleA: jsonb("schedule_a").$type<JerseyCompanyReturnScheduleAData>(),
+    distributions: jsonb("distributions")
+      .$type<JerseyCompanyReturnDistributionsData>(),
+    compliance: jsonb("compliance").$type<JerseyCompanyReturnComplianceData>(),
+    economicSubstance: jsonb("economic_substance")
+      .$type<JerseyEconomicSubstanceData>(),
+    additionalInfo: jsonb("additional_info")
+      .$type<JerseyCompanyReturnAdditionalInfoData>(),
+    isComplete: boolean("is_complete").default(false),
+    missingFields: jsonb("missing_fields").$type<string[]>(),
+    aiExtractedAt: timestamp("ai_extracted_at", { withTimezone: true }),
+    lastEditedAt: timestamp("last_edited_at", { withTimezone: true }),
+    lastEditedBy: uuid("last_edited_by").references(() => accounts.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
+      () => new Date(),
+    ),
+  }),
+  (t) => [
+    uniqueIndex("lts_jersey_company_return_form_tax_return_idx").on(
+      t.taxReturnId,
+    ),
+    index("lts_jersey_company_return_form_complete_idx").on(t.isComplete),
+  ],
+);
+
+// ============================================================================
 // RELATIONS
 // ============================================================================
 
@@ -944,6 +1010,10 @@ export const taxReturnsRelations = relations(taxReturns, ({ one, many }) => ({
     fields: [taxReturns.id],
     references: [substanceForms.taxReturnId],
   }),
+  jerseyCompanyReturnForm: one(jerseyCompanyReturnForms, {
+    fields: [taxReturns.id],
+    references: [jerseyCompanyReturnForms.taxReturnId],
+  }),
 }));
 
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
@@ -1003,6 +1073,20 @@ export const substanceFormsRelations = relations(substanceForms, ({ one }) => ({
   }),
 }));
 
+export const jerseyCompanyReturnFormsRelations = relations(
+  jerseyCompanyReturnForms,
+  ({ one }) => ({
+    taxReturn: one(taxReturns, {
+      fields: [jerseyCompanyReturnForms.taxReturnId],
+      references: [taxReturns.id],
+    }),
+    lastEditedByAccount: one(accounts, {
+      fields: [jerseyCompanyReturnForms.lastEditedBy],
+      references: [accounts.id],
+    }),
+  }),
+);
+
 // ============================================================================
 // TYPE EXPORTS
 // ============================================================================
@@ -1053,3 +1137,8 @@ export type NewTaxSyncJob = typeof taxSyncJobs.$inferInsert;
 
 export type SubstanceForm = typeof substanceForms.$inferSelect;
 export type NewSubstanceForm = typeof substanceForms.$inferInsert;
+
+export type JerseyCompanyReturnForm =
+  typeof jerseyCompanyReturnForms.$inferSelect;
+export type NewJerseyCompanyReturnForm =
+  typeof jerseyCompanyReturnForms.$inferInsert;

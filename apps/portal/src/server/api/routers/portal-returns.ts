@@ -9,6 +9,10 @@ import * as XLSX from "xlsx";
 
 import {
   accounts,
+  createEmptyJerseyCompanyReturnFormData,
+  getJerseyCompanyReturnMissingFields,
+  isJerseyCompanyReturnComplete,
+  jerseyCompanyReturnForms,
   jurisdictions,
   organisations,
   portalMemberships,
@@ -24,6 +28,10 @@ import {
   substanceFormSchema,
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
+import {
+  jerseyCompanyReturnFormSchema,
+  sanitizeJerseyCompanyReturnData,
+} from "@/lib/schemas/jersey-company-return";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import type { TRPCContext } from "@/server/api/trpc";
 
@@ -36,6 +44,34 @@ const portalFileSchema = z.object({
   role: z.enum(taxReturnFileRoles).optional(),
 });
 
+const DEFAULT_CERTIFICATE_TYPE = "Certificate 3";
+
+function normalizeTaxReferenceNumber(input: {
+  taxReferenceNumber?: string | null;
+  externalId?: string | null;
+  taxYear?: number | string | null;
+}) {
+  const { taxReferenceNumber, externalId, taxYear } = input;
+  const normalizedExternalId = externalId?.trim().toUpperCase() ?? "";
+  const yearSuffix = taxYear ? `-${String(taxYear).trim()}` : "";
+
+  if (normalizedExternalId) {
+    if (yearSuffix && normalizedExternalId.endsWith(yearSuffix)) {
+      return normalizedExternalId.slice(0, -yearSuffix.length);
+    }
+
+    return normalizedExternalId.replace(/-\d{4}$/, "");
+  }
+
+  const normalizedTaxReference = taxReferenceNumber
+    ?.trim()
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .replace(/[^A-Z0-9/-]/g, "");
+
+  return normalizedTaxReference ?? undefined;
+}
+
 const aiExtractionSchema = z.object({
   entityName: z.string().optional(),
   entityType: z.enum(["Company", "Partnership"]).optional(),
@@ -43,24 +79,62 @@ const aiExtractionSchema = z.object({
   accountingPeriodEnd: z.string().optional(),
   isCollectiveInvestmentVehicle: z.enum(["Yes", "No"]).optional(),
   companyNumber: z.string().optional(),
-  taxReferenceNumber: z.string().optional(),
+  taxReferenceNumber: z
+    .string()
+    .optional()
+    .describe(
+      "Tax reference number - preserve the exact alphanumeric format, including any leading letters such as C",
+    ),
   registeredAddress: z.string().optional(),
   principalPlaceOfBusiness: z.string().optional(),
   isIncorporatedInGuernsey: z.enum(["Yes", "No"]).optional(),
-  economicClassificationCode: z.string().optional().describe("REQUIRED for 2025 returns — Company Activity Code dropdown"),
-  certificateType: z.string().optional(),
-  entityActivity: z.string().optional().describe("Nature of the entity's business activity (e.g., 'Property Holdings') — extract from Directors Report"),
+  economicClassificationCode: z
+    .string()
+    .optional()
+    .describe("REQUIRED for 2025 returns — Company Activity Code dropdown"),
+  certificateType: z
+    .string()
+    .optional()
+    .describe('Certificate type - always return exactly "Certificate 3"'),
+  entityActivity: z
+    .string()
+    .optional()
+    .describe(
+      "Nature of the entity's business activity (e.g., 'Property Holdings') — extract from Directors Report",
+    ),
   partnershipName: z.string().optional(),
   partnershipNumber: z.string().optional(),
   areFinancialStatementsConsolidated: z.enum(["Yes", "No"]).optional(),
-  accountsPreparerName: z.string().optional().describe("Name of the ACCOUNTANT/AUDITOR who prepared the financial accounts, NOT the ESR form preparer"),
-  accountsPreparerQualification: z.string().optional().describe("Qualification of the accounts preparer/auditor (ACCA, ICAEW, etc.)"),
-  netBookValue: z.string().optional().describe("Net book value from Balance Sheet — if negative, return '0'"),
-  totalProfit: z.string().optional().describe("Total profit from P&L — if negative (a loss), return '0'"),
-  profitAllocation: z.enum(["Investment", "Business"]).optional().describe("Profit before tax allocation — REQUIRED, always pick one"),
+  accountsPreparerName: z
+    .string()
+    .optional()
+    .describe(
+      "Name of the ACCOUNTANT/AUDITOR who prepared the financial accounts, NOT the ESR form preparer",
+    ),
+  accountsPreparerQualification: z
+    .string()
+    .optional()
+    .describe(
+      "Qualification of the accounts preparer/auditor (ACCA, ICAEW, etc.)",
+    ),
+  netBookValue: z
+    .string()
+    .optional()
+    .describe("Net book value from Balance Sheet — if negative, return '0'"),
+  totalProfit: z
+    .string()
+    .optional()
+    .describe("Total profit from P&L — if negative (a loss), return '0'"),
+  profitAllocation: z
+    .enum(["Investment", "Business"])
+    .optional()
+    .describe("Profit before tax allocation — REQUIRED, always pick one"),
   isGuernseyFiFatca: z.enum(["Yes", "No"]).optional(),
   isGuernseyFiCrs: z.enum(["Yes", "No"]).optional(),
-  isRegisteredOnIgor: z.enum(["Yes", "No"]).optional().describe("Is registered on IGOR — must be Yes if FATCA is Yes"),
+  isRegisteredOnIgor: z
+    .enum(["Yes", "No"])
+    .optional()
+    .describe("Is registered on IGOR — must be Yes if FATCA is Yes"),
   relevantActivity: z
     .enum([
       "Banking",
@@ -304,6 +378,7 @@ export const portalReturnsRouter = createTRPCRouter({
       z
         .object({
           orgId: z.string().uuid().optional(),
+          focusReturnId: z.string().uuid().optional(),
         })
         .optional(),
     )
@@ -391,20 +466,34 @@ export const portalReturnsRouter = createTRPCRouter({
       const jurisdictionsList = Array.from(grouped.values())
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((jurisdictionGroup) => {
+          const focusRow = input?.focusReturnId
+            ? jurisdictionGroup.rows.find(
+                (row) => row.id === input.focusReturnId,
+              )
+            : undefined;
+
           const recentRows = recentReturnIds
             .map((id) => jurisdictionGroup.rows.find((row) => row.id === id))
             .filter((row): row is NonNullable<typeof row> => !!row);
 
-          const selectedIds = new Set(recentRows.map((row) => row.id));
+          const selectedIds = new Set([
+            ...recentRows.map((row) => row.id),
+            ...(focusRow ? [focusRow.id] : []),
+          ]);
           const latestRows = jurisdictionGroup.rows.filter(
             (row) => !selectedIds.has(row.id),
           );
-          const pinned = [...recentRows, ...latestRows].slice(0, 3);
+          const pinned = [
+            ...(focusRow ? [focusRow] : []),
+            ...recentRows.filter((row) => row.id !== focusRow?.id),
+            ...latestRows,
+          ].slice(0, 3);
 
           return {
             jurisdictionId: jurisdictionGroup.jurisdictionId,
             code: jurisdictionGroup.code,
             name: jurisdictionGroup.name,
+            hasFocusReturn: !!focusRow,
             returns: pinned.map((row) => ({
               id: row.id,
               entityName: row.entityName,
@@ -549,6 +638,7 @@ export const portalReturnsRouter = createTRPCRouter({
           entityName: taxReturns.entityName,
           taxYear: taxReturns.taxYear,
           status: taxReturns.status,
+          returnType: taxReturns.returnType,
           externalId: taxReturns.externalId,
           link: taxReturns.link,
           pdfUrl: taxReturns.pdfUrl,
@@ -558,8 +648,19 @@ export const portalReturnsRouter = createTRPCRouter({
           jurisdictionCode: jurisdictions.code,
           jurisdictionName: jurisdictions.name,
           substanceId: substanceForms.id,
-          isSubstanceComplete: substanceForms.isComplete,
-          missingSubstanceFields: substanceForms.missingFields,
+          jerseyFormId: jerseyCompanyReturnForms.id,
+          isSubstanceComplete: sql<boolean | null>`
+            CASE
+              WHEN ${taxReturns.returnType} = 'economic_substance' THEN ${substanceForms.isComplete}
+              ELSE ${jerseyCompanyReturnForms.isComplete}
+            END
+          `,
+          missingSubstanceFields: sql<unknown>`
+            CASE
+              WHEN ${taxReturns.returnType} = 'economic_substance' THEN ${substanceForms.missingFields}
+              ELSE ${jerseyCompanyReturnForms.missingFields}
+            END
+          `,
         })
         .from(taxReturns)
         .innerJoin(
@@ -567,6 +668,10 @@ export const portalReturnsRouter = createTRPCRouter({
           eq(taxReturns.jurisdictionId, jurisdictions.id),
         )
         .leftJoin(substanceForms, eq(substanceForms.taxReturnId, taxReturns.id))
+        .leftJoin(
+          jerseyCompanyReturnForms,
+          eq(jerseyCompanyReturnForms.taxReturnId, taxReturns.id),
+        )
         .where(eq(taxReturns.orgId, input.orgId))
         .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt));
 
@@ -657,9 +762,13 @@ export const portalReturnsRouter = createTRPCRouter({
         .values({
           taxReturnId: input.taxReturnId,
           entityName: returnRecord.entityName,
-          taxReferenceNumber: returnRecord.externalId ?? undefined,
+          taxReferenceNumber: normalizeTaxReferenceNumber({
+            externalId: returnRecord.externalId,
+            taxYear: returnRecord.taxYear,
+          }),
           accountingPeriodStart: `${Number(returnRecord.taxYear) - 1}-04-06`,
           accountingPeriodEnd: `${returnRecord.taxYear}-04-05`,
+          certificateType: DEFAULT_CERTIFICATE_TYPE,
           preparedBy: preparedByName,
           missingFields: getMissingFields({ preparedBy: preparedByName }),
           lastEditedBy: account.id,
@@ -732,6 +841,210 @@ export const portalReturnsRouter = createTRPCRouter({
           lastEditedBy: account.id,
         })
         .where(eq(substanceForms.taxReturnId, input.taxReturnId))
+        .returning();
+
+      return updated ?? null;
+    }),
+
+  getJerseyCompanyReturnForm: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        taxReturnId: z.string().uuid(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      const returnRecord = await ctx.db.query.taxReturns.findFirst({
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
+        with: {
+          jurisdiction: true,
+        },
+      });
+
+      if (!returnRecord) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
+      }
+
+      if (
+        returnRecord.jurisdiction?.code !== "JE" ||
+        returnRecord.returnType !== "company"
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Jersey company form is only available for Jersey company returns.",
+        });
+      }
+
+      const form = await ctx.db.query.jerseyCompanyReturnForms.findFirst({
+        where: eq(jerseyCompanyReturnForms.taxReturnId, input.taxReturnId),
+      });
+
+      return form ?? null;
+    }),
+
+  createJerseyCompanyReturnForm: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        taxReturnId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      const returnRecord = await ctx.db.query.taxReturns.findFirst({
+        where: and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, input.orgId),
+        ),
+        with: {
+          jurisdiction: true,
+        },
+      });
+
+      if (!returnRecord) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
+      }
+
+      if (
+        returnRecord.jurisdiction?.code !== "JE" ||
+        returnRecord.returnType !== "company"
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Jersey company form is only available for Jersey company returns.",
+        });
+      }
+
+      const existing = await ctx.db.query.jerseyCompanyReturnForms.findFirst({
+        where: eq(jerseyCompanyReturnForms.taxReturnId, input.taxReturnId),
+      });
+
+      if (existing) {
+        return existing;
+      }
+
+      const initialData = createEmptyJerseyCompanyReturnFormData();
+      const missingFields = getJerseyCompanyReturnMissingFields(initialData);
+
+      const [created] = await ctx.db
+        .insert(jerseyCompanyReturnForms)
+        .values({
+          taxReturnId: input.taxReturnId,
+          section1: initialData.section1,
+          scheduleA: initialData.scheduleA,
+          distributions: initialData.distributions,
+          compliance: initialData.compliance,
+          economicSubstance: initialData.economicSubstance,
+          additionalInfo: initialData.additionalInfo,
+          missingFields,
+          isComplete: missingFields.length === 0,
+          lastEditedBy: account.id,
+        })
+        .returning();
+
+      return created ?? null;
+    }),
+
+  updateJerseyCompanyReturnForm: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        taxReturnId: z.string().uuid(),
+        data: jerseyCompanyReturnFormSchema.partial(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      const existing = await ctx.db.query.jerseyCompanyReturnForms.findFirst({
+        where: eq(jerseyCompanyReturnForms.taxReturnId, input.taxReturnId),
+      });
+
+      if (!existing) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message:
+            "Jersey company return form has not been initialized for this return.",
+        });
+      }
+
+      const merged = sanitizeJerseyCompanyReturnData({
+        section1: {
+          ...(existing.section1 ?? {}),
+          ...(input.data.section1 ?? {}),
+        },
+        scheduleA: {
+          ...(existing.scheduleA ?? {}),
+          ...(input.data.scheduleA ?? {}),
+        },
+        distributions: {
+          ...(existing.distributions ?? {}),
+          ...(input.data.distributions ?? {}),
+        },
+        compliance: {
+          ...(existing.compliance ?? {}),
+          ...(input.data.compliance ?? {}),
+        },
+        economicSubstance: {
+          ...(existing.economicSubstance ?? {}),
+          ...(input.data.economicSubstance ?? {}),
+          relevantActivities:
+            input.data.economicSubstance?.relevantActivities ??
+            existing.economicSubstance?.relevantActivities ??
+            [],
+        },
+        additionalInfo: {
+          ...(existing.additionalInfo ?? {}),
+          ...(input.data.additionalInfo ?? {}),
+        },
+      });
+
+      const missingFields = getJerseyCompanyReturnMissingFields(merged);
+
+      const [updated] = await ctx.db
+        .update(jerseyCompanyReturnForms)
+        .set({
+          section1: merged.section1,
+          scheduleA: merged.scheduleA,
+          distributions: merged.distributions,
+          compliance: merged.compliance,
+          economicSubstance: merged.economicSubstance,
+          additionalInfo: merged.additionalInfo,
+          missingFields,
+          isComplete: isJerseyCompanyReturnComplete(merged),
+          lastEditedAt: new Date(),
+          lastEditedBy: account.id,
+        })
+        .where(eq(jerseyCompanyReturnForms.taxReturnId, input.taxReturnId))
         .returning();
 
       return updated ?? null;
@@ -1038,9 +1351,13 @@ export const portalReturnsRouter = createTRPCRouter({
           .values({
             taxReturnId: input.taxReturnId,
             entityName: returnRecord.entityName,
-            taxReferenceNumber: returnRecord.externalId ?? undefined,
+            taxReferenceNumber: normalizeTaxReferenceNumber({
+              externalId: returnRecord.externalId,
+              taxYear: returnRecord.taxYear,
+            }),
             accountingPeriodStart: `${returnRecord.taxYear}-01-01`,
             accountingPeriodEnd: `${returnRecord.taxYear}-12-31`,
+            certificateType: DEFAULT_CERTIFICATE_TYPE,
             preparedBy: preparedByName,
             isGuernseyFiFatca: "No",
             isGuernseyFiCrs: "No",
@@ -1178,6 +1495,8 @@ Use these strict output rules:
 - Yes/No fields: "Yes" or "No"
 - Yes/No/N/A fields: "Yes", "No", or "N/A"
 - relevantActivity: pick exactly one allowed option from the enum.
+- certificateType: always return "${DEFAULT_CERTIFICATE_TYPE}".
+- taxReferenceNumber: preserve the exact source formatting. Do not strip leading letters and do not replace the letter "C" with the number "0".
 - If total profit is negative (a loss), return "0". The portal does not accept negative values.
 - If net book value is negative, return "0".
 - profitAllocation is REQUIRED — always pick "Investment" or "Business".
@@ -1220,14 +1539,24 @@ ${cigaOptionsText}
       // Force correct accounting period (Guernsey tax year: 6 April to 5 April)
       extractedData.accountingPeriodStart = `${Number(returnRecord.taxYear) - 1}-04-06`;
       extractedData.accountingPeriodEnd = `${returnRecord.taxYear}-04-05`;
+      extractedData.certificateType = DEFAULT_CERTIFICATE_TYPE;
+      extractedData.taxReferenceNumber = normalizeTaxReferenceNumber({
+        taxReferenceNumber: extractedData.taxReferenceNumber,
+        externalId: returnRecord.externalId,
+        taxYear: returnRecord.taxYear,
+      });
 
       // Clamp negative financial values to "0"
       if (extractedData.totalProfit) {
-        const num = parseFloat(extractedData.totalProfit.replace(/[^0-9.-]/g, ""));
+        const num = parseFloat(
+          extractedData.totalProfit.replace(/[^0-9.-]/g, ""),
+        );
         if (!isNaN(num) && num < 0) extractedData.totalProfit = "0";
       }
       if (extractedData.netBookValue) {
-        const num = parseFloat(extractedData.netBookValue.replace(/[^0-9.-]/g, ""));
+        const num = parseFloat(
+          extractedData.netBookValue.replace(/[^0-9.-]/g, ""),
+        );
         if (!isNaN(num) && num < 0) extractedData.netBookValue = "0";
       }
 
@@ -1240,7 +1569,10 @@ ${cigaOptionsText}
 
       // IGOR: "Yes" if FI under FATCA or CRS, "No" otherwise
       if (!extractedData.isRegisteredOnIgor) {
-        if (extractedData.isGuernseyFiFatca === "Yes" || extractedData.isGuernseyFiCrs === "Yes") {
+        if (
+          extractedData.isGuernseyFiFatca === "Yes" ||
+          extractedData.isGuernseyFiCrs === "Yes"
+        ) {
           extractedData.isRegisteredOnIgor = "Yes";
         } else {
           extractedData.isRegisteredOnIgor = "No";

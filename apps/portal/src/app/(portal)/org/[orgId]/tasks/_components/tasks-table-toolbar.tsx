@@ -6,10 +6,18 @@ import {
   FileSpreadsheet,
   FolderOpen,
   Search,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 import type { StatusFilter, TaskFilter, TaskKind } from "./tasks-table-utils";
@@ -22,6 +30,9 @@ type Props = {
   onTaskFilterChange: (value: TaskFilter) => void;
   statusFilter: StatusFilter;
   onStatusFilterChange: (value: StatusFilter) => void;
+  jurisdictionFilter: string;
+  onJurisdictionFilterChange: (value: string) => void;
+  jurisdictions: Array<{ code: string; name: string }>;
   filteredCount: number;
   totalCount: number;
   taskCounts: Record<TaskKind, number>;
@@ -36,6 +47,9 @@ export function TasksTableToolbar({
   onTaskFilterChange,
   statusFilter,
   onStatusFilterChange,
+  jurisdictionFilter,
+  onJurisdictionFilterChange,
+  jurisdictions,
   filteredCount,
   totalCount,
   taskCounts,
@@ -48,7 +62,7 @@ export function TasksTableToolbar({
     count: number;
     icon?: typeof AlertTriangle;
   }> = [
-    { value: "all", label: "All Open", count: totalCount },
+    { value: "all", label: "All", count: totalCount },
     {
       value: "review",
       label: TASK_LABEL.review,
@@ -76,62 +90,89 @@ export function TasksTableToolbar({
   ];
 
   return (
-    <div className="border-b p-4">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
-            <span className="bg-muted/35 text-muted-foreground inline-flex rounded-full border px-2.5 py-1 text-xs font-medium">
-              {filteredCount} shown
+    <div className="p-4 pb-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold tracking-tight">Tasks</h1>
+          {hasFilters ? (
+            <span className="text-muted-foreground text-xs">
+              {filteredCount} of {totalCount}
             </span>
-            <span className="bg-muted/35 text-muted-foreground inline-flex rounded-full border px-2.5 py-1 text-xs font-medium">
-              {totalCount} open total
+          ) : (
+            <span className="text-muted-foreground text-xs">
+              {totalCount} open
             </span>
-          </div>
-
-          <p className="text-muted-foreground mt-2 text-sm">
-            Search, filter, sort, and paginate every open return from one table.
-          </p>
+          )}
         </div>
 
-        <div className="flex w-full max-w-md flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
-            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1 sm:w-56 sm:flex-initial">
+            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2" />
             <Input
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
-              placeholder="Search entity, jurisdiction, year, or external ID"
-              className="bg-background h-10 pl-9"
+              placeholder="Search..."
+              className="bg-background h-9 pl-9 text-sm"
             />
           </div>
 
-          <select
+          <Select
             value={statusFilter}
-            onChange={(event) =>
-              onStatusFilterChange(event.target.value as StatusFilter)
+            onValueChange={(value) =>
+              onStatusFilterChange(value as StatusFilter)
             }
-            className="bg-background h-10 rounded-xl border px-3 text-sm sm:w-auto"
           >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger
+              aria-label="Filter by status"
+              className="bg-background h-9 w-[150px] text-sm"
+            >
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent align="end">
+              {STATUS_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {jurisdictions.length > 1 ? (
+            <Select
+              value={jurisdictionFilter}
+              onValueChange={onJurisdictionFilterChange}
+            >
+              <SelectTrigger
+                aria-label="Filter by jurisdiction"
+                className="bg-background h-9 w-[160px] text-sm"
+              >
+                <SelectValue placeholder="All jurisdictions" />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="all">All jurisdictions</SelectItem>
+                {jurisdictions.map((j) => (
+                  <SelectItem key={j.code} value={j.code}>
+                    {j.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
 
           {hasFilters ? (
             <Button
-              variant="outline"
-              className="h-10 shrink-0"
+              variant="ghost"
+              size="icon"
+              className="size-9 shrink-0"
               onClick={onReset}
             >
-              Reset
+              <X className="size-4" />
             </Button>
           ) : null}
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap gap-1.5">
         {taskFilterButtons.map((filterButton) => {
           const active = taskFilter === filterButton.value;
           const Icon = filterButton.icon;
@@ -142,15 +183,20 @@ export function TasksTableToolbar({
               type="button"
               onClick={() => onTaskFilterChange(filterButton.value)}
               className={cn(
-                "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm transition",
+                "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
                 active
-                  ? "border-foreground/15 bg-muted/65 text-foreground shadow-sm"
-                  : "bg-background text-muted-foreground hover:bg-muted/35 hover:text-foreground",
+                  ? "border-foreground/15 bg-foreground/5 text-foreground"
+                  : "border-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground",
               )}
             >
-              {Icon ? <Icon className="size-3.5" /> : null}
+              {Icon ? <Icon className="size-3" /> : null}
               <span>{filterButton.label}</span>
-              <span className="rounded-full bg-black/5 px-1.5 py-0.5 text-xs dark:bg-white/10">
+              <span
+                className={cn(
+                  "ml-0.5 tabular-nums",
+                  active ? "text-foreground/70" : "text-muted-foreground/60",
+                )}
+              >
                 {filterButton.count}
               </span>
             </button>

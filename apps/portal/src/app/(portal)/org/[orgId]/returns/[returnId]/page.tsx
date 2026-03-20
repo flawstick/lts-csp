@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 
 import { ReturnFilesTab } from "./_components/return-files-tab";
 import { ReturnFormTab } from "./_components/return-form-tab";
+import { JerseyReturnWorkspace } from "./_components/jersey-return-workspace";
 import { ReturnWorkspaceHeader } from "./_components/return-workspace-header";
 import {
   asVaultFiles,
@@ -457,6 +458,28 @@ export default function ReturnWorkspacePage() {
           </Button>
         </section>
       </main>
+    );
+  }
+
+  if (
+    selectedReturn.jurisdictionCode === "JE" &&
+    selectedReturn.returnType === "company"
+  ) {
+    return (
+      <JerseyReturnWorkspace
+        orgId={orgId}
+        selectedReturn={selectedReturn}
+        selectedStatus={selectedStatus}
+        onDismiss={() =>
+          dismissMutation.mutate({ orgId, taxReturnId: selectedReturn.id })
+        }
+        onUndismiss={() =>
+          undismissMutation.mutate({ orgId, taxReturnId: selectedReturn.id })
+        }
+        isDismissing={
+          dismissMutation.isPending || undismissMutation.isPending
+        }
+      />
     );
   }
 

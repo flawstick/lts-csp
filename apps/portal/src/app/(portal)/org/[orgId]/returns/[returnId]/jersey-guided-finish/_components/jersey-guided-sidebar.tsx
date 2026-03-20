@@ -3,25 +3,20 @@
 import { Check, Circle } from "lucide-react";
 import { motion } from "motion/react";
 
-import type { SubstanceFormData } from "@/lib/schemas/substance-form";
+import type { JerseyCompanyReturnFormData } from "@repo/database/jersey-company-return";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
-import {
-  getSectionCompletion,
-  type FormSection,
-  type VaultFile,
-} from "../../_components/return-workspace-shared";
+import type { VaultFile } from "../../_components/return-workspace-shared";
 
 export const FINAL_STEP_ID = "financial-pack";
 
-export type GuidedStep =
+export type JerseyGuidedStep =
   | {
       id: string;
       kind: "section";
       title: string;
       description: string;
-      fields: readonly string[];
     }
   | {
       id: typeof FINAL_STEP_ID;
@@ -30,57 +25,113 @@ export type GuidedStep =
       description: string;
     };
 
-export function buildSteps(visibleSections: FormSection[]): GuidedStep[] {
+export type JerseySection = {
+  id: string;
+  title: string;
+  description: string;
+};
+
+export const JERSEY_GUIDED_SECTIONS: JerseySection[] = [
+  {
+    id: "section1",
+    title: "Section 1",
+    description: "Residency, statement attachments, SIC code, profit figures, and Schedule A gating.",
+  },
+  {
+    id: "economicSubstance",
+    title: "Economic Substance",
+    description: "Multi-national group flags, relevant activities, CIGA, outsourcing, and board management.",
+  },
+  {
+    id: "scheduleA",
+    title: "Schedule A",
+    description: "Assessment basis, income computation, and tax charge calculations.",
+  },
+  {
+    id: "distributions",
+    title: "Distributions",
+    description: "Shareholder dividends, distribution details, and withholding amounts.",
+  },
+  {
+    id: "compliance",
+    title: "Compliance",
+    description: "Connected person deductions, FATCA/CRS, and declaration statements.",
+  },
+  {
+    id: "additionalInfo",
+    title: "Additional Info",
+    description: "Supplementary notes and any extra information for the filing.",
+  },
+];
+
+export function buildJerseySteps(): JerseyGuidedStep[] {
   return [
-    ...visibleSections.map((section) => ({
+    ...JERSEY_GUIDED_SECTIONS.map((section) => ({
       id: section.id,
       kind: "section" as const,
       title: section.title,
       description: section.description,
-      fields: section.fields,
     })),
     {
       id: FINAL_STEP_ID,
       kind: "upload" as const,
       title: "Financial Pack",
-      description: "Upload signed financial statements for the filing.",
+      description: "Upload signed financial statements for the Jersey filing.",
     },
   ];
 }
 
-type GuidedSidebarProps = {
-  steps: GuidedStep[];
+function countSectionFilled(
+  sectionId: string,
+  draft: Partial<JerseyCompanyReturnFormData>,
+): { filled: number; total: number } {
+  const sectionData = draft[sectionId as keyof JerseyCompanyReturnFormData];
+  if (!sectionData || typeof sectionData !== "object") return { filled: 0, total: 0 };
+
+  const entries = Object.entries(sectionData);
+  const total = entries.length;
+  const filled = entries.filter(([, value]) => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
+  }).length;
+
+  return { filled, total };
+}
+
+type JerseyGuidedSidebarProps = {
+  steps: JerseyGuidedStep[];
   activeStepId: string;
   entityName: string;
-  draftForm: Partial<SubstanceFormData>;
-  draftMissingFields: string[];
-  visibleSections: FormSection[];
+  draftForm: Partial<JerseyCompanyReturnFormData>;
+  missingFields: string[];
+  missingBySection: Record<string, string[]>;
   progressRatio: number;
   uploadReady: boolean;
   assignedFinancialStatementsFile: VaultFile | null;
   selectedFinancialStatementsName: string | null;
-  missingFieldsByStep: Map<string, string[]>;
   onStepChange: (stepId: string) => void;
 };
 
-export function GuidedSidebar({
+export function JerseyGuidedSidebar({
   steps,
   activeStepId,
   entityName,
   draftForm,
-  draftMissingFields,
-  visibleSections,
+  missingFields,
+  missingBySection,
   progressRatio,
   uploadReady,
   assignedFinancialStatementsFile,
   selectedFinancialStatementsName,
-  missingFieldsByStep,
   onStepChange,
-}: GuidedSidebarProps) {
+}: JerseyGuidedSidebarProps) {
   const completedCount = steps.filter((step) => {
     if (step.kind === "section") {
-      const c = getSectionCompletion(step.fields, draftForm);
-      return c.missingRequired === 0 && c.filled > 0;
+      const sectionMissing = missingBySection[step.id] ?? [];
+      const completion = countSectionFilled(step.id, draftForm);
+      return sectionMissing.length === 0 && completion.filled > 0;
     }
     return uploadReady;
   }).length;
@@ -120,14 +171,14 @@ export function GuidedSidebar({
           {steps.map((step, index) => {
             const isActive = step.id === activeStepId;
             const isSection = step.kind === "section";
-            const missingFields = isSection
-              ? (missingFieldsByStep.get(step.id) ?? [])
+            const sectionMissing = isSection
+              ? (missingBySection[step.id] ?? [])
               : [];
             const completion = isSection
-              ? getSectionCompletion(step.fields, draftForm)
+              ? countSectionFilled(step.id, draftForm)
               : null;
             const isComplete = isSection
-              ? completion?.missingRequired === 0 && completion.filled > 0
+              ? sectionMissing.length === 0 && (completion?.filled ?? 0) > 0
               : uploadReady;
 
             return (
@@ -180,10 +231,10 @@ export function GuidedSidebar({
                           ? `Queued: ${selectedFinancialStatementsName}`
                           : "No file selected"}
                   </p>
-                  {missingFields.length > 0 && !isComplete ? (
+                  {sectionMissing.length > 0 && !isComplete ? (
                     <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">
                       <Circle className="size-1.5 fill-current" />
-                      {missingFields.length} required
+                      {sectionMissing.length} required
                     </span>
                   ) : null}
                 </div>
@@ -197,9 +248,9 @@ export function GuidedSidebar({
       <div className="border-t border-border/50 px-5 py-3">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>
-            {draftMissingFields.length === 0
+            {missingFields.length === 0
               ? "All required fields complete"
-              : `${draftMissingFields.length} required fields remaining`}
+              : `${missingFields.length} required fields remaining`}
           </span>
           <span
             className={cn(

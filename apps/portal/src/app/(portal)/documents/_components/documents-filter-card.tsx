@@ -45,10 +45,8 @@ export function DocumentsFilterCard({
     filterOptions.find((option) => option.value === filterValue)?.label ?? filterOptions[0]?.label ?? "All";
 
   return (
-    <section className="portal-card relative overflow-hidden p-3">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.08),transparent_56%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_bottom_right,rgba(249,115,22,0.08),transparent_56%)]" />
-      <div className="relative flex flex-wrap items-center gap-2">
+    <section className="portal-card p-3">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-64 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -110,7 +108,7 @@ export function DocumentsFilterCard({
             {resultLabel}
           </span>
         ) : null}
-      </div>
+    </div>
     </section>
   );
 }

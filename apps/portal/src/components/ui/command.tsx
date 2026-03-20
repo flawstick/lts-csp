@@ -34,7 +34,7 @@ function CommandDialog({
 }) {
   return (
     <Dialog {...props}>
-      <DialogContent className="overflow-hidden p-0" showCloseButton={false}>
+      <DialogContent className="portal-card overflow-hidden p-0" showCloseButton={false}>
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <DialogDescription className="sr-only">{description}</DialogDescription>
         <Command className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-item]]:rounded-md [&_[cmdk-item]]:px-2.5 [&_[cmdk-item]]:py-2 [&_[cmdk-item]]:text-sm [&_[cmdk-item]_svg]:size-4 [&_[cmdk-item]_svg]:shrink-0 [&_[cmdk-item][data-selected=true]]:bg-muted [&_[cmdk-item][data-selected=true]]:text-foreground [&_[cmdk-list]]:max-h-[420px] [&_[cmdk-list]]:overflow-y-auto [&_[cmdk-list]]:p-2 [&_[cmdk-separator]]:bg-border [&_[cmdk-separator]]:mx-2 [&_[cmdk-separator]]:h-px">
@@ -78,12 +78,13 @@ function CommandList({
 }
 
 function CommandEmpty({
+  className,
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.Empty>) {
   return (
     <CommandPrimitive.Empty
       data-slot="command-empty"
-      className="py-8 text-center text-sm text-muted-foreground"
+      className={cn("py-8 text-center text-sm text-muted-foreground", className)}
       {...props}
     />
   )

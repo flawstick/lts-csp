@@ -17,6 +17,10 @@
     "./queries": {
       "types": "./src/queries/index.ts",
       "default": "./src/queries/index.ts"
+    },
+    "./jersey-company-return": {
+      "types": "./src/jersey-company-return.ts",
+      "default": "./src/jersey-company-return.ts"
     }
   },
   "scripts": {

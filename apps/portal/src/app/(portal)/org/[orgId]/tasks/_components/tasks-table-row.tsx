@@ -1,15 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowUpRight } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  Clock3,
+  FileSpreadsheet,
+  FolderOpen,
+} from "lucide-react";
 import { motion } from "motion/react";
 
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import {
-  TASK_CLASS,
-  TASK_LABEL,
   STATUS_CLASS,
   STATUS_LABEL,
   classifyTaskKind,
@@ -22,23 +25,19 @@ import {
   type TaskRecord,
 } from "./tasks-table-utils";
 
-const rowVariants = {
-  initial: { opacity: 0, y: 6 },
-  animate: { opacity: 1, y: 0 },
-  hover: {},
-};
+const TASK_ICON = {
+  review: AlertTriangle,
+  active: Clock3,
+  esr: FileSpreadsheet,
+  documents: FolderOpen,
+} as const;
 
-const dotVariants = {
-  initial: { scale: 1, opacity: 0.5 },
-  animate: { scale: 1, opacity: 0.5 },
-  hover: { scale: 1.15, opacity: 0.9 },
-};
-
-const badgeVariants = {
-  initial: { opacity: 1, x: 0 },
-  animate: { opacity: 1, x: 0 },
-  hover: { x: 1.5 },
-};
+const TASK_DOT_COLOR = {
+  review: "bg-amber-500",
+  active: "bg-sky-500",
+  esr: "bg-violet-500",
+  documents: "bg-orange-500",
+} as const;
 
 type Props = {
   orgId: string;
@@ -54,136 +53,108 @@ export function TasksTableRow({ orgId, row, index }: Props) {
   const action = getTaskAction(row);
   const updatedLabel = formatRelativeTime(row.updatedAt);
   const updatedTitle = formatDateTime(row.updatedAt);
-  const metadataLabel = row.externalId
-    ? `Tax year ${row.taxYear} • External ID ${row.externalId}`
-    : `Tax year ${row.taxYear}`;
+  const TaskIcon = TASK_ICON[taskKind];
 
   return (
-    <motion.tr
-      layout
-      initial="initial"
-      animate="animate"
-      whileHover="hover"
-      variants={rowVariants}
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
       transition={{
-        duration: 0.18,
-        delay: index < 12 ? index * 0.015 : 0,
+        duration: 0.2,
+        delay: index < 12 ? index * 0.02 : 0,
         ease: "easeOut",
       }}
-      className="group border-b/60 hover:bg-muted/20"
+      className="group"
     >
-      <td className="px-4 py-3">
-        <div className="flex items-start gap-3">
-          <motion.span
-            variants={dotVariants}
-            transition={{ duration: 0.16, ease: "easeOut" }}
-            className="bg-foreground/25 mt-1.5 size-2.5 shrink-0 rounded-full"
+      <Link
+        href={`/org/${orgId}/returns/${row.id}`}
+        className="hover:bg-muted/30 -mx-2 flex items-center gap-4 rounded-xl px-2 py-3.5 transition-colors"
+      >
+        {/* Left: Status dot + Icon */}
+        <div className="relative shrink-0">
+          <span
+            className={cn(
+              "bg-muted/60 text-muted-foreground inline-flex size-10 items-center justify-center rounded-xl border transition-colors",
+              "group-hover:border-border/80 group-hover:bg-muted/80",
+            )}
+          >
+            <TaskIcon className="size-4.5" />
+          </span>
+          <span
+            className={cn(
+              "absolute -top-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-white dark:ring-zinc-950",
+              TASK_DOT_COLOR[taskKind],
+            )}
           />
-
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="truncate font-medium">{row.entityName}</p>
-              <motion.span
-                variants={badgeVariants}
-                transition={{ duration: 0.16, ease: "easeOut" }}
-                className={cn(
-                  "inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                  TASK_CLASS[taskKind],
-                )}
-              >
-                {TASK_LABEL[taskKind]}
-              </motion.span>
-            </div>
-
-            <p className="text-muted-foreground mt-1 truncate text-xs">
-              {metadataLabel}
-            </p>
-          </div>
         </div>
-      </td>
 
-      <td className="text-muted-foreground px-4 py-3">
-        <p className="truncate">
-          {row.jurisdictionName} ({row.jurisdictionCode})
-        </p>
-      </td>
-
-      <td className="px-4 py-3">
-        <div className="max-w-[20rem]">
-          <p className="font-medium">{action.title}</p>
-          <p className="text-muted-foreground mt-1 truncate text-xs">
-            {action.detail}
+        {/* Center: Entity + action */}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <p className="truncate text-sm font-semibold">{row.entityName}</p>
+            <span className="text-muted-foreground text-xs">{row.taxYear}</span>
+            {row.jurisdictionCode ? (
+              <span className="inline-flex rounded-md border border-border/60 bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {row.jurisdictionCode}
+              </span>
+            ) : null}
+          </div>
+          <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">
+            {action.title}
+            {action.detail ? ` — ${action.detail}` : ""}
           </p>
         </div>
-      </td>
 
-      <td className="px-4 py-3">
-        <div className="flex flex-wrap gap-1.5">
+        {/* Right: Badges + meta */}
+        <div className="hidden shrink-0 items-center gap-2 sm:flex">
+          {/* Progress indicators */}
+          <div className="flex items-center gap-1.5">
+            {files === 0 ? (
+              <span className="inline-flex rounded-md border border-orange-500/20 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-300">
+                No docs
+              </span>
+            ) : null}
+            {!row.isSubstanceComplete ? (
+              <span className="inline-flex rounded-md border border-violet-500/20 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-300">
+                {missingFields > 0 ? `${missingFields} missing` : "ESR pending"}
+              </span>
+            ) : null}
+          </div>
+
+          {/* Status badge */}
           <span
             className={cn(
-              "inline-flex rounded-full border px-2 py-1 text-[11px] font-medium",
-              files > 0
-                ? "border-slate-200 bg-slate-50 text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/80"
-                : "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-500/20 dark:bg-orange-500/10 dark:text-orange-200",
+              "inline-flex rounded-md border px-2 py-0.5 text-[11px] font-medium",
+              STATUS_CLASS[status],
             )}
           >
-            {files > 0
-              ? `${files} document${files === 1 ? "" : "s"}`
-              : "No documents"}
+            {STATUS_LABEL[status]}
           </span>
+
+          {/* Updated time */}
           <span
-            className={cn(
-              "inline-flex rounded-full border px-2 py-1 text-[11px] font-medium",
-              row.isSubstanceComplete
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200"
-                : "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-200",
-            )}
+            className="text-muted-foreground w-16 text-right text-xs"
+            title={updatedTitle}
           >
-            {row.isSubstanceComplete
-              ? "ESR ready"
-              : missingFields > 0
-                ? `${missingFields} missing`
-                : "ESR pending"}
+            {updatedLabel}
           </span>
+
+          <ArrowUpRight className="text-muted-foreground/50 group-hover:text-foreground/70 size-4 transition-colors" />
         </div>
-      </td>
 
-      <td className="px-4 py-3">
-        <span
-          className={cn(
-            "inline-flex rounded-full border px-2 py-1 text-[11px] font-medium",
-            STATUS_CLASS[status],
-          )}
-        >
-          {STATUS_LABEL[status]}
-        </span>
-      </td>
-
-      <td className="px-4 py-3">
-        <p className="truncate font-medium" title={updatedTitle}>
-          {updatedLabel}
-        </p>
-      </td>
-
-      <td className="px-4 py-3 pr-6 text-right">
-        <motion.div
-          variants={badgeVariants}
-          transition={{ duration: 0.16, ease: "easeOut" }}
-          className="inline-flex"
-        >
-          <Button
-            asChild
-            size="sm"
-            variant="outline"
-            className="bg-background h-8 gap-1.5"
+        {/* Mobile: Simplified right side */}
+        <div className="flex shrink-0 items-center gap-2 sm:hidden">
+          <span
+            className={cn(
+              "inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-medium",
+              STATUS_CLASS[status],
+            )}
           >
-            <Link href={`/org/${orgId}/returns/${row.id}`}>
-              Open
-              <ArrowUpRight className="size-3.5" />
-            </Link>
-          </Button>
-        </motion.div>
-      </td>
-    </motion.tr>
+            {STATUS_LABEL[status]}
+          </span>
+          <ArrowUpRight className="text-muted-foreground/50 size-3.5" />
+        </div>
+      </Link>
+    </motion.div>
   );
 }

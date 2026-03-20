@@ -58,6 +58,9 @@ type ReturnFilesTabProps = {
   isExtractPending: boolean;
   isAssignPending: boolean;
   uploadedFileUrls: UploadedFile[] | null;
+  showAiExtraction?: boolean;
+  uploadDescription?: string;
+  uploadedFilesDescription?: string;
   onUploadFiles: (files: File[]) => void;
   onAssignFinancialStatements: (fileUrl: string) => void;
   onDismissAssignment: () => void;
@@ -73,6 +76,9 @@ export function ReturnFilesTab({
   isExtractPending,
   isAssignPending,
   uploadedFileUrls,
+  showAiExtraction = true,
+  uploadDescription = "Drop files here or browse. PDFs, spreadsheets, and documents are accepted.",
+  uploadedFilesDescription = "Review documents, open them, or run AI extraction.",
   onUploadFiles,
   onAssignFinancialStatements,
   onDismissAssignment,
@@ -86,7 +92,7 @@ export function ReturnFilesTab({
   const [deletingFileUrl, setDeletingFileUrl] = useState<string | null>(null);
 
   const deletingFile = deletingFileUrl
-    ? selectedFiles.find((f) => f.url === deletingFileUrl) ?? null
+    ? (selectedFiles.find((f) => f.url === deletingFileUrl) ?? null)
     : null;
 
   const uploadedPdfs = useMemo(
@@ -127,7 +133,7 @@ export function ReturnFilesTab({
     <TabsContent value="files">
       <div className="space-y-4">
         {/* Upload zone */}
-        <div className="rounded-xl border border-border/70 bg-card p-5 shadow-xs">
+        <div className="border-border/70 bg-card rounded-xl border p-5 shadow-xs">
           <input
             id={fileInputId}
             type="file"
@@ -139,17 +145,16 @@ export function ReturnFilesTab({
 
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex items-start gap-3">
-              <span className="inline-flex size-10 items-center justify-center rounded-lg border border-border/70 bg-muted/60 text-foreground">
+              <span className="border-border/70 bg-muted/60 text-foreground inline-flex size-10 items-center justify-center rounded-lg border">
                 <UploadCloud className="size-4.5" />
               </span>
               <div>
                 <p className="text-sm font-semibold">Upload documents</p>
-                <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">
-                  Drop files here or browse. PDFs, spreadsheets, and documents are accepted.
+                <p className="text-muted-foreground mt-0.5 max-w-2xl text-sm">
+                  {uploadDescription}
                 </p>
               </div>
             </div>
-
           </div>
 
           <div
@@ -159,8 +164,14 @@ export function ReturnFilesTab({
                 ? "border-primary/40 bg-primary/[0.03]"
                 : "border-border/60",
             )}
-            onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
             onDragLeave={(e) => {
               e.preventDefault();
               if (e.currentTarget.contains(e.relatedTarget as Node)) return;
@@ -171,7 +182,7 @@ export function ReturnFilesTab({
             <div className="flex flex-col items-center gap-4 text-center">
               <span
                 className={cn(
-                  "inline-flex size-11 items-center justify-center rounded-full border bg-muted/40 transition-colors",
+                  "bg-muted/40 inline-flex size-11 items-center justify-center rounded-full border transition-colors",
                   isDragging
                     ? "border-primary/30 text-primary"
                     : "border-border/60 text-muted-foreground",
@@ -192,7 +203,7 @@ export function ReturnFilesTab({
                       ? "Drop files here"
                       : "Drag files here or browse"}
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="text-muted-foreground mt-1 text-xs">
                   PDF, Excel, CSV, ZIP, DOC accepted
                 </p>
               </div>
@@ -211,43 +222,45 @@ export function ReturnFilesTab({
         </div>
 
         {/* Uploaded files */}
-        <div className="rounded-xl border border-border/70 bg-card p-5 shadow-xs">
+        <div className="border-border/70 bg-card rounded-xl border p-5 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold">Uploaded files</p>
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                Review documents, open them, or run AI extraction.
+              <p className="text-muted-foreground mt-0.5 text-sm">
+                {uploadedFilesDescription}
               </p>
             </div>
 
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onRunAiExtraction}
-              disabled={!selectedFiles.length || isExtractPending}
-            >
-              {isExtractPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Sparkles className="size-4" />
-              )}
-              Run AI extraction
-            </Button>
+            {showAiExtraction ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onRunAiExtraction}
+                disabled={!selectedFiles.length || isExtractPending}
+              >
+                {isExtractPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Sparkles className="size-4" />
+                )}
+                Run AI extraction
+              </Button>
+            ) : null}
           </div>
 
           {!selectedFiles.length ? (
-            <p className="mt-4 rounded-lg border border-dashed border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
+            <p className="border-border/60 text-muted-foreground mt-4 rounded-lg border border-dashed px-4 py-10 text-center text-sm">
               No uploaded files yet.
             </p>
           ) : (
-            <div className="mt-4 divide-y divide-border/50">
+            <div className="divide-border/50 mt-4 divide-y">
               {selectedFiles.map((file) => (
                 <div
                   key={`${file.url}-${file.uploadedAt ?? file.name}`}
                   className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
                 >
                   <div className="flex min-w-0 items-center gap-3">
-                    <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground">
+                    <span className="bg-muted/60 text-muted-foreground inline-flex size-9 shrink-0 items-center justify-center rounded-lg">
                       {isPdfLike(file) ? (
                         <FileText className="size-4" />
                       ) : (
@@ -265,7 +278,7 @@ export function ReturnFilesTab({
                           </span>
                         ) : null}
                       </div>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
+                      <p className="text-muted-foreground mt-0.5 text-xs">
                         {formatBytes(file.size)} ·{" "}
                         {file.uploadedAt
                           ? new Date(file.uploadedAt).toLocaleString()
@@ -291,7 +304,9 @@ export function ReturnFilesTab({
                         {file.role === "financial_statements" ? (
                           <DropdownMenuItem
                             className="cursor-pointer"
-                            onClick={() => onUnassignFinancialStatements(file.url)}
+                            onClick={() =>
+                              onUnassignFinancialStatements(file.url)
+                            }
                           >
                             <FileText className="size-3.5" />
                             Unassign financial statements
@@ -299,7 +314,9 @@ export function ReturnFilesTab({
                         ) : (
                           <DropdownMenuItem
                             className="cursor-pointer"
-                            onClick={() => onAssignFinancialStatements(file.url)}
+                            onClick={() =>
+                              onAssignFinancialStatements(file.url)
+                            }
                           >
                             <FileText className="size-3.5" />
                             Assign as financial statements
@@ -328,18 +345,29 @@ export function ReturnFilesTab({
       {showSingleDialog ? (
         <Dialog
           open
-          onOpenChange={(open) => { if (!open) onDismissAssignment(); }}
+          onOpenChange={(open) => {
+            if (!open) onDismissAssignment();
+          }}
         >
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Financial Statements?</DialogTitle>
+              <DialogTitle>Assign signed financial statements?</DialogTitle>
               <DialogDescription>
-                Is <span className="font-medium text-foreground">{uploadedPdfs[0]?.name}</span> your
-                financial statements for this return?
+                Is{" "}
+                <span className="text-foreground font-medium">
+                  {uploadedPdfs[0]?.name}
+                </span>{" "}
+                the signed financial statements PDF for this return?
               </DialogDescription>
             </DialogHeader>
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800">
+              Upload the final signed accounts only. Draft accounts should not
+              be assigned here.
+            </div>
             <DialogFooter>
-              <Button variant="outline" onClick={onDismissAssignment}>No</Button>
+              <Button variant="outline" onClick={onDismissAssignment}>
+                No
+              </Button>
               <Button
                 disabled={isAssignPending}
                 onClick={() => {
@@ -350,7 +378,7 @@ export function ReturnFilesTab({
                 {isAssignPending ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : null}
-                Yes, assign it
+                Yes, assign signed PDF
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -370,38 +398,45 @@ export function ReturnFilesTab({
         >
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Select Financial Statements</DialogTitle>
+              <DialogTitle>Select signed financial statements</DialogTitle>
               <DialogDescription>
-                Which of these PDFs is the financial statements for this return?
+                Which of these PDFs is the signed financial statements for this
+                return?
               </DialogDescription>
             </DialogHeader>
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800">
+              Choose the final signed PDF only. If none of these files are
+              signed yet, leave them unassigned.
+            </div>
 
             <RadioGroup
               value={selectedRadio}
               onValueChange={setSelectedRadio}
-              className="gap-0 divide-y divide-border/50 rounded-lg border border-border/60"
+              className="divide-border/50 border-border/60 gap-0 divide-y rounded-lg border"
             >
               {uploadedPdfs.map((file) => (
                 <label
                   key={file.url}
                   className={cn(
-                    "flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30",
+                    "hover:bg-muted/30 flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors",
                     selectedRadio === file.url && "bg-primary/[0.04]",
                   )}
                 >
                   <RadioGroupItem value={file.url} />
-                  <FileText className="size-4 shrink-0 text-muted-foreground" />
+                  <FileText className="text-muted-foreground size-4 shrink-0" />
                   <span className="min-w-0 truncate text-sm">{file.name}</span>
                 </label>
               ))}
               <label
                 className={cn(
-                  "flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30",
+                  "hover:bg-muted/30 flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors",
                   selectedRadio === "__none__" && "bg-primary/[0.04]",
                 )}
               >
                 <RadioGroupItem value="__none__" />
-                <span className="text-sm text-muted-foreground">None of these</span>
+                <span className="text-muted-foreground text-sm">
+                  None of these
+                </span>
               </label>
             </RadioGroup>
 
@@ -429,14 +464,16 @@ export function ReturnFilesTab({
       {deletingFileUrl ? (
         <AlertDialog
           open
-          onOpenChange={(open) => { if (!open) setDeletingFileUrl(null); }}
+          onOpenChange={(open) => {
+            if (!open) setDeletingFileUrl(null);
+          }}
         >
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Remove file?</AlertDialogTitle>
               <AlertDialogDescription>
                 Are you sure you want to remove{" "}
-                <span className="font-medium text-foreground">
+                <span className="text-foreground font-medium">
                   {deletingFile?.name ?? "this file"}
                 </span>
                 ? This action cannot be undone.

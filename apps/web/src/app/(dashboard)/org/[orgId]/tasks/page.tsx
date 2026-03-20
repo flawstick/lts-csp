@@ -65,12 +65,15 @@ import { useState, useEffect } from "react"
 import { useParams } from "next/navigation"
 
 type StatusFilter = "pending" | "in_progress" | "completed" | "failed" | "cancelled" | undefined
+type JurisdictionFilter = "all" | "GG" | "JE"
 
 export default function TasksPage() {
   const params = useParams()
   const orgId = params?.orgId as string
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(undefined)
+  const [jurisdictionFilter, setJurisdictionFilter] =
+    useState<JurisdictionFilter>("all")
   const [searchQuery, setSearchQuery] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -93,12 +96,14 @@ export default function TasksPage() {
   useEffect(() => {
     setPage(1)
     setSelected(new Set())
-  }, [statusFilter])
+  }, [jurisdictionFilter, statusFilter])
 
   const { data, isLoading, refetch } = api.taxReturn.listTasks.useQuery({
     orgId, // Filter by org from URL
     page,
     pageSize,
+    jurisdictionCode:
+      jurisdictionFilter === "all" ? undefined : jurisdictionFilter,
     status: statusFilter,
     search: debouncedSearch || undefined,
   }, {
@@ -245,6 +250,21 @@ export default function TasksPage() {
                     </TooltipContent>
                   </Tooltip>
                   <Select
+                    value={jurisdictionFilter}
+                    onValueChange={(value) =>
+                      setJurisdictionFilter(value as JurisdictionFilter)
+                    }
+                  >
+                    <SelectTrigger className="w-[160px] border-none shadow-none focus:ring-0 bg-muted">
+                      <SelectValue placeholder="All jurisdictions" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All jurisdictions</SelectItem>
+                      <SelectItem value="GG">Guernsey</SelectItem>
+                      <SelectItem value="JE">Jersey</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
                     value={statusFilter ?? "all"}
                     onValueChange={(value) => setStatusFilter(value === "all" ? undefined : value as StatusFilter)}
                   >
@@ -290,6 +310,7 @@ export default function TasksPage() {
                     </TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Type</TableHead>
+                    <TableHead>Jurisdiction</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead>Related Return</TableHead>
                     <TableHead>Status</TableHead>
@@ -303,6 +324,7 @@ export default function TasksPage() {
                         <TableCell><Skeleton className="h-4 w-4" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                        <TableCell><Skeleton className="h-5 w-12" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-16" /></TableCell>
@@ -311,7 +333,7 @@ export default function TasksPage() {
                     ))
                   ) : !data?.tasks || data.tasks.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-64 text-center text-muted-foreground">
+                      <TableCell colSpan={8} className="h-64 text-center text-muted-foreground">
                         <div className="flex flex-col items-center justify-center">
                           <Terminal className="h-12 w-12 mb-4 opacity-20" />
                           <p>No tasks found.</p>
@@ -334,6 +356,11 @@ export default function TasksPage() {
                         <TableCell className="font-medium">{task.name}</TableCell>
                         <TableCell>
                           <Badge variant="outline">{getTaskTypeLabel(task.taskType)}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {task.jurisdiction?.code || "—"}
+                          </Badge>
                         </TableCell>
                         <TableCell>{new Date(task.createdAt).toLocaleDateString()}</TableCell>
                         <TableCell>
@@ -420,7 +447,7 @@ export default function TasksPage() {
                                       </div>
                                       <div className="flex justify-between">
                                         <span className="text-muted-foreground">Jurisdiction:</span>
-                                        <span>Guernsey</span>
+                                        <span>{task.jurisdiction?.name || "—"}</span>
                                       </div>
                                       <div className="pt-2 mt-2 border-t flex justify-end">
                                         <Button variant="secondary" size="sm" asChild>

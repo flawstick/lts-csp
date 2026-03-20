@@ -62,6 +62,8 @@ interface PromptBuilderOptions {
   financialStatementsUrl?: string | null;
 }
 
+const DEFAULT_CERTIFICATE_TYPE = "Certificate 3";
+
 /**
  * Builds the main AI prompt for filling out the Guernsey Economic Substance Register
  */
@@ -101,7 +103,7 @@ If prompted for CSP or secret credentials:
 
 ## IMPORTANT INSTRUCTIONS
 
-**CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "Certificate 3" (this is always the correct option).
+**CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "${DEFAULT_CERTIFICATE_TYPE}" (this is always the correct option).
 
 **TURNOVER FIELD:** The "Turnover / Gross Income" field in Section 6 may be labeled simply as "Turnover" on the portal. Look for a field asking for gross income or turnover amount in the Adequacy Assessment area.
 
@@ -247,11 +249,12 @@ ${field("Registered Address", form.registeredAddress)}
 ${field("Principal Place of Business", form.principalPlaceOfBusiness)}
 ${field("Is Incorporated in Guernsey", form.isIncorporatedInGuernsey)}
 ${field("Economic Classification Code", form.economicClassificationCode)}
-${field("Certificate Type", form.certificateType)}
+${field("Certificate Type", DEFAULT_CERTIFICATE_TYPE)}
 ${field("Entity Activity", form.entityActivity)}
 
 **IMPORTANT:**
 - Economic Classification Code is REQUIRED for 2025 returns — this is a dropdown field on the portal, select the matching option.
+- Certificate Type is fixed for this filing flow: always use ${DEFAULT_CERTIFICATE_TYPE}.
 - Entity Activity describes the nature of the entity's business (e.g., "Property Holdings"). Preferred to have it filled even if the entity has no relevant activity.
 `;
 }
@@ -264,7 +267,9 @@ ${field("Partnership Number", form.partnershipNumber)}
 `;
 }
 
-function clampNegativeToZero(value: string | null | undefined): string | null | undefined {
+function clampNegativeToZero(
+  value: string | null | undefined,
+): string | null | undefined {
   if (!value) return value;
   const num = parseFloat(value.replace(/[^0-9.-]/g, ""));
   if (!isNaN(num) && num < 0) return "0";
