@@ -214,12 +214,10 @@ export default function ReturnWorkspacePage() {
       message.toLowerCase().includes("running") ||
       message.toLowerCase().includes("processing");
     if (isError) {
-      toast.dismiss("return-action");
       toast.error(message, { id: "return-action" });
     } else if (isLoading) {
       toast.loading(message, { id: "return-action" });
     } else {
-      toast.dismiss("return-action");
       toast.success(message, { id: "return-action", duration: 3000 });
     }
   };
