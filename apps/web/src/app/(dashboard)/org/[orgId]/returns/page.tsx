@@ -53,16 +53,22 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | "dismissed" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
+type TaxYearFilter = "all" | `${number}`
 
 export default function ReturnsPage() {
   const params = useParams()
   const orgId = params?.orgId as string
   const searchParams = useSearchParams()
   const initialStatus = searchParams.get("status") as StatusFilter
+  const currentCalendarYear = React.useMemo(() => new Date().getUTCFullYear(), [])
+  const defaultTaxYear = currentCalendarYear - 1
 
   const [page, setPage] = React.useState(1)
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(initialStatus ?? undefined)
   const [jurisdictionFilter, setJurisdictionFilter] = React.useState<JurisdictionFilter>("all")
+  const [taxYearFilter, setTaxYearFilter] = React.useState<TaxYearFilter>(
+    `${defaultTaxYear}` as TaxYearFilter,
+  )
   const [searchQuery, setSearchQuery] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [logsDialogOpen, setLogsDialogOpen] = React.useState(false)
@@ -87,7 +93,7 @@ export default function ReturnsPage() {
   React.useEffect(() => {
     setPage(1)
     setSelected(new Set()) // Clear selection on filter change
-  }, [jurisdictionFilter, statusFilter])
+  }, [jurisdictionFilter, statusFilter, taxYearFilter])
 
   const utils = api.useUtils()
 
@@ -98,6 +104,7 @@ export default function ReturnsPage() {
       pageSize,
       jurisdictionCode:
         jurisdictionFilter === "all" ? undefined : jurisdictionFilter,
+      taxYear: taxYearFilter === "all" ? undefined : Number(taxYearFilter),
       status: statusFilter,
       search: debouncedSearch || undefined,
     },
@@ -106,6 +113,14 @@ export default function ReturnsPage() {
       enabled: !!orgId, // Only run query if we have an orgId
     }
   )
+
+  const taxYearOptions = React.useMemo(() => {
+    const recentYears = Array.from({ length: 8 }, (_, index) => currentCalendarYear - index)
+    const syncedYears = (data?.returns ?? []).map((item) => item.taxYear)
+    return Array.from(new Set([...recentYears, ...syncedYears])).sort(
+      (a, b) => b - a,
+    )
+  }, [currentCalendarYear, data?.returns])
 
   const deleteMutation = api.taxReturn.delete.useMutation({
     onSuccess: () => {
@@ -361,6 +376,23 @@ export default function ReturnsPage() {
                     <SelectItem value="dismissed">Dismissed</SelectItem>
                   </SelectContent>
                 </Select>
+                <div className="h-6 w-px bg-border" />
+                <Select
+                  value={taxYearFilter}
+                  onValueChange={(value) => setTaxYearFilter(value as TaxYearFilter)}
+                >
+                  <SelectTrigger className="w-[140px] border-none shadow-none focus:ring-0 bg-muted">
+                    <SelectValue placeholder="Tax year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All tax years</SelectItem>
+                    {taxYearOptions.map((year) => (
+                      <SelectItem key={year} value={`${year}`}>
+                        {year}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {selected.size > 0 && (
                   <>
                      <div className="h-6 w-px bg-border" />
@@ -412,7 +444,7 @@ export default function ReturnsPage() {
                   ) : data?.returns.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
-                        {searchQuery || statusFilter
+                        {searchQuery || statusFilter || jurisdictionFilter !== "all" || taxYearFilter !== "all"
                           ? "No returns match your filters."
                           : "No returns found. Run a sync job to import returns."}
                       </TableCell>

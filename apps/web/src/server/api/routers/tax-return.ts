@@ -446,6 +446,7 @@ export const taxReturnRouter = createTRPCRouter({
         page: z.number().min(1).default(1),
         pageSize: z.number().min(1).max(100).default(20),
         jurisdictionCode: z.string().trim().min(2).max(8).optional(),
+        taxYear: z.number().int().optional(),
         status: z
           .enum([
             "pending",
@@ -460,7 +461,15 @@ export const taxReturnRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const { orgId, page, pageSize, jurisdictionCode, status, search } = input;
+      const {
+        orgId,
+        page,
+        pageSize,
+        jurisdictionCode,
+        taxYear,
+        status,
+        search,
+      } = input;
       const offset = (page - 1) * pageSize;
 
       // Build where conditions
@@ -473,6 +482,10 @@ export const taxReturnRouter = createTRPCRouter({
 
       if (jurisdictionCode) {
         conditions.push(eq(jurisdictions.code, jurisdictionCode));
+      }
+
+      if (typeof taxYear === "number") {
+        conditions.push(eq(taxReturns.taxYear, taxYear));
       }
 
       if (status) {
