@@ -3,16 +3,13 @@
  * Runs on ECS, uses Browser Use Cloud API, streams status via Redis
  */
 
-import {
-  db,
-  taxReturns,
-  substanceForms,
-  jobs,
-  tasks,
-  eq,
-} from "@repo/database";
+import { db, taxReturns, jobs, tasks, eq } from "@repo/database";
 import { publishJobEvent } from "@repo/redis";
-import { BrowserUseClient } from "./browser-use-client";
+import {
+  BrowserUseClient,
+  type BrowserUseModel,
+  type BrowserUseSessionStatus,
+} from "./browser-use-client";
 import { buildSubstanceFormPrompt } from "./prompt-builder";
 
 // ============================================================================
@@ -24,6 +21,7 @@ const TAX_RETURN_ID = process.env.TAX_RETURN_ID || "";
 const JOB_ID = process.env.JOB_ID || "";
 const TASK_ID = process.env.TASK_ID || "";
 const OVERRIDE_SAVED = process.env.OVERRIDE_SAVED === "true";
+const BROWSER_USE_MODEL: BrowserUseModel = "bu-max";
 
 const POLL_INTERVAL_MS = 2000;
 const MAX_RUNTIME_MS = 30 * 60 * 1000;
@@ -45,6 +43,15 @@ const REQUIRES_ATTENTION_KEYWORDS = [
   "need to login",
 ];
 
+const DETACHED_BROWSER_RECOVERY_PATTERNS = [
+  "cdp still not connected",
+  "target may have detached",
+  "no valid agent focus available",
+  "about:blank",
+  "expected at least one handler to return a non-none result",
+  "reconnection failed",
+];
+
 type TaxReturnAttachedFile = {
   url: string;
   name: string;
@@ -58,6 +65,7 @@ type TaxReturnAttachedFile = {
 type BrowserSessionInputFile = {
   originalName: string;
   sessionFileName: string;
+  sessionFilePath: string;
   url: string;
   category?: string;
   role?: string;
@@ -67,9 +75,17 @@ type BrowserSessionInputFile = {
 // Logging + Redis Publishing
 // ============================================================================
 
-async function log(message: string, data?: Record<string, unknown>) {
+async function log(
+  message: string,
+  data?: Record<string, unknown>,
+  options?: { publish?: boolean },
+) {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] ${message}`, data ? JSON.stringify(data) : "");
+
+  if (options?.publish === false) {
+    return;
+  }
 
   try {
     await publishJobEvent({
@@ -92,6 +108,95 @@ async function publishStatus(status: string, data: Record<string, unknown>) {
   } catch (err) {
     console.error("Redis publish failed:", err);
   }
+}
+
+function isTerminalSessionStatus(status: BrowserUseSessionStatus): boolean {
+  return (
+    status === "idle" ||
+    status === "stopped" ||
+    status === "timed_out" ||
+    status === "error"
+  );
+}
+
+function normalizeBrowserUseOutput(output: unknown): string {
+  if (typeof output === "string") {
+    return output;
+  }
+
+  if (output == null) {
+    return "";
+  }
+
+  try {
+    return JSON.stringify(output, null, 2);
+  } catch {
+    return String(output);
+  }
+}
+
+function isDetachedBrowserRecoveryError(message: {
+  summary?: string | null;
+  data?: unknown;
+  type?: string | null;
+}): boolean {
+  const dataText =
+    typeof message.data === "string"
+      ? message.data
+      : message.data == null
+        ? ""
+        : JSON.stringify(message.data);
+
+  const haystack = `${message.summary ?? ""} ${dataText} ${message.type ?? ""}`
+    .toLowerCase()
+    .trim();
+
+  return DETACHED_BROWSER_RECOVERY_PATTERNS.some((pattern) =>
+    haystack.includes(pattern),
+  );
+}
+
+async function waitForSessionToLeaveRunning(
+  client: BrowserUseClient,
+  sessionId: string,
+  timeoutMs = 10_000,
+): Promise<BrowserUseSessionStatus> {
+  const deadline = Date.now() + timeoutMs;
+  let lastStatus: BrowserUseSessionStatus = "running";
+
+  while (Date.now() < deadline) {
+    const session = await client.getSession(sessionId);
+    lastStatus = session.status;
+
+    if (session.status !== "running") {
+      return session.status;
+    }
+
+    await sleep(250);
+  }
+
+  return lastStatus;
+}
+
+async function syncProgressCursorAfterPause(
+  client: BrowserUseClient,
+  sessionId: string,
+  lastMessageId: string | null,
+  lastStepCount: number,
+): Promise<{ lastMessageId: string | null; lastStepCount: number }> {
+  const session = await client.getSession(sessionId);
+  const newMessages = await client.getMessages(sessionId, lastMessageId);
+  const orderedMessages = [...newMessages.messages].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+
+  return {
+    lastMessageId:
+      orderedMessages.length > 0
+        ? (orderedMessages[orderedMessages.length - 1]?.id ?? lastMessageId)
+        : lastMessageId,
+    lastStepCount: Math.max(lastStepCount, session.stepCount),
+  };
 }
 
 function getTaxReturnFiles(files: unknown): TaxReturnAttachedFile[] {
@@ -179,7 +284,7 @@ function getPdfExtension(file: TaxReturnAttachedFile): string {
 
 async function uploadFinancialStatementsFile(
   client: BrowserUseClient,
-  sessionId: string,
+  workspaceId: string,
   files: TaxReturnAttachedFile[],
   logFn: typeof log,
 ): Promise<BrowserSessionInputFile | null> {
@@ -213,7 +318,7 @@ async function uploadFinancialStatementsFile(
           `financial-statements${getPdfExtension(selectedFile) || ".pdf"}`,
         );
 
-  const sessionFileName = await client.uploadFile(sessionId, {
+  const uploadedFile = await client.uploadFileToWorkspace(workspaceId, {
     name: uploadName,
     type:
       selectedFile.type ||
@@ -222,14 +327,28 @@ async function uploadFinancialStatementsFile(
     buffer,
   });
 
-  await logFn("Uploaded financial statements PDF to Browser Use session", {
+  const workspaceFiles = await client.getWorkspaceFiles(workspaceId);
+  const isUploaded = workspaceFiles.files.some(
+    (file) => file.path === uploadedFile.path || file.path.endsWith(uploadName),
+  );
+
+  if (!isUploaded) {
+    throw new Error(
+      `Browser Use workspace upload could not be verified for ${uploadName}`,
+    );
+  }
+
+  await logFn("Uploaded financial statements PDF to Browser Use workspace", {
     originalName: selectedFile.name,
-    sessionFileName,
+    sessionFileName: uploadedFile.name,
+    sessionFilePath: uploadedFile.path,
+    workspaceId,
   });
 
   return {
     originalName: selectedFile.name,
-    sessionFileName,
+    sessionFileName: uploadedFile.name,
+    sessionFilePath: uploadedFile.path,
     url: selectedFile.url,
     category: selectedFile.category,
     role: selectedFile.role,
@@ -263,7 +382,11 @@ async function main() {
     if (JOB_ID) {
       await db
         .update(jobs)
-        .set({ status: "running", startedAt: new Date() })
+        .set({
+          status: "running",
+          startedAt: new Date(),
+          aiModel: BROWSER_USE_MODEL,
+        })
         .where(eq(jobs.id, JOB_ID));
     }
 
@@ -285,10 +408,6 @@ async function main() {
     );
     const session = await client.createSession({
       ...(useProxy && { proxyCountryCode: "uk" as const }),
-      startUrl:
-        taxReturn.link ||
-        taxReturn.jurisdiction?.portalUrl ||
-        "https://my.gov.gg",
     });
 
     await log("Session created", {
@@ -296,17 +415,26 @@ async function main() {
       liveUrl: session.liveUrl,
     });
 
+    let workspaceId: string | null = null;
     let financialStatementsFile: BrowserSessionInputFile | null = null;
     try {
+      const workspace = await client.createWorkspace(
+        `tax-return-${TAX_RETURN_ID}`,
+      );
+      workspaceId = workspace.id;
+      await log("Browser Use workspace created", {
+        workspaceId,
+      });
+
       financialStatementsFile = await uploadFinancialStatementsFile(
         client,
-        session.id,
+        workspaceId,
         taxReturnFiles,
         log,
       );
     } catch (error) {
       await log(
-        "Failed to prepare financial statements PDF for Browser Use session",
+        "Failed to prepare financial statements PDF for Browser Use workspace",
         {
           error: error instanceof Error ? error.message : String(error),
         },
@@ -329,6 +457,10 @@ async function main() {
       financialStatementsFile,
       financialStatementsUrl: financialStatementsFile?.url ?? null,
     });
+    const recoveryReturnUrl =
+      taxReturn.link ||
+      taxReturn.jurisdiction?.portalUrl ||
+      "https://my.gov.gg";
 
     // Publish live URL immediately
     await publishJobEvent({
@@ -338,6 +470,7 @@ async function main() {
       data: {
         liveUrl: session.liveUrl,
         sessionId: session.id,
+        workspaceId,
         taxReturnId: TAX_RETURN_ID,
         entityName: taxReturn.entityName,
       },
@@ -348,32 +481,37 @@ async function main() {
       await db
         .update(jobs)
         .set({
-          resultData: { liveUrl: session.liveUrl, sessionId: session.id },
+          aiModel: BROWSER_USE_MODEL,
+          resultData: {
+            liveUrl: session.liveUrl,
+            sessionId: session.id,
+            workspaceId,
+          },
         })
         .where(eq(jobs.id, JOB_ID));
     }
 
-    // Create task
-    await log("Creating Browser Use task");
-    const taskResponse = await client.createTask({
-      task: prompt,
+    await log("Starting Browser Use task", {
       sessionId: session.id,
-      llm: "browser-use-llm",
-      maxSteps: 100,
-      highlightElements: true,
-      vision: "auto",
-      metadata: {
-        taxReturnId: TAX_RETURN_ID,
-        entityName: taxReturn.entityName,
-        taxYear: String(taxReturn.taxYear),
-      },
+      model: BROWSER_USE_MODEL,
     });
 
-    await log("Task created", { taskId: taskResponse.id });
+    let currentRunPromise = Promise.resolve(
+      client.runTask(prompt, {
+        sessionId: session.id,
+        model: BROWSER_USE_MODEL,
+        timeoutMs: MAX_RUNTIME_MS,
+        workspaceId: workspaceId ?? undefined,
+      }),
+    );
 
     // Poll for completion
     const startTime = Date.now();
     let lastStepCount = 0;
+    let lastMessageId: string | null = null;
+    let terminalStateHandled = false;
+    let detachedBrowserRecoveryFailures = 0;
+    let hasAttemptedDetachedBrowserRecovery = false;
 
     while (Date.now() - startTime < MAX_RUNTIME_MS) {
       await sleep(POLL_INTERVAL_MS);
@@ -387,8 +525,10 @@ async function main() {
       if (currentJobStatus?.status === "cancelled") {
         await log("Job cancelled by user");
         try {
-          await client.updateTask(taskResponse.id, "stop_task_and_session");
+          await client.stopSession(session.id, "session");
         } catch {}
+        void currentRunPromise.catch(() => undefined);
+        terminalStateHandled = true;
         break;
       }
 
@@ -406,13 +546,31 @@ async function main() {
           },
         });
 
-        // Pause the browser-use task
+        // Stop the active task but keep the session/browser alive for manual work.
         try {
-          await client.updateTask(taskResponse.id, "pause");
+          await client.stopSession(session.id, "task");
+          const stoppedStatus = await waitForSessionToLeaveRunning(
+            client,
+            session.id,
+          );
+          await log("Pause stop request processed", {
+            sessionId: session.id,
+            sessionStatus: stoppedStatus,
+          });
         } catch {}
+        void currentRunPromise.catch(() => undefined);
+        const pausedCursor = await syncProgressCursorAfterPause(
+          client,
+          session.id,
+          lastMessageId,
+          lastStepCount,
+        );
+        lastMessageId = pausedCursor.lastMessageId;
+        lastStepCount = pausedCursor.lastStepCount;
 
         // Wait for resume
         const pauseStartTime = Date.now();
+        let resumed = false;
         while (Date.now() - pauseStartTime < MAX_PAUSE_DURATION_MS) {
           await sleep(PAUSE_CHECK_INTERVAL_MS);
           const checkJob = await db.query.jobs.findFirst({
@@ -422,18 +580,35 @@ async function main() {
 
           if (checkJob?.status === "running") {
             await log("User resumed - continuing task");
-            try {
-              await client.updateTask(taskResponse.id, "resume");
-            } catch {}
+            const continuePrompt = `
+Continue from where you left off. The user has completed any manual intervention or authentication.
+Now proceed with the original task:
+
+${prompt}
+`;
+            currentRunPromise = Promise.resolve(
+              client.runTask(continuePrompt, {
+                sessionId: session.id,
+                model: BROWSER_USE_MODEL,
+                timeoutMs: MAX_RUNTIME_MS,
+                workspaceId: workspaceId ?? undefined,
+              }),
+            );
+            resumed = true;
             break;
           }
           if (checkJob?.status === "cancelled") {
             await log("Job cancelled during pause");
             try {
-              await client.updateTask(taskResponse.id, "stop_task_and_session");
+              await client.stopSession(session.id, "session");
             } catch {}
+            terminalStateHandled = true;
             break;
           }
+        }
+
+        if (terminalStateHandled) {
+          break;
         }
 
         // Check if we timed out or cancelled
@@ -441,33 +616,197 @@ async function main() {
           where: eq(jobs.id, JOB_ID),
           columns: { status: true },
         });
-        if (finalCheck?.status !== "running") {
+        if (!resumed || finalCheck?.status !== "running") {
+          if (finalCheck?.status === "paused") {
+            await log("Pause timeout - marking as failed");
+            await db
+              .update(jobs)
+              .set({
+                status: "failed",
+                completedAt: new Date(),
+                errorMessage: "Timed out waiting for user intervention",
+              })
+              .where(eq(jobs.id, JOB_ID));
+            terminalStateHandled = true;
+          }
           break;
         }
+
+        continue;
       }
 
-      const task = await client.getTask(taskResponse.id);
+      const browserSession = await client.getSession(session.id);
+      const newMessages = await client.getMessages(session.id, lastMessageId);
+      const orderedMessages = [...newMessages.messages].sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      );
+      const publishedMessageUpdate = orderedMessages.length > 0;
+      let sawDetachedBrowserRecoveryError = false;
 
-      // Publish new steps
-      if (task.steps.length > lastStepCount) {
-        for (const step of task.steps.slice(lastStepCount)) {
-          await publishStatus("step", {
-            stepNumber: step.number,
-            goal: step.nextGoal,
-            memory: step.memory,
-            url: step.url,
-            actions: step.actions,
-            screenshotUrl: step.screenshotUrl,
-          });
-          await log(`Step ${step.number}: ${step.nextGoal}`);
+      for (const message of orderedMessages) {
+        const detachedBrowserRecoveryError =
+          isDetachedBrowserRecoveryError(message);
+        if (detachedBrowserRecoveryError) {
+          sawDetachedBrowserRecoveryError = true;
         }
-        lastStepCount = task.steps.length;
+
+        const summary = message.summary?.trim() || message.type;
+        await publishStatus("step", {
+          stepNumber: browserSession.stepCount,
+          goal: summary,
+          liveUrl: browserSession.liveUrl ?? session.liveUrl,
+          memory: message.data,
+          url: browserSession.liveUrl ?? session.liveUrl,
+          actions: [message.type],
+        });
+        await log(
+          summary,
+          {
+            type: message.type,
+            role: message.role,
+            sessionId: session.id,
+          },
+          { publish: false },
+        );
+        lastMessageId = message.id;
       }
 
-      // Check completion
-      if (task.status === "finished") {
-        const success = task.isSuccess ?? true;
-        const output = task.output || "";
+      if (orderedMessages.length > 0) {
+        detachedBrowserRecoveryFailures = sawDetachedBrowserRecoveryError
+          ? detachedBrowserRecoveryFailures + 1
+          : 0;
+      }
+
+      if (
+        browserSession.stepCount > lastStepCount &&
+        browserSession.lastStepSummary &&
+        !publishedMessageUpdate
+      ) {
+        await publishStatus("step", {
+          stepNumber: browserSession.stepCount,
+          goal: browserSession.lastStepSummary,
+          liveUrl: browserSession.liveUrl ?? session.liveUrl,
+          url: browserSession.liveUrl ?? session.liveUrl,
+          actions: [],
+        });
+        await log(
+          `Step ${browserSession.stepCount}: ${browserSession.lastStepSummary}`,
+          {
+            sessionId: session.id,
+          },
+          { publish: false },
+        );
+      }
+      lastStepCount = Math.max(lastStepCount, browserSession.stepCount);
+
+      if (
+        browserSession.status === "running" &&
+        detachedBrowserRecoveryFailures >= 3
+      ) {
+        if (!hasAttemptedDetachedBrowserRecovery) {
+          await log(
+            "Browser Use lost tab focus repeatedly - restarting with recovery instructions",
+            {
+              sessionId: session.id,
+              recoveryReturnUrl,
+              failureCount: detachedBrowserRecoveryFailures,
+            },
+          );
+
+          try {
+            await client.stopSession(session.id, "task");
+            await waitForSessionToLeaveRunning(client, session.id);
+          } catch {}
+
+          const recoveryPrompt = `
+The browser entered an unstable state after a bad click or detached tab.
+
+RECOVERY RULES:
+- Use only Browser Use native tools: switch, close, navigate, go_back, click, input, upload_file, evaluate, screenshot.
+- Do NOT use Python or browser-wrapper recovery helpers such as get_tabs.
+- If a stray tab or blank page is open, use switch or close to return to the main Guernsey portal tab.
+- If you cannot recover the portal tab quickly, navigate directly to: ${recoveryReturnUrl}
+- If you land on a page ending in reviewAndSubmit/summary, this is a saved draft summary. Do NOT click Submit, Confirm, Print, or Download from that page.
+- From the summary page, use a Change or Edit link to reopen the filing sections and continue the return.
+- Verify the Financial Statements / Accounts upload before leaving that section, and do not continue while the control still says "No file chosen".
+
+Continue the original task now:
+
+${prompt}
+`;
+
+          currentRunPromise = Promise.resolve(
+            client.runTask(recoveryPrompt, {
+              sessionId: session.id,
+              model: BROWSER_USE_MODEL,
+              timeoutMs: MAX_RUNTIME_MS,
+              workspaceId: workspaceId ?? undefined,
+            }),
+          );
+          hasAttemptedDetachedBrowserRecovery = true;
+          detachedBrowserRecoveryFailures = 0;
+          continue;
+        }
+
+        const focusFailureMessage =
+          "Browser Use lost browser focus repeatedly after a detached tab/blank page and could not recover automatically.";
+
+        await log(focusFailureMessage, {
+          sessionId: session.id,
+          failureCount: detachedBrowserRecoveryFailures,
+        });
+
+        await publishJobEvent({
+          type: "job:failed",
+          jobId: JOB_ID,
+          timestamp: Date.now(),
+          data: {
+            error: focusFailureMessage,
+            browserUseSessionId: session.id,
+            liveUrl: session.liveUrl,
+          },
+        });
+
+        await db
+          .update(taxReturns)
+          .set({ status: "failed" })
+          .where(eq(taxReturns.id, TAX_RETURN_ID));
+
+        if (JOB_ID) {
+          await db
+            .update(jobs)
+            .set({
+              status: "failed",
+              completedAt: new Date(),
+              errorMessage: focusFailureMessage,
+              resultData: {
+                liveUrl: session.liveUrl,
+                browserUseSessionId: session.id,
+                workspaceId,
+              },
+            })
+            .where(eq(jobs.id, JOB_ID));
+        }
+
+        try {
+          await client.stopSession(session.id, "task");
+        } catch {}
+
+        terminalStateHandled = true;
+        break;
+      }
+
+      if (isTerminalSessionStatus(browserSession.status)) {
+        const runResult = await currentRunPromise.catch(() => null);
+        const output = normalizeBrowserUseOutput(
+          runResult?.output ?? browserSession.output,
+        );
+        const success =
+          browserSession.status === "idle" &&
+          (runResult?.isTaskSuccessful ??
+            browserSession.isTaskSuccessful ??
+            true);
 
         // Check if the agent needs user intervention (e.g., login required)
         const needsAttention =
@@ -485,7 +824,7 @@ async function main() {
             timestamp: Date.now(),
             data: {
               output,
-              browserUseTaskId: taskResponse.id,
+              browserUseSessionId: session.id,
               liveUrl: session.liveUrl,
               sessionId: session.id,
               message:
@@ -501,7 +840,7 @@ async function main() {
                 status: "paused",
                 resultData: {
                   output,
-                  browserUseTaskId: taskResponse.id,
+                  browserUseSessionId: session.id,
                   liveUrl: session.liveUrl,
                   sessionId: session.id,
                   pausedAt: Date.now(),
@@ -526,28 +865,25 @@ async function main() {
             if (!currentJob) break;
 
             if (currentJob.status === "running") {
-              await log("User resumed - creating new task to continue");
+              await log(
+                "User resumed - creating new Browser Use run to continue",
+              );
 
-              // User resumed, create a new browser-use task to continue
               const continuePrompt = `
 Continue from where you left off. The user has completed the login/authentication.
 Now proceed with the original task:
 
 ${prompt}
 `;
-              const continueTask = await client.createTask({
-                task: continuePrompt,
-                sessionId: session.id,
-                llm: "browser-use-llm",
-                maxSteps: 100,
-                highlightElements: true,
-                vision: "auto",
-              });
+              currentRunPromise = Promise.resolve(
+                client.runTask(continuePrompt, {
+                  sessionId: session.id,
+                  model: BROWSER_USE_MODEL,
+                  timeoutMs: MAX_RUNTIME_MS,
+                  workspaceId: workspaceId ?? undefined,
+                }),
+              );
 
-              // Reset polling for the new task
-              lastStepCount = 0;
-              // Update taskResponse reference for continued polling
-              Object.assign(taskResponse, { id: continueTask.id });
               break;
             }
 
@@ -584,8 +920,9 @@ ${prompt}
         await log(
           success ? "Task completed successfully" : "Task finished with issues",
           {
-            output: task.output,
+            output,
             isSuccess: success,
+            sessionStatus: browserSession.status,
           },
         );
 
@@ -594,9 +931,9 @@ ${prompt}
           jobId: JOB_ID,
           timestamp: Date.now(),
           data: {
-            output: task.output,
+            output,
             isSuccess: success,
-            browserUseTaskId: taskResponse.id,
+            browserUseSessionId: session.id,
           },
         });
 
@@ -612,32 +949,60 @@ ${prompt}
               status: success ? "completed" : "failed",
               completedAt: new Date(),
               resultData: {
-                output: task.output,
-                browserUseTaskId: taskResponse.id,
+                output,
+                browserUseSessionId: session.id,
                 liveUrl: session.liveUrl,
+                workspaceId,
               },
             })
             .where(eq(jobs.id, JOB_ID));
         }
 
+        terminalStateHandled = true;
         break;
       }
 
-      if (task.status === "stopped") {
-        await log("Task was stopped");
-        await publishJobEvent({
-          type: "job:failed",
-          jobId: JOB_ID,
-          timestamp: Date.now(),
-          data: { reason: "stopped" },
+      if (browserSession.status === "running") {
+        await publishStatus("running", {
+          stepCount: browserSession.stepCount,
+          lastStepSummary: browserSession.lastStepSummary,
+          liveUrl: browserSession.liveUrl ?? session.liveUrl,
         });
-        break;
       }
+    }
 
-      if (task.status === "paused") {
-        await publishStatus("paused", {
-          message: "Task paused - waiting for intervention",
-        });
+    if (!terminalStateHandled) {
+      const timeoutMessage =
+        "Browser Use session timed out before reaching a terminal state";
+      void currentRunPromise.catch(() => undefined);
+      await log(timeoutMessage, { sessionId: session.id });
+
+      await publishJobEvent({
+        type: "job:failed",
+        jobId: JOB_ID,
+        timestamp: Date.now(),
+        data: { error: timeoutMessage, browserUseSessionId: session.id },
+      });
+
+      await db
+        .update(taxReturns)
+        .set({ status: "failed" })
+        .where(eq(taxReturns.id, TAX_RETURN_ID));
+
+      if (JOB_ID) {
+        await db
+          .update(jobs)
+          .set({
+            status: "failed",
+            completedAt: new Date(),
+            errorMessage: timeoutMessage,
+            resultData: {
+              liveUrl: session.liveUrl,
+              browserUseSessionId: session.id,
+              workspaceId,
+            },
+          })
+          .where(eq(jobs.id, JOB_ID));
       }
     }
 
@@ -646,6 +1011,13 @@ ${prompt}
       await client.stopSession(session.id);
       await log("Session stopped");
     } catch {}
+
+    if (workspaceId) {
+      try {
+        await client.deleteWorkspace(workspaceId);
+        await log("Workspace deleted", { workspaceId });
+      } catch {}
+    }
 
     process.exit(0);
   } catch (err) {

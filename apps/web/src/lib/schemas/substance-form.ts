@@ -230,9 +230,7 @@ export const REQUIRED_FIELDS: (keyof SubstanceFormData)[] = [
   "profitAllocation",
   "isConstituentEntity",
   "relevantActivity",
-  "allBoardMeetingsInGuernsey",
   "totalBoardMeetings",
-  "boardMeetingsInGuernsey",
   "preparedBy",
 ];
 
@@ -414,12 +412,14 @@ export const FORM_SECTIONS = [
     title: "Partnership Information",
     description: "Required if entity is a partnership",
     fields: ["partnershipName", "partnershipNumber"],
-    conditional: (data: Partial<SubstanceFormData>) => data.entityType === "Partnership",
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.entityType === "Partnership",
   },
   {
     id: "financialStatements",
     title: "Financial Statements",
-    description: "Details about the entity's financial statements and key figures",
+    description:
+      "Details about the entity's financial statements and key figures",
     fields: [
       "areFinancialStatementsConsolidated",
       "accountsPreparerName",
@@ -439,23 +439,40 @@ export const FORM_SECTIONS = [
     id: "relevantActivities",
     title: "Relevant Activities",
     description: "Income-generating activities performed by the entity",
-    fields: ["relevantActivity", "hasMultipleRelevantActivities", "hasIntellectualPropertyHolding"],
+    fields: [
+      "relevantActivity",
+      "hasMultipleRelevantActivities",
+      "hasIntellectualPropertyHolding",
+    ],
   },
   {
     id: "intellectualProperty",
     title: "Intellectual Property",
     description: "IP holding company details and high-risk status",
-    fields: ["isHighRiskIpEntity", "wantsToRebutHighRiskStatus", "highRiskRebuttalNarrative", "ipIncomeType"],
+    fields: [
+      "isHighRiskIpEntity",
+      "wantsToRebutHighRiskStatus",
+      "highRiskRebuttalNarrative",
+      "ipIncomeType",
+    ],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity === "Intellectual Property Holding Company" || data.hasIntellectualPropertyHolding === "Yes",
+      data.relevantActivity === "Intellectual Property Holding Company" ||
+      data.hasIntellectualPropertyHolding === "Yes",
   },
   {
     id: "adequacy",
     title: "Adequacy Assessment",
-    description: "Assessment of adequate substance (expenditure and physical presence)",
-    fields: ["hasAdequateExpenditure", "hasAdequatePhysicalPresence", "adequacyExpenditureDetails", "adequacyPhysicalPresenceDetails"],
+    description:
+      "Assessment of adequate substance (expenditure and physical presence)",
+    fields: [
+      "hasAdequateExpenditure",
+      "hasAdequatePhysicalPresence",
+      "adequacyExpenditureDetails",
+      "adequacyPhysicalPresenceDetails",
+    ],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
+      data.relevantActivity !== undefined &&
+      data.relevantActivity !== "None of the above",
   },
   {
     id: "ciga",
@@ -463,7 +480,8 @@ export const FORM_SECTIONS = [
     description: "Details of CIGA performed for the relevant activity",
     fields: ["cigaPerformed", "cigaDetails"],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
+      data.relevantActivity !== undefined &&
+      data.relevantActivity !== "None of the above",
   },
   {
     id: "employees",
@@ -471,7 +489,8 @@ export const FORM_SECTIONS = [
     description: "Full-time equivalent employee calculations",
     fields: ["employees", "totalFte", "totalQualifiedFte"],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
+      data.relevantActivity !== undefined &&
+      data.relevantActivity !== "None of the above",
   },
   {
     id: "outsourcing",
@@ -479,7 +498,8 @@ export const FORM_SECTIONS = [
     description: "Details of any outsourced CIGA",
     fields: ["hasCigaOutsourcing", "outsourcingDetails"],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
+      data.relevantActivity !== undefined &&
+      data.relevantActivity !== "None of the above",
   },
   {
     id: "beneficialOwnership",
@@ -487,7 +507,8 @@ export const FORM_SECTIONS = [
     description: "Parent entities and ultimate beneficial owners",
     fields: ["immediateParents", "ultimateParents", "ultimateBeneficialOwners"],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
+      data.relevantActivity !== undefined &&
+      data.relevantActivity !== "None of the above",
   },
   {
     id: "directedManaged",
@@ -511,7 +532,12 @@ export const FORM_SECTIONS = [
     id: "declaration",
     title: "Declaration",
     description: "Sign-off by preparer and manager",
-    fields: ["preparedBy", "preparedDate", "managerSignOff", "managerSignOffDate"],
+    fields: [
+      "preparedBy",
+      "preparedDate",
+      "managerSignOff",
+      "managerSignOffDate",
+    ],
   },
   {
     id: "countryByCountry",
@@ -522,8 +548,15 @@ export const FORM_SECTIONS = [
   {
     id: "additionalInformation",
     title: "Additional Information",
-    description: "Post balance sheet events, C42 associations, and contract info",
-    fields: ["hasPostBalanceSheetEvent", "postBalanceSheetEventDetails", "hasC42Association", "c42AssociatedCompanies", "contractInformation"],
+    description:
+      "Post balance sheet events, C42 associations, and contract info",
+    fields: [
+      "hasPostBalanceSheetEvent",
+      "postBalanceSheetEventDetails",
+      "hasC42Association",
+      "c42AssociatedCompanies",
+      "contractInformation",
+    ],
   },
 ] as const;
 

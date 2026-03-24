@@ -1,4 +1,13 @@
-import { db, tasks, jobs, taxReturns, substanceForms, organisations, jurisdictions, eq } from "@repo/database";
+import {
+  db,
+  tasks,
+  jobs,
+  taxReturns,
+  substanceForms,
+  organisations,
+  jurisdictions,
+  eq,
+} from "@repo/database";
 import { NextResponse } from "next/server";
 import { launchBrowserTask } from "@/lib/ecs";
 
@@ -40,13 +49,19 @@ export async function POST(request: Request) {
     });
 
     if (!taxReturn) {
-      return NextResponse.json({ error: "Tax return not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Tax return not found" },
+        { status: 404 },
+      );
     }
 
     if (!taxReturn.substanceForm) {
       return NextResponse.json(
-        { error: "Tax return has no substance form. Run fill-form script first." },
-        { status: 400 }
+        {
+          error:
+            "Tax return has no substance form. Run fill-form script first.",
+        },
+        { status: 400 },
       );
     }
 
@@ -69,7 +84,10 @@ export async function POST(request: Request) {
       .returning();
 
     if (!task) {
-      return NextResponse.json({ error: "Failed to create task" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to create task" },
+        { status: 500 },
+      );
     }
 
     // Create job
@@ -79,12 +97,15 @@ export async function POST(request: Request) {
         taskId: task.id,
         jobNumber: 1,
         status: "pending",
-        aiModel: "claude-sonnet-4",
+        aiModel: "bu-max",
       })
       .returning();
 
     if (!job) {
-      return NextResponse.json({ error: "Failed to create job" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to create job" },
+        { status: 500 },
+      );
     }
 
     // Launch ECS task
@@ -137,7 +158,7 @@ export async function POST(request: Request) {
     console.error("Browser task launch error:", error);
     return NextResponse.json(
       { error: "Failed to launch browser task", details: String(error) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

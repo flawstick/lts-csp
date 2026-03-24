@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -62,16 +62,20 @@ export function SidebarFooterSection({
   onLogout,
 }: SidebarFooterSectionProps) {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [feedbackCardDismissed, setFeedbackCardDismissed] = useState(() => {
-    try {
-      return localStorage.getItem("feedback-card-hidden") === "true";
-    } catch {
-      return false;
-    }
-  });
+  const [feedbackCardDismissed, setFeedbackCardDismissed] = useState(false);
   const [feedbackCardHovered, setFeedbackCardHovered] = useState(false);
   const [feedbackDropdownOpen, setFeedbackDropdownOpen] = useState(false);
   const { state: sidebarState } = useSidebar();
+
+  useEffect(() => {
+    try {
+      setFeedbackCardDismissed(
+        localStorage.getItem("feedback-card-hidden") === "true",
+      );
+    } catch {
+      setFeedbackCardDismissed(false);
+    }
+  }, []);
 
   const showFeedbackCard =
     !feedbackCardDismissed && sidebarState !== "collapsed";
@@ -122,20 +126,27 @@ export function SidebarFooterSection({
                   transition={{ duration: 0.18, ease: "easeOut" }}
                   className="absolute top-0 right-3 z-10 -translate-y-1/2"
                 >
-                  <DropdownMenu open={feedbackDropdownOpen} onOpenChange={(open) => {
-                    setFeedbackDropdownOpen(open);
-                    if (!open) setFeedbackCardHovered(false);
-                  }}>
+                  <DropdownMenu
+                    open={feedbackDropdownOpen}
+                    onOpenChange={(open) => {
+                      setFeedbackDropdownOpen(open);
+                      if (!open) setFeedbackCardHovered(false);
+                    }}
+                  >
                     <DropdownMenuTrigger asChild>
                       <button
                         type="button"
                         aria-label="Hide feedback card"
-                        className="cursor-pointer text-muted-foreground hover:text-foreground hover:border-border hover:bg-background border-border/60 bg-sidebar inline-flex h-5 min-w-6 items-center justify-center rounded-full border px-1.5 shadow-sm transition-colors"
+                        className="text-muted-foreground hover:text-foreground hover:border-border hover:bg-background border-border/60 bg-sidebar inline-flex h-5 min-w-6 cursor-pointer items-center justify-center rounded-full border px-1.5 shadow-sm transition-colors"
                       >
                         <Minus className="size-3.5" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" side="top" className="w-44">
+                    <DropdownMenuContent
+                      align="end"
+                      side="top"
+                      className="w-44"
+                    >
                       <DropdownMenuItem
                         onClick={() => {
                           setFeedbackCardDismissed(true);
@@ -150,7 +161,10 @@ export function SidebarFooterSection({
                           setFeedbackCardDismissed(true);
                           setFeedbackCardHovered(false);
                           try {
-                            localStorage.setItem("feedback-card-hidden", "true");
+                            localStorage.setItem(
+                              "feedback-card-hidden",
+                              "true",
+                            );
                           } catch {
                             // ignore
                           }

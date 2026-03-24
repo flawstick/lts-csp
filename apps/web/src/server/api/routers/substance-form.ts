@@ -11,6 +11,7 @@ import {
   getMissingFields,
   type SubstanceFormData,
   CIGA_BY_ACTIVITY,
+  relevantActivityEnum,
 } from "@/lib/schemas/substance-form";
 
 const DEFAULT_CERTIFICATE_TYPE = "Certificate 3";
@@ -21,7 +22,7 @@ function normalizeTaxReferenceNumber(input: {
   taxYear?: number | string | null;
 }) {
   const { taxReferenceNumber, externalId, taxYear } = input;
-  const normalizedExternalId = externalId?.trim().toUpperCase() || "";
+  const normalizedExternalId = externalId?.trim().toUpperCase() ?? "";
   const yearSuffix = taxYear ? `-${String(taxYear).trim()}` : "";
 
   if (normalizedExternalId) {
@@ -38,7 +39,199 @@ function normalizeTaxReferenceNumber(input: {
     .replace(/\s+/g, "")
     .replace(/[^A-Z0-9/-]/g, "");
 
-  return normalizedTaxReference || undefined;
+  return normalizedTaxReference ?? undefined;
+}
+
+const RELEVANT_ACTIVITY_OPTIONS = relevantActivityEnum.options;
+type RelevantActivityOption = (typeof RELEVANT_ACTIVITY_OPTIONS)[number];
+type ExtractionContextSource =
+  | {
+      entityActivity?: string | null;
+      relevantActivity?: string | null;
+      economicClassificationCode?: string | null;
+      cigaPerformed?: string | null;
+      cigaDetails?: string | null;
+    }
+  | null
+  | undefined;
+
+const ECONOMIC_CLASSIFICATION_CODE_PATTERN = /\b\d{1,3}(?:\.\d{1,3})+\b/;
+const ECONOMIC_CLASSIFICATION_CODE_CONTEXT_PATTERN =
+  /\b\d{1,3}(?:\.\d{1,3}){2,}\b/;
+
+const RELEVANT_ACTIVITY_CONTEXT_RULES: Array<{
+  activity: RelevantActivityOption;
+  patterns: RegExp[];
+}> = [
+  {
+    activity: "Self-managed fund",
+    patterns: [
+      /\bself[- ]managed fund\b/i,
+      /\bself managed collective investment\b/i,
+    ],
+  },
+  {
+    activity: "Fund management",
+    patterns: [
+      /\bfund management\b/i,
+      /\binvestment management\b/i,
+      /\bportfolio management\b/i,
+    ],
+  },
+  {
+    activity: "Intellectual Property Holding Company",
+    patterns: [
+      /\bintellectual property\b/i,
+      /\broyalt(?:y|ies)\b/i,
+      /\blicen[cs](?:e|ing)\b/i,
+      /\bpatent\b/i,
+      /\btrademark\b/i,
+    ],
+  },
+  {
+    activity: "Pure Equity Holding Company",
+    patterns: [
+      /\bpure equity\b/i,
+      /\bequity holding\b/i,
+      /\bshareholding\b/i,
+      /\bdividend income\b/i,
+      /\bshares in subsidiaries\b/i,
+    ],
+  },
+  {
+    activity: "Banking",
+    patterns: [
+      /\bbanking\b/i,
+      /\bdeposit(?: |-)?taking\b/i,
+      /\bcredit institution\b/i,
+      /\bloan book\b/i,
+    ],
+  },
+  {
+    activity: "Insurance",
+    patterns: [/\binsurance\b/i, /\breinsurance\b/i, /\bund(er)?writing\b/i],
+  },
+  {
+    activity: "Financing and leasing",
+    patterns: [
+      /\bfinancing\b/i,
+      /\bleasing\b/i,
+      /\blease agreements?\b/i,
+      /\blending\b/i,
+      /\bcredit facilities?\b/i,
+    ],
+  },
+  {
+    activity: "Distribution and Service Centre",
+    patterns: [
+      /\bdistribution and service centre\b/i,
+      /\bservice centre\b/i,
+      /\bdistribution centre\b/i,
+      /\bprocurement services\b/i,
+      /\badministrative services to group\b/i,
+    ],
+  },
+  {
+    activity: "Headquarters",
+    patterns: [
+      /\bheadquarters\b/i,
+      /\bhead office\b/i,
+      /\bgroup headquarters\b/i,
+    ],
+  },
+  {
+    activity: "Shipping",
+    patterns: [/\bshipping\b/i, /\bmaritime\b/i, /\bvessel\b/i, /\bcharter\b/i],
+  },
+];
+
+function normalizeEconomicClassificationCode(value?: string | null) {
+  if (!value) return undefined;
+  const match = ECONOMIC_CLASSIFICATION_CODE_PATTERN.exec(value);
+  return match?.[0];
+}
+
+function findEconomicClassificationCodeFromContext(
+  ...contexts: Array<string | null | undefined>
+) {
+  const combined = contexts
+    .filter(
+      (context): context is string => !!context && context.trim().length > 0,
+    )
+    .join("\n");
+
+  if (!combined) {
+    return undefined;
+  }
+
+  const labeledMatch =
+    /(?:economic classification code|company activity code|activity code|classification code|economic code)[^0-9]{0,50}(\d{1,3}(?:\.\d{1,3})+\b)/i.exec(
+      combined,
+    );
+
+  if (labeledMatch?.[1]) {
+    return labeledMatch[1];
+  }
+
+  return ECONOMIC_CLASSIFICATION_CODE_CONTEXT_PATTERN.exec(combined)?.[0];
+}
+
+function inferRelevantActivityFromContext(
+  ...contexts: Array<string | null | undefined>
+): RelevantActivityOption | undefined {
+  const snippets = contexts.filter(
+    (context): context is string =>
+      typeof context === "string" && context.trim().length > 0,
+  );
+
+  for (const snippet of snippets) {
+    const exact = RELEVANT_ACTIVITY_OPTIONS.find(
+      (option) => snippet.trim().toLowerCase() === option.toLowerCase(),
+    );
+    if (exact) {
+      return exact;
+    }
+  }
+
+  const combined = snippets.join("\n");
+  if (!combined) {
+    return undefined;
+  }
+
+  for (const rule of RELEVANT_ACTIVITY_CONTEXT_RULES) {
+    if (rule.patterns.some((pattern) => pattern.test(combined))) {
+      return rule.activity;
+    }
+  }
+
+  return undefined;
+}
+
+function buildExistingExtractionContext(form: ExtractionContextSource) {
+  if (!form) {
+    return "";
+  }
+
+  const lines = [
+    form.entityActivity
+      ? `- Existing entityActivity: ${form.entityActivity}`
+      : null,
+    form.relevantActivity
+      ? `- Existing relevantActivity: ${form.relevantActivity}`
+      : null,
+    form.economicClassificationCode
+      ? `- Existing economicClassificationCode: ${form.economicClassificationCode}`
+      : null,
+    form.cigaPerformed
+      ? `- Existing cigaPerformed: ${form.cigaPerformed}`
+      : null,
+  ].filter(Boolean);
+
+  if (!lines.length) {
+    return "";
+  }
+
+  return `Use this saved form context as prior context when the new files are ambiguous or incomplete:\n${lines.join("\n")}`;
 }
 
 // AI Extraction Schema - Uses inline enums to avoid Zod v4 JSON schema conversion issues
@@ -86,7 +279,7 @@ const aiExtractionSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Economic classification code / Company Activity Code — REQUIRED for 2025 returns, this is a dropdown on the portal",
+      'Economic classification code / Company Activity Code — REQUIRED for 2025 returns. It usually looks like a dotted numeric code such as "10.5.4". Return only the dotted code.',
     ),
   certificateType: z
     .string()
@@ -173,7 +366,9 @@ const aiExtractionSchema = z.object({
       "None of the above",
     ])
     .optional()
-    .describe("Primary relevant activity from the dropdown options"),
+    .describe(
+      "Primary relevant activity from the dropdown options. Use existing form context and the entity activity/business description if the documents are ambiguous.",
+    ),
   hasMultipleRelevantActivities: z
     .enum(["Yes", "No"])
     .optional()
@@ -446,7 +641,7 @@ export const substanceFormRouter = createTRPCRouter({
             where: eq(organisations.id, taxReturn.orgId),
           })
         : null;
-      const preparedByName = org?.accountName || org?.name || "LTS Tax Limited";
+      const preparedByName = org?.accountName ?? org?.name ?? "LTS Tax Limited";
 
       // Check if form already exists
       const existing = await ctx.db.query.substanceForms.findFirst({
@@ -560,7 +755,7 @@ export const substanceFormRouter = createTRPCRouter({
             where: eq(organisations.id, taxReturn.orgId),
           })
         : null;
-      const preparedByName = org?.accountName || org?.name || "LTS Tax Limited";
+      const preparedByName = org?.accountName ?? org?.name ?? "LTS Tax Limited";
 
       // Get existing form or create one
       let form = await ctx.db.query.substanceForms.findFirst({
@@ -583,7 +778,10 @@ export const substanceFormRouter = createTRPCRouter({
             missingFields: getMissingFields({}),
           })
           .returning();
-        form = newForm!;
+        if (!newForm) {
+          throw new Error("Failed to create substance form");
+        }
+        form = newForm;
       }
 
       // Track AI extraction start
@@ -618,7 +816,7 @@ export const substanceFormRouter = createTRPCRouter({
       for (const url of input.fileUrls) {
         const response = await fetch(url);
         const mediaType =
-          response.headers.get("content-type") || "application/pdf";
+          response.headers.get("content-type") ?? "application/pdf";
         const buffer = await response.arrayBuffer();
 
         // Handle Excel files - convert to CSV
@@ -707,10 +905,13 @@ export const substanceFormRouter = createTRPCRouter({
             `${activity}:\n  - ${options.join("\n  - ")}`,
         )
         .join("\n\n");
+      const existingContextText = buildExistingExtractionContext(form);
 
       const prompt = `You are an expert at extracting information from financial and corporate documents for Guernsey Economic Substance Register reporting.
 
 Analyze the provided document(s) and extract all relevant information to fill out a Guernsey Economic Substance Register form.
+
+${existingContextText ? `=== EXISTING FORM CONTEXT ===\n${existingContextText}\n` : ""}
 
 === FORM STRUCTURE ===
 
@@ -809,11 +1010,11 @@ IMPORTANT RULES:
 - If total profit is negative (a loss), return "0". The portal does not accept negative values.
 - If net book value is negative, return "0".
 - profitAllocation is REQUIRED — always pick "Investment" or "Business" based on the entity's income type.
-- economicClassificationCode is REQUIRED for 2025 returns. Always try to extract this.
+- economicClassificationCode is REQUIRED for 2025 returns. It usually looks like a dotted numeric code such as "10.5.4". Look specifically for dot-separated numeric codes near labels like "Economic Classification Code" or "Company Activity Code", and return only the dotted code.
 - isConstituentEntity (CbCR) is REQUIRED for 2025 returns — default to "No" if not stated.
 - accountsPreparerName is the ACCOUNTANT who prepared the financial accounts, NOT "LTS Tax Limited".
-- relevantActivity is REQUIRED — pick the single most applicable option. If none apply, use "None of the above".
-- allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey — always try to extract from minutes or directors reports.
+- relevantActivity is REQUIRED — pick the single most applicable option. Use the saved form context plus the entity activity/business description if the new documents are ambiguous. If the existing saved form already identifies the relevant activity and the new files do not clearly contradict it, keep that activity.
+- allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey are helpful but not required. Extract them when the documents state them, otherwise leave them empty.
 - If the entity has no relevant activity ("None of the above"), leave sections 6B, 7, 8, 9, and 10 empty.`;
 
       console.log(
@@ -861,6 +1062,7 @@ IMPORTANT RULES:
         Object.keys(result.object).length,
       );
       const extractedData = result.object;
+      const extractedTextContext = textContents.map((content) => content.text);
 
       // Apply defaults for fields that should have default values
 
@@ -875,14 +1077,10 @@ IMPORTANT RULES:
       });
 
       // Default preparedBy to org account name if not extracted
-      if (!extractedData.preparedBy) {
-        extractedData.preparedBy = preparedByName;
-      }
+      extractedData.preparedBy ??= preparedByName;
 
       // Default profitAllocation to "Investment" if not extracted
-      if (!extractedData.profitAllocation) {
-        extractedData.profitAllocation = "Investment";
-      }
+      extractedData.profitAllocation ??= "Investment";
 
       // Clamp negative financial values to "0" — portal does not accept negatives
       if (extractedData.totalProfit) {
@@ -903,12 +1101,8 @@ IMPORTANT RULES:
       }
 
       // FATCA/CRS defaults — "No" when not a financial institution
-      if (!extractedData.isGuernseyFiFatca) {
-        extractedData.isGuernseyFiFatca = "No";
-      }
-      if (!extractedData.isGuernseyFiCrs) {
-        extractedData.isGuernseyFiCrs = "No";
-      }
+      extractedData.isGuernseyFiFatca ??= "No";
+      extractedData.isGuernseyFiCrs ??= "No";
 
       // IGOR: "Yes" if FI under FATCA or CRS, "No" otherwise
       if (!extractedData.isRegisteredOnIgor) {
@@ -923,8 +1117,36 @@ IMPORTANT RULES:
       }
 
       // CbCR — default to "No" for 2025 returns
-      if (!extractedData.isConstituentEntity) {
-        extractedData.isConstituentEntity = "No";
+      extractedData.isConstituentEntity ??= "No";
+
+      extractedData.economicClassificationCode =
+        normalizeEconomicClassificationCode(
+          extractedData.economicClassificationCode,
+        ) ??
+        findEconomicClassificationCodeFromContext(
+          extractedData.entityActivity,
+          form.entityActivity,
+          ...extractedTextContext,
+        ) ??
+        normalizeEconomicClassificationCode(form.economicClassificationCode);
+
+      const contextualRelevantActivity = inferRelevantActivityFromContext(
+        extractedData.relevantActivity,
+        form.relevantActivity,
+        extractedData.entityActivity,
+        form.entityActivity,
+        extractedData.cigaPerformed,
+        extractedData.cigaDetails,
+        ...extractedTextContext,
+      );
+
+      if (
+        !extractedData.relevantActivity ||
+        (extractedData.relevantActivity === "None of the above" &&
+          contextualRelevantActivity &&
+          contextualRelevantActivity !== "None of the above")
+      ) {
+        extractedData.relevantActivity = contextualRelevantActivity;
       }
 
       // Merge with existing data (AI data fills in gaps)
@@ -988,7 +1210,9 @@ IMPORTANT RULES:
       return {
         exists: true,
         isComplete: form.isComplete ?? false,
-        missingFields: (form.missingFields as string[]) ?? [],
+        missingFields: Array.isArray(form.missingFields)
+          ? form.missingFields
+          : [],
       };
     }),
 

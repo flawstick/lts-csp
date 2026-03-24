@@ -4,7 +4,7 @@ import type { SyncedTaxReturn, SyncLogger } from "./types";
 
 const ITEMS_PER_PAGE = 50;
 const MAX_PAGES = 100;
-const BASE_URL = "https://my.gov.gg/revenue/employee-assigned-cases";
+const BASE_URL = "https://my.gov.gg/revenue/all-cases";
 
 function getHeaders(sessionCookies: string) {
   return {

@@ -147,8 +147,8 @@ The Guernsey Economic Substance Register (ESR) return has 14 sections:
 - **Ultimate Beneficial Owners** — array with name, date of birth, place of birth, nationality, country of tax residence, TIN, address
 
 ### Section 12: Directed and Managed in Guernsey
-- **All Board Meetings in Guernsey?** — Yes/No (required)
-- **Total Board Meetings** (required), **Board Meetings in Guernsey** (required)
+- **All Board Meetings in Guernsey?** — Yes/No
+- **Total Board Meetings**, **Board Meetings in Guernsey**
 - **Adequate Meeting Frequency?**, **Enough Directors Present?**, **Directors Have Expertise?** — Yes/No/N/A
 - **Strategic Decisions Made in Guernsey?**, **Records Maintained in Guernsey?** — Yes/No/N/A
 - **Board Meeting Location**, **Directors** list, **Board Meetings** list with dates/attendees/agenda
@@ -283,7 +283,9 @@ function buildContextBlock(ctx: ChatContext): string {
   if (ctx.currentReturn) {
     const r = ctx.currentReturn;
     lines.push(`- **Current Return**: ${r.entityName} (${r.taxYear})`);
-    lines.push(`  - Jurisdiction: ${r.jurisdictionName} (${r.jurisdictionCode})`);
+    lines.push(
+      `  - Jurisdiction: ${r.jurisdictionName} (${r.jurisdictionCode})`,
+    );
     lines.push(`  - Type: ${r.returnType}`);
     lines.push(`  - Status: ${r.status}`);
     lines.push(`  - Return ID: ${r.id}`);

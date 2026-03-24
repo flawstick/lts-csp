@@ -263,9 +263,7 @@ export const REQUIRED_FIELDS: (keyof SubstanceFormData)[] = [
   "profitAllocation",
   "isConstituentEntity",
   "relevantActivity",
-  "allBoardMeetingsInGuernsey",
   "totalBoardMeetings",
-  "boardMeetingsInGuernsey",
   "preparedBy",
   "preparedDate",
 ];
@@ -337,7 +335,8 @@ export const FIELD_LABELS: Record<string, string> = {
   partnershipNumber: "Partnership Number",
   isSolelyGuernseyPartners: "Solely Guernsey Individual Partners?",
   partnershipActivitiesWhollyInGuernsey: "Activities Wholly in Guernsey?",
-  partnershipPoeMOutsideGuernsey: "Place of Effective Management Outside Guernsey?",
+  partnershipPoeMOutsideGuernsey:
+    "Place of Effective Management Outside Guernsey?",
 
   // Financial Statements
   areFinancialStatementsConsolidated: "Are Financial Statements Consolidated?",
@@ -464,7 +463,8 @@ export const FORM_SECTIONS = [
       "taxReferenceNumber",
       "beneficialMemberCategories",
     ],
-    conditional: (data: Partial<SubstanceFormData>) => data.entityType === "Company",
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.entityType === "Company",
   },
   {
     id: "partnershipInfo",
@@ -478,7 +478,8 @@ export const FORM_SECTIONS = [
       "partnershipActivitiesWhollyInGuernsey",
       "partnershipPoeMOutsideGuernsey",
     ],
-    conditional: (data: Partial<SubstanceFormData>) => data.entityType === "Partnership",
+    conditional: (data: Partial<SubstanceFormData>) =>
+      data.entityType === "Partnership",
   },
   {
     id: "financialStatements",
@@ -535,7 +536,8 @@ export const FORM_SECTIONS = [
   {
     id: "economicSubstance",
     title: "Economic Substance",
-    description: "Relevant activities and core income generating activities (CIGA)",
+    description:
+      "Relevant activities and core income generating activities (CIGA)",
     fields: [
       "relevantActivity",
       "cigaCheckboxes",
@@ -560,7 +562,8 @@ export const FORM_SECTIONS = [
       "outsourcingDetails",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
+      data.relevantActivity !== undefined &&
+      data.relevantActivity !== "None of the above",
   },
   {
     id: "economicSubstance2",
@@ -572,7 +575,8 @@ export const FORM_SECTIONS = [
       "secondCigaCheckboxes",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
+      data.relevantActivity !== undefined &&
+      data.relevantActivity !== "None of the above",
   },
   {
     id: "intellectualProperty",
@@ -586,7 +590,8 @@ export const FORM_SECTIONS = [
       "ipIncomeType",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity === "Intellectual Property Holding Company" || data.hasIntellectualPropertyHolding === "Yes",
+      data.relevantActivity === "Intellectual Property Holding Company" ||
+      data.hasIntellectualPropertyHolding === "Yes",
   },
 
   // ── Ownership & Governance ───────────────────────────────────────────
@@ -601,7 +606,8 @@ export const FORM_SECTIONS = [
       "ultimateBeneficialOwners",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity !== undefined && data.relevantActivity !== "None of the above",
+      data.relevantActivity !== undefined &&
+      data.relevantActivity !== "None of the above",
   },
   {
     id: "directedManaged",

@@ -48,6 +48,7 @@ interface BoardMeeting {
 interface SessionInputFile {
   originalName: string;
   sessionFileName: string;
+  sessionFilePath: string;
   category?: string;
   role?: string;
 }
@@ -63,6 +64,11 @@ interface PromptBuilderOptions {
 }
 
 const DEFAULT_CERTIFICATE_TYPE = "Certificate 3";
+const INFERABLE_FIELDS = new Set([
+  "entityActivity",
+  "relevantActivity",
+  "hasIntellectualPropertyHolding",
+]);
 
 /**
  * Builds the main AI prompt for filling out the Guernsey Economic Substance Register
@@ -81,6 +87,15 @@ export function buildSubstanceFormPrompt(
   } = options;
 
   const sections: string[] = [];
+  const missingFields = Array.isArray(substanceForm.missingFields)
+    ? substanceForm.missingFields
+    : [];
+  const inferableMissingFields = missingFields.filter((field) =>
+    INFERABLE_FIELDS.has(field),
+  );
+  const blockingMissingFields = missingFields.filter(
+    (field) => !INFERABLE_FIELDS.has(field),
+  );
 
   // Header and navigation
   sections.push(`
@@ -110,25 +125,41 @@ If prompted for CSP or secret credentials:
 **COMPLETION:** Double-check all fields before moving to the next section. Do not leave any fields empty - fill them with the data provided below or mark as N/A if truly not applicable.
 
 **IF STUCK:** If you cannot complete a field or encounter an error you cannot resolve, pause the task and report the issue for user intervention.
+
+**SUMMARY PAGE SAFETY:** If the portal lands on a page ending in **reviewAndSubmit/summary**, treat it as a saved draft summary. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action from that page. Use the summary page's **Change** or **Edit** links to re-enter the filing sections and continue the return.
+
+**TAB / BLANK PAGE RECOVERY:** Use Browser Use native tools only: **switch**, **close**, **navigate**, **go_back**, **click**, **input**, **upload_file**, **evaluate**, **screenshot**. Do **NOT** use Python or browser-wrapper tab recovery helpers such as **get_tabs**. If a bad click opens a stray tab or leaves you on **about:blank**, use **switch** or **close** to get back to the main Guernsey portal tab. If that fails quickly, use **navigate** to return to the filing URL and continue.
+
+## INFERENCE RULES FOR GUERNSEY FILING
+- If the portal asks for **Entity Activity** or **Relevant Company Activity** and the saved value is blank, weak, or "None of the above", infer a short, plausible business description from the rest of the context. Use the company name, relevant activity, economic classification code, accounts data, and any other form details. Do NOT pause just because this field was not explicitly provided.
+- If the portal asks **Has Intellectual Property Holding?** and the saved answer is missing, infer it from context instead of pausing.
+- Answer **"Yes"** for intellectual property holding only if the context clearly suggests IP ownership or exploitation, such as licensing, royalties, trademarks, patents, brands, software IP, or an Intellectual Property Holding Company relevant activity.
+- Otherwise answer **"No"** for intellectual property holding.
+- Prefer a reasonable inferred answer over stopping the task. Only pause if the portal blocks progress after you have already made the best inference from the provided context.
 ${
   financialStatementsFile && financialStatementsUrl
     ? `
 
 ## FINANCIAL STATEMENTS PDF — CRITICAL: DO NOT SKIP THIS
 - File: "${financialStatementsFile.originalName}"
-- Download URL: ${financialStatementsUrl}
+- Uploaded Browser Use workspace file: "${financialStatementsFile.sessionFileName}"
+- Uploaded Browser Use workspace path: "${financialStatementsFile.sessionFilePath}"
+- Download URL fallback: ${financialStatementsUrl}
 
 **PORTAL FLOW FOR FINANCIAL STATEMENTS (Upload Accounts section):**
 1. When the portal asks if financial statements are available online, select **"No"**.
 2. A file upload input will appear.
-3. To upload the file, use **run_javascript** with this EXACT script:
+3. Use Browser Use's **upload_file** tool on the visible file input as the PRIMARY method, with the uploaded workspace path "${financialStatementsFile.sessionFilePath}".
+4. After using **upload_file**, visually confirm that the control no longer says **"No file chosen"** and that a filename is shown.
+5. If the control still says **"No file chosen"** or no filename is visible, the upload did NOT work yet. Do NOT continue.
+6. If **upload_file** fails or the control still shows **"No file chosen"**, use Browser Use's **evaluate** tool with this EXACT script:
 
-fetch('${financialStatementsUrl}').then(r=>r.blob()).then(blob=>{const f=new File([blob],'${financialStatementsFile.originalName}',{type:'application/pdf'});const d=new DataTransfer();d.items.add(f);const i=document.querySelector('input[type="file"]');if(i){i.files=d.files;i.dispatchEvent(new Event('change',{bubbles:true}))}})
+fetch('${financialStatementsUrl}').then(r=>r.blob()).then(blob=>{const f=new File([blob],'${financialStatementsFile.originalName}',{type:'application/pdf'});const d=new DataTransfer();d.items.add(f);const i=document.querySelector('input[type=\"file\"]');if(i){i.files=d.files;i.dispatchEvent(new Event('change',{bubbles:true}))}})
 
-4. After running the script, verify the file name appears next to the upload input.
-5. If run_javascript is not available, try **upload_file** with path "${financialStatementsFile.sessionFileName}" instead.
-6. Do NOT skip this section. Do NOT select "Yes". Do NOT move past without uploading the file.
-7. If neither approach works, STOP and report "REQUIRES_ATTENTION: Financial statements upload failed".
+7. After **evaluate**, verify again that the control no longer says **"No file chosen"**.
+8. Only once a filename is visible should you leave **"Would you like to upload another file?"** as **"No"** and click Save/Continue.
+9. Never leave the Accounts upload step while the control still says **"No file chosen"**. If the portal somehow advances without a file attached, go back and upload it before continuing.
+10. If neither **upload_file** nor **evaluate** works, STOP and report "REQUIRES_ATTENTION: Financial statements upload failed".
 `
     : `
 
@@ -205,12 +236,20 @@ The entity has no relevant activity — Adequacy Assessment, CIGA, Employees (FT
   // Section 14: Additional Information
   sections.push(buildAdditionalInfoSection(substanceForm));
 
+  if (inferableMissingFields.length > 0) {
+    sections.push(`
+## INFER THESE MISSING FIELDS FROM CONTEXT
+Do NOT stop for these fields. Infer the best answer from the rest of the form context and continue:
+${inferableMissingFields.map((f) => `- ${f}`).join("\n")}
+`);
+  }
+
   // Missing fields warning
-  if (substanceForm.missingFields && substanceForm.missingFields.length > 0) {
+  if (blockingMissingFields.length > 0) {
     sections.push(`
 ## ⚠️ MISSING INFORMATION
 The following fields are missing data. When you encounter these fields, STOP and report "REQUIRES_ATTENTION" with the field name:
-${substanceForm.missingFields.map((f) => `- ${f}`).join("\n")}
+${blockingMissingFields.map((f) => `- ${f}`).join("\n")}
 `);
   }
 
@@ -290,7 +329,8 @@ ${field("Profit Before Tax Allocation", form.profitAllocation)}
 - Net Book Value and Total Profit: if the value is negative (a loss), enter **0**. The portal does not accept negative values.
 - Profit Before Tax Allocation is REQUIRED — must be either "Investment" or "Business".
 - Accounts Preparer Name/Qualification is the ACCOUNTANT who prepared the financial statements, NOT LTS Tax.
-- **FINANCIAL STATEMENTS UPLOAD:** When the portal asks if financial statements are available online, select **"No"** and then upload the PDF using the run_javascript method described in the FINANCIAL STATEMENTS PDF section above. DO NOT SKIP THIS.
+- **FINANCIAL STATEMENTS UPLOAD:** When the portal asks if financial statements are available online, select **"No"** and then use **upload_file** on the visible file input with the preloaded Browser Use workspace PDF described above. If the control still shows **"No file chosen"**, use **evaluate** as fallback. Do NOT click Save/Continue until a filename is visible.
+- If you reach **reviewAndSubmit/summary** before verifying this upload, go back into the filing using a **Change/Edit** link and return to the Financial Statements / Accounts section before continuing.
 `;
 }
 
@@ -331,6 +371,11 @@ ${field("Adequacy Physical Presence Details", form.adequacyPhysicalPresenceDetai
 ${field("Relevant Activity", form.relevantActivity)}
 ${field("Has Multiple Relevant Activities", form.hasMultipleRelevantActivities)}
 ${field("Has Intellectual Property Holding", form.hasIntellectualPropertyHolding)}
+
+**IMPORTANT:**
+- If the portal requires a business description such as "Entity Activity" or "Relevant Company Activity", infer a concise description from the broader context even if the saved value is blank or "None of the above".
+- If "Has Intellectual Property Holding" is missing, infer it from context. Default to **"No"** unless the form context clearly indicates IP ownership, licensing, royalties, trademarks, patents, brands, software IP, or an Intellectual Property Holding Company activity.
+- If you encounter the final summary page while Section 6 has not been checked in this run, do **NOT** submit from there. Use a **Change/Edit** link to return to the relevant activities section and continue filling the form.
 ${ipSection}
 `;
 }
