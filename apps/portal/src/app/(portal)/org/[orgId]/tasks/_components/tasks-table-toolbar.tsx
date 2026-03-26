@@ -20,7 +20,12 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
-import type { StatusFilter, TaskFilter, TaskKind } from "./tasks-table-utils";
+import type {
+  StatusFilter,
+  TaskFilter,
+  TaskKind,
+  TaxYearFilter,
+} from "./tasks-table-utils";
 import { STATUS_OPTIONS, TASK_LABEL } from "./tasks-table-utils";
 
 type Props = {
@@ -32,6 +37,9 @@ type Props = {
   onStatusFilterChange: (value: StatusFilter) => void;
   jurisdictionFilter: string;
   onJurisdictionFilterChange: (value: string) => void;
+  taxYearFilter: TaxYearFilter;
+  onTaxYearFilterChange: (value: TaxYearFilter) => void;
+  taxYearOptions: number[];
   jurisdictions: Array<{ code: string; name: string }>;
   filteredCount: number;
   totalCount: number;
@@ -49,6 +57,9 @@ export function TasksTableToolbar({
   onStatusFilterChange,
   jurisdictionFilter,
   onJurisdictionFilterChange,
+  taxYearFilter,
+  onTaxYearFilterChange,
+  taxYearOptions,
   jurisdictions,
   filteredCount,
   totalCount,
@@ -158,6 +169,28 @@ export function TasksTableToolbar({
               </SelectContent>
             </Select>
           ) : null}
+
+          <Select
+            value={taxYearFilter}
+            onValueChange={(value) =>
+              onTaxYearFilterChange(value as TaxYearFilter)
+            }
+          >
+            <SelectTrigger
+              aria-label="Filter by tax year"
+              className="bg-background h-9 w-[140px] text-sm"
+            >
+              <SelectValue placeholder="Tax year" />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="all">All years</SelectItem>
+              {taxYearOptions.map((year) => (
+                <SelectItem key={year} value={`${year}`}>
+                  {year}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {hasFilters ? (
             <Button

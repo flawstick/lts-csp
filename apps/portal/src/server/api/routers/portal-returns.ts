@@ -571,6 +571,45 @@ async function assertActiveMembership(ctx: {
   return membership;
 }
 
+async function getPortalReturnForOrg(ctx: {
+  db: TRPCContext["db"];
+  orgId: string;
+  taxReturnId: string;
+}) {
+  return ctx.db.query.taxReturns.findFirst({
+    where: and(
+      eq(taxReturns.id, ctx.taxReturnId),
+      eq(taxReturns.orgId, ctx.orgId),
+    ),
+    with: {
+      jurisdiction: true,
+    },
+  });
+}
+
+function assertGuernseyPortalReturnUnlocked(
+  returnRecord:
+    | {
+        status: string;
+        returnType: string | null;
+        jurisdiction?: { code: string } | null;
+      }
+    | null
+    | undefined,
+) {
+  if (
+    returnRecord?.jurisdiction?.code === "GG" &&
+    returnRecord.returnType === "economic_substance" &&
+    returnRecord.status === "completed"
+  ) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "This Guernsey ESR is locked because the return is already completed in the Guernsey Tax Portal.",
+    });
+  }
+}
+
 export const portalReturnsRouter = createTRPCRouter({
   sidebarJurisdictions: protectedProcedure
     .input(
@@ -892,11 +931,10 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -905,6 +943,8 @@ export const portalReturnsRouter = createTRPCRouter({
           message: "Return not found.",
         });
       }
+
+      assertGuernseyPortalReturnUnlocked(returnRecord);
 
       const form = await ctx.db.query.substanceForms.findFirst({
         where: eq(substanceForms.taxReturnId, input.taxReturnId),
@@ -928,11 +968,10 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -941,6 +980,8 @@ export const portalReturnsRouter = createTRPCRouter({
           message: "Return not found.",
         });
       }
+
+      assertGuernseyPortalReturnUnlocked(returnRecord);
 
       const existing = await ctx.db.query.substanceForms.findFirst({
         where: eq(substanceForms.taxReturnId, input.taxReturnId),
@@ -994,11 +1035,10 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -1007,6 +1047,8 @@ export const portalReturnsRouter = createTRPCRouter({
           message: "Return not found.",
         });
       }
+
+      assertGuernseyPortalReturnUnlocked(returnRecord);
 
       const existing = await ctx.db.query.substanceForms.findFirst({
         where: eq(substanceForms.taxReturnId, input.taxReturnId),
@@ -1265,11 +1307,10 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -1278,6 +1319,8 @@ export const portalReturnsRouter = createTRPCRouter({
           message: "Return not found.",
         });
       }
+
+      assertGuernseyPortalReturnUnlocked(returnRecord);
 
       const existingFiles = returnRecord.files ?? [];
       const uploadedAt = new Date().toISOString();
@@ -1324,11 +1367,10 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -1337,6 +1379,8 @@ export const portalReturnsRouter = createTRPCRouter({
           message: "Return not found.",
         });
       }
+
+      assertGuernseyPortalReturnUnlocked(returnRecord);
 
       const existingFiles = returnRecord.files ?? [];
       const hasTargetFile = existingFiles.some(
@@ -1398,11 +1442,10 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -1411,6 +1454,8 @@ export const portalReturnsRouter = createTRPCRouter({
           message: "Return not found.",
         });
       }
+
+      assertGuernseyPortalReturnUnlocked(returnRecord);
 
       const existingFiles = returnRecord.files ?? [];
       const updatedFiles = existingFiles.filter(
@@ -1455,11 +1500,10 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -1468,6 +1512,8 @@ export const portalReturnsRouter = createTRPCRouter({
           message: "Return not found.",
         });
       }
+
+      assertGuernseyPortalReturnUnlocked(returnRecord);
 
       const existingMetadata: Record<string, unknown> =
         returnRecord.metadata && typeof returnRecord.metadata === "object"

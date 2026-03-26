@@ -197,6 +197,14 @@ export default function ReturnWorkspacePage() {
   const selectedStatus = selectedReturn
     ? normalizeStatus(selectedReturn.status)
     : "pending";
+  const isGuernseyEsrLocked = Boolean(
+    selectedReturn &&
+      selectedReturn.jurisdictionCode === "GG" &&
+      selectedReturn.returnType === "economic_substance" &&
+      selectedStatus === "completed",
+  );
+  const guernseyLockMessage =
+    "This Guernsey ESR is locked because the return is already completed in the Guernsey Tax Portal.";
   const draftMissingFields = useMemo(
     () => getMissingFields(draftForm),
     [draftForm],
@@ -227,6 +235,10 @@ export default function ReturnWorkspacePage() {
       return;
     }
 
+    if (isGuernseyEsrLocked) {
+      throw new Error(guernseyLockMessage);
+    }
+
     await createSubstanceFormMutation.mutateAsync({
       orgId,
       taxReturnId: selectedReturn.id,
@@ -238,6 +250,10 @@ export default function ReturnWorkspacePage() {
     successMessage?: string,
   ) => {
     if (!selectedReturn) return;
+    if (isGuernseyEsrLocked) {
+      showMessage(guernseyLockMessage);
+      return;
+    }
 
     await ensureSubstanceFormExists();
     await updateSubstanceFormMutation.mutateAsync({
@@ -253,6 +269,10 @@ export default function ReturnWorkspacePage() {
 
   const handleUploadFiles = async (files: File[]) => {
     if (!selectedReturn || !files.length) return;
+    if (isGuernseyEsrLocked) {
+      showMessage(guernseyLockMessage);
+      return;
+    }
 
     setIsUploadingFiles(true);
     setUploadedFileUrls(null);
@@ -295,9 +315,13 @@ export default function ReturnWorkspacePage() {
   const handleRunAiExtraction = async () => {
     if (
       !selectedReturn ||
+      isGuernseyEsrLocked ||
       aiExtractionLockRef.current ||
       extractSubstanceFormMutation.isPending
     ) {
+      if (isGuernseyEsrLocked) {
+        showMessage(guernseyLockMessage);
+      }
       return;
     }
 
@@ -335,6 +359,10 @@ export default function ReturnWorkspacePage() {
 
   const handleAssignFinancialStatements = async (fileUrl: string) => {
     if (!selectedReturn) return;
+    if (isGuernseyEsrLocked) {
+      showMessage(guernseyLockMessage);
+      return;
+    }
 
     try {
       await assignDocumentRoleMutation.mutateAsync({
@@ -357,6 +385,10 @@ export default function ReturnWorkspacePage() {
 
   const handleUnassignFinancialStatements = async (fileUrl: string) => {
     if (!selectedReturn) return;
+    if (isGuernseyEsrLocked) {
+      showMessage(guernseyLockMessage);
+      return;
+    }
 
     try {
       await assignDocumentRoleMutation.mutateAsync({
@@ -378,6 +410,10 @@ export default function ReturnWorkspacePage() {
 
   const handleRemoveDocument = async (fileUrl: string) => {
     if (!selectedReturn) return;
+    if (isGuernseyEsrLocked) {
+      showMessage(guernseyLockMessage);
+      return;
+    }
 
     try {
       await removeDocumentMutation.mutateAsync({
@@ -508,6 +544,8 @@ export default function ReturnWorkspacePage() {
           onOpenFinishSheet={() => {
             router.push(`/org/${orgId}/returns/${returnId}/guided-finish`);
           }}
+          isReadOnly={isGuernseyEsrLocked}
+          readOnlyMessage={guernseyLockMessage}
           onDismiss={() =>
             dismissMutation.mutate({ orgId, taxReturnId: returnId })
           }
@@ -581,6 +619,8 @@ export default function ReturnWorkspacePage() {
               savingSection={savingSection}
               isUpdating={updateSubstanceFormMutation.isPending}
               isInitializing={createSubstanceFormMutation.isPending}
+              isReadOnly={isGuernseyEsrLocked}
+              readOnlyMessage={guernseyLockMessage}
               onInitForm={() => {
                 void handleInitForm();
               }}
@@ -602,6 +642,8 @@ export default function ReturnWorkspacePage() {
               isExtractPending={isAiExtractionPending}
               isAssignPending={assignDocumentRoleMutation.isPending}
               uploadedFileUrls={uploadedFileUrls}
+              isReadOnly={isGuernseyEsrLocked}
+              readOnlyMessage={guernseyLockMessage}
               onUploadFiles={(files) => {
                 void handleUploadFiles(files);
               }}

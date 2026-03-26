@@ -67,6 +67,8 @@ type ReturnFilesTabProps = {
   onRunAiExtraction: () => void;
   onRemoveDocument: (fileUrl: string) => void;
   onUnassignFinancialStatements: (fileUrl: string) => void;
+  isReadOnly?: boolean;
+  readOnlyMessage?: string;
 };
 
 export function ReturnFilesTab({
@@ -85,6 +87,8 @@ export function ReturnFilesTab({
   onRunAiExtraction,
   onRemoveDocument,
   onUnassignFinancialStatements,
+  isReadOnly = false,
+  readOnlyMessage,
 }: ReturnFilesTabProps) {
   const fileInputId = useId();
   const [isDragging, setIsDragging] = useState(false);
@@ -111,11 +115,16 @@ export function ReturnFilesTab({
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(false);
+    if (isReadOnly) return;
     const files = Array.from(event.dataTransfer.files ?? []);
     if (files.length) onUploadFiles(files);
   };
 
   const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (isReadOnly) {
+      event.target.value = "";
+      return;
+    }
     const files = Array.from(event.target.files ?? []);
     if (files.length) onUploadFiles(files);
     event.target.value = "";
@@ -132,6 +141,11 @@ export function ReturnFilesTab({
   return (
     <TabsContent value="files">
       <div className="space-y-4">
+        {isReadOnly && readOnlyMessage ? (
+          <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800">
+            {readOnlyMessage}
+          </div>
+        ) : null}
         {/* Upload zone */}
         <div className="border-border/70 bg-card rounded-xl border p-5 shadow-xs">
           <input
@@ -201,7 +215,9 @@ export function ReturnFilesTab({
                     ? "Uploading..."
                     : isDragging
                       ? "Drop files here"
-                      : "Drag files here or browse"}
+                      : isReadOnly
+                        ? "Uploads locked for this completed return"
+                        : "Drag files here or browse"}
                 </p>
                 <p className="text-muted-foreground mt-1 text-xs">
                   PDF, Excel, CSV, ZIP, DOC accepted
@@ -212,7 +228,7 @@ export function ReturnFilesTab({
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={isUploading}
+                disabled={isUploading || isReadOnly}
                 onClick={() => document.getElementById(fileInputId)?.click()}
               >
                 Choose files
@@ -236,7 +252,7 @@ export function ReturnFilesTab({
                 size="sm"
                 variant="outline"
                 onClick={onRunAiExtraction}
-                disabled={!selectedFiles.length || isExtractPending}
+                disabled={!selectedFiles.length || isExtractPending || isReadOnly}
               >
                 {isExtractPending ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -304,6 +320,7 @@ export function ReturnFilesTab({
                         {file.role === "financial_statements" ? (
                           <DropdownMenuItem
                             className="cursor-pointer"
+                            disabled={isReadOnly}
                             onClick={() =>
                               onUnassignFinancialStatements(file.url)
                             }
@@ -314,6 +331,7 @@ export function ReturnFilesTab({
                         ) : (
                           <DropdownMenuItem
                             className="cursor-pointer"
+                            disabled={isReadOnly}
                             onClick={() =>
                               onAssignFinancialStatements(file.url)
                             }
@@ -326,6 +344,7 @@ export function ReturnFilesTab({
                         <DropdownMenuItem
                           variant="destructive"
                           className="cursor-pointer"
+                          disabled={isReadOnly}
                           onClick={() => setDeletingFileUrl(file.url)}
                         >
                           <Trash2 className="size-3.5" />
@@ -369,7 +388,7 @@ export function ReturnFilesTab({
                 No
               </Button>
               <Button
-                disabled={isAssignPending}
+                disabled={isAssignPending || isReadOnly}
                 onClick={() => {
                   const pdf = uploadedPdfs[0];
                   if (pdf) onAssignFinancialStatements(pdf.url);
@@ -450,7 +469,10 @@ export function ReturnFilesTab({
               >
                 Cancel
               </Button>
-              <Button onClick={handleConfirmRadio} disabled={isAssignPending}>
+              <Button
+                onClick={handleConfirmRadio}
+                disabled={isAssignPending || isReadOnly}
+              >
                 {isAssignPending ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : null}
@@ -482,6 +504,7 @@ export function ReturnFilesTab({
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction
+                disabled={isReadOnly}
                 onClick={() => {
                   onRemoveDocument(deletingFileUrl);
                   setDeletingFileUrl(null);

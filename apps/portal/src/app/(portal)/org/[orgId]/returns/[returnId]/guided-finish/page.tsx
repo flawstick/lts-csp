@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import {
   asVaultFiles,
   isPdfLike,
+  normalizeStatus,
   sanitizeFormData,
 } from "../_components/return-workspace-shared";
 
@@ -59,6 +60,17 @@ export default function GuidedFinishPage() {
     () => (returnsQuery.data ?? []).find((row) => row.id === returnId) ?? null,
     [returnId, returnsQuery.data],
   );
+  const selectedStatus = selectedReturn
+    ? normalizeStatus(selectedReturn.status)
+    : "pending";
+  const isGuernseyEsrLocked = Boolean(
+    selectedReturn &&
+      selectedReturn.jurisdictionCode === "GG" &&
+      selectedReturn.returnType === "economic_substance" &&
+      selectedStatus === "completed",
+  );
+  const guernseyLockMessage =
+    "This Guernsey ESR is locked because the return is already completed in the Guernsey Tax Portal.";
 
   const createSubstanceFormMutation =
     api.portalReturns.createSubstanceForm.useMutation({
@@ -222,6 +234,9 @@ export default function GuidedFinishPage() {
 
   const ensureSubstanceFormExists = async () => {
     if (!selectedReturn || substanceFormQuery.data) return;
+    if (isGuernseyEsrLocked) {
+      throw new Error(guernseyLockMessage);
+    }
     await createSubstanceFormMutation.mutateAsync({
       orgId,
       taxReturnId: selectedReturn.id,
@@ -233,6 +248,10 @@ export default function GuidedFinishPage() {
     successMessage?: string,
   ) => {
     if (!selectedReturn) return;
+    if (isGuernseyEsrLocked) {
+      showMessage(guernseyLockMessage);
+      return;
+    }
     await ensureSubstanceFormExists();
     await updateSubstanceFormMutation.mutateAsync({
       orgId,
@@ -259,6 +278,10 @@ export default function GuidedFinishPage() {
 
   const handleSaveProgress = async () => {
     try {
+      if (isGuernseyEsrLocked) {
+        showMessage(guernseyLockMessage);
+        return;
+      }
       showMessage("Saving...");
       await persistFormData(draftForm, "Progress saved.");
     } catch (error) {
@@ -270,6 +293,10 @@ export default function GuidedFinishPage() {
 
   const handleComplete = async () => {
     try {
+      if (isGuernseyEsrLocked) {
+        showMessage(guernseyLockMessage);
+        return;
+      }
       showMessage("Saving guided return...");
       const finalData = { ...draftForm };
       if (!finalData.preparedBy) {
@@ -407,6 +434,11 @@ export default function GuidedFinishPage() {
     <div className="-m-4 sm:-m-6 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden">
       <div className="relative grid h-full min-h-0 lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-h-0 flex-col">
+          {isGuernseyEsrLocked ? (
+            <div className="border-b border-emerald-500/20 bg-emerald-500/10 px-6 py-3 text-sm text-emerald-800">
+              {guernseyLockMessage}
+            </div>
+          ) : null}
           <GuidedStepContent
             contentRef={contentRef}
             resolvedActiveStep={resolvedActiveStep}
@@ -426,6 +458,7 @@ export default function GuidedFinishPage() {
             selectedFinancialStatementsName={selectedFinancialStatementsName}
             assignedFinancialStatementsFile={assignedFinancialStatementsFile}
             onStepChange={handleStepChange}
+            readOnly={isGuernseyEsrLocked}
           />
 
           {/* Footer */}
@@ -466,7 +499,7 @@ export default function GuidedFinishPage() {
                   onClick={() => {
                     void handleSaveProgress();
                   }}
-                  disabled={isBusy}
+                  disabled={isBusy || isGuernseyEsrLocked}
                   className="h-8 text-xs text-muted-foreground"
                 >
                   {isBusy ? (
@@ -493,7 +526,11 @@ export default function GuidedFinishPage() {
                     onClick={() => {
                       void handleComplete();
                     }}
-                    disabled={draftMissingFields.length > 0 || isBusy}
+                    disabled={
+                      draftMissingFields.length > 0 ||
+                      isBusy ||
+                      isGuernseyEsrLocked
+                    }
                     className="h-8"
                   >
                     {isBusy ? (

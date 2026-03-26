@@ -55,6 +55,8 @@ type ReturnFormTabProps = {
   savingSection: boolean;
   isUpdating: boolean;
   isInitializing: boolean;
+  isReadOnly?: boolean;
+  readOnlyMessage?: string;
   onInitForm: () => void;
   onSaveSection: () => void;
   onClearForm: () => void;
@@ -75,6 +77,8 @@ export function ReturnFormTab({
   savingSection,
   isUpdating,
   isInitializing,
+  isReadOnly = false,
+  readOnlyMessage,
   onInitForm,
   onSaveSection,
   onClearForm,
@@ -82,6 +86,11 @@ export function ReturnFormTab({
   return (
     <TabsContent value="form">
       <div className="space-y-4">
+        {isReadOnly && readOnlyMessage ? (
+          <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800">
+            {readOnlyMessage}
+          </div>
+        ) : null}
         {isSubstanceFormLoading && !substanceForm ? (
           <ReturnWorkspaceFormSkeleton />
         ) : !substanceForm ? (
@@ -95,7 +104,7 @@ export function ReturnFormTab({
             </p>
             <Button
               onClick={onInitForm}
-              disabled={isInitializing}
+              disabled={isInitializing || isReadOnly}
               className="mt-5 px-5 shadow-[0_18px_44px_-26px_rgba(37,99,235,0.85)]"
             >
               {isInitializing ? (
@@ -227,6 +236,7 @@ export function ReturnFormTab({
                         draftForm={draftForm}
                         setDraftForm={setDraftForm}
                         showRequiredBadges
+                        disabled={isReadOnly}
                       />
 
                       <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
@@ -235,12 +245,13 @@ export function ReturnFormTab({
                           onClick={() =>
                             setDraftForm(sanitizeFormData(substanceForm))
                           }
+                          disabled={isReadOnly}
                         >
                           Reset
                         </Button>
                         <Button
                           onClick={onSaveSection}
-                          disabled={savingSection || isUpdating}
+                          disabled={savingSection || isUpdating || isReadOnly}
                           className="shadow-[0_18px_44px_-26px_rgba(37,99,235,0.85)]"
                         >
                           {savingSection || isUpdating ? (
@@ -258,13 +269,18 @@ export function ReturnFormTab({
             ) : null}
 
             <div className="flex justify-end pt-2">
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive">
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-destructive"
+                    disabled={isReadOnly}
+                  >
                     <Trash2 className="size-3.5" />
                     Clear form
                   </Button>
-                </AlertDialogTrigger>
+                  </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>Clear all form data?</AlertDialogTitle>
@@ -275,6 +291,7 @@ export function ReturnFormTab({
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
                     <AlertDialogAction
+                      disabled={isReadOnly}
                       onClick={onClearForm}
                     >
                       Clear form

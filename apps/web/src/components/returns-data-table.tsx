@@ -17,16 +17,12 @@ import {
 import {
   flexRender,
   getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
   type ColumnDef,
-  type ColumnFiltersState,
   type SortingState,
   type VisibilityState,
 } from "@tanstack/react-table"
-import { Loader2 } from "@/lib/icons"
 
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -41,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -56,10 +53,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@/components/ui/toggle-group"
 import { api } from "@/trpc/react"
 
 type TaxReturn = {
@@ -67,8 +60,11 @@ type TaxReturn = {
   entityName: string
   taxYear: number
   status: string
+  returnType: string | null
   externalId: string | null
   link: string | null
+  isSubstanceComplete: boolean | null
+  missingSubstanceFieldCount: number
   jurisdiction: { code: string } | null
 }
 
@@ -178,10 +174,37 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
           return (
             <Badge variant="outline" className="text-muted-foreground px-1.5">
               <IconLoader />
-              Pending
+              Awaiting Automation
             </Badge>
           )
       }
+    },
+  },
+  {
+    id: "readiness",
+    header: "Readiness",
+    cell: ({ row }) => {
+      if (row.original.isSubstanceComplete) {
+        return (
+          <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 px-1.5 text-emerald-700">
+            Ready
+          </Badge>
+        )
+      }
+
+      if ((row.original.missingSubstanceFieldCount ?? 0) > 0) {
+        return (
+          <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 px-1.5 text-violet-700">
+            {row.original.missingSubstanceFieldCount} Missing
+          </Badge>
+        )
+      }
+
+      return (
+        <Badge variant="outline" className="border-slate-500/30 bg-slate-500/10 px-1.5 text-slate-700">
+          Needs Form
+        </Badge>
+      )
     },
   },
   {
@@ -218,129 +241,132 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
   },
 ]
 
-type FilterValue = "all" | "pending" | "review" | "completed"
+type StatusFilter =
+  | "all"
+  | "pending"
+  | "in_progress"
+  | "review_required"
+  | "completed"
+  | "failed"
+  | "dismissed"
 type JurisdictionFilter = "all" | "GG" | "JE"
+type TaxYearFilter = "all" | `${number}`
 
 interface ReturnsDataTableProps {
   orgId: string
 }
 
 export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
-  const { data, isLoading } = api.taxReturn.list.useQuery(
-    { orgId, page: 1, pageSize: 50 },
-    { refetchOnWindowFocus: false }
-  )
-
-  const [filter, setFilter] = React.useState<FilterValue>("all")
+  const currentCalendarYear = React.useMemo(() => new Date().getUTCFullYear(), [])
+  const defaultTaxYear = `${currentCalendarYear - 1}` as TaxYearFilter
+  const [searchQuery, setSearchQuery] = React.useState("")
+  const [debouncedSearch, setDebouncedSearch] = React.useState("")
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all")
   const [jurisdictionFilter, setJurisdictionFilter] =
     React.useState<JurisdictionFilter>("all")
+  const [taxYearFilter, setTaxYearFilter] =
+    React.useState<TaxYearFilter>(defaultTaxYear)
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [pagination, setPagination] = React.useState({
     pageIndex: 0,
     pageSize: 10,
   })
 
-  const filteredData = React.useMemo(() => {
-    const returns = (data?.returns || []).filter((row) =>
-      jurisdictionFilter === "all"
-        ? true
-        : row.jurisdiction?.code === jurisdictionFilter,
-    )
-    switch (filter) {
-      case "pending":
-        return returns.filter(r => r.status === "pending")
-      case "review":
-        return returns.filter(r => r.status === "review_required")
-      case "completed":
-        return returns.filter(r => r.status === "completed")
-      default:
-        return returns
-    }
-  }, [data, filter, jurisdictionFilter])
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim())
+      setPagination((current) => ({ ...current, pageIndex: 0 }))
+    }, 250)
 
-  const counts = React.useMemo(() => {
-    const returns = (data?.returns || []).filter((row) =>
-      jurisdictionFilter === "all"
-        ? true
-        : row.jurisdiction?.code === jurisdictionFilter,
-    )
-    return {
-      pending: returns.filter(r => r.status === "pending").length,
-      review: returns.filter(r => r.status === "review_required").length,
-      completed: returns.filter(r => r.status === "completed").length,
-    }
-  }, [data, jurisdictionFilter])
+    return () => window.clearTimeout(timer)
+  }, [searchQuery])
+
+  const { data, isLoading } = api.taxReturn.list.useQuery(
+    {
+      orgId,
+      page: pagination.pageIndex + 1,
+      pageSize: pagination.pageSize,
+      jurisdictionCode:
+        jurisdictionFilter === "all" ? undefined : jurisdictionFilter,
+      taxYear: taxYearFilter === "all" ? undefined : Number(taxYearFilter),
+      status: statusFilter === "all" ? undefined : statusFilter,
+      search: debouncedSearch || undefined,
+    },
+    { refetchOnWindowFocus: false },
+  )
+
+  const taxYearOptions = React.useMemo(
+    () =>
+      Array.from({ length: 8 }, (_, index) => currentCalendarYear - index),
+    [currentCalendarYear],
+  )
 
   const columns = React.useMemo(() => createColumns(orgId), [orgId])
 
   const table = useReactTable({
-    data: filteredData,
+    data: data?.returns ?? [],
     columns,
     state: {
       sorting,
       columnVisibility,
       rowSelection,
-      columnFilters,
       pagination,
     },
     getRowId: (row) => row.id,
     enableRowSelection: true,
+    manualPagination: true,
+    pageCount: data?.totalPages ?? 1,
     onRowSelectionChange: setRowSelection,
     onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange: setPagination,
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
   })
 
   // Reset pagination when filter changes
   React.useEffect(() => {
-    setPagination(p => ({ ...p, pageIndex: 0 }))
-  }, [filter, jurisdictionFilter])
+    setPagination((current) => ({ ...current, pageIndex: 0 }))
+    setRowSelection({})
+  }, [jurisdictionFilter, statusFilter, taxYearFilter])
+
+  const hasActiveFilters =
+    debouncedSearch.length > 0 ||
+    statusFilter !== "all" ||
+    jurisdictionFilter !== "all" ||
+    taxYearFilter !== "all"
 
   return (
     <div className="w-full flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3 px-4 lg:px-6">
         <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-full min-w-[220px] max-w-sm">
+            <Input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search name or external ID"
+              className="h-9"
+            />
+          </div>
           <Select
-            value={filter}
-            onValueChange={(v) => setFilter(v as FilterValue)}
+            value={statusFilter}
+            onValueChange={(value) => setStatusFilter(value as StatusFilter)}
           >
-            <SelectTrigger
-              className="flex w-fit @4xl/main:hidden"
-              size="sm"
-            >
-              <SelectValue placeholder="Select a view" />
+            <SelectTrigger size="sm" className="w-[180px]">
+              <SelectValue placeholder="All statuses" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Returns</SelectItem>
-              <SelectItem value="pending">Pending ({counts.pending})</SelectItem>
-              <SelectItem value="review">Review ({counts.review})</SelectItem>
-              <SelectItem value="completed">Completed ({counts.completed})</SelectItem>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="pending">Awaiting automation</SelectItem>
+              <SelectItem value="in_progress">In Progress</SelectItem>
+              <SelectItem value="review_required">Review Required</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="failed">Failed</SelectItem>
+              <SelectItem value="dismissed">Dismissed</SelectItem>
             </SelectContent>
           </Select>
-          <ToggleGroup
-            type="single"
-            value={filter}
-            onValueChange={(v) => v && setFilter(v as FilterValue)}
-            variant="outline"
-            className="hidden @4xl/main:flex"
-          >
-            <ToggleGroupItem value="all">All Returns</ToggleGroupItem>
-            <ToggleGroupItem value="pending">
-              Pending <Badge variant="secondary" className="ml-1">{counts.pending}</Badge>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="review">
-              Review <Badge variant="secondary" className="ml-1">{counts.review}</Badge>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="completed">Completed</ToggleGroupItem>
-          </ToggleGroup>
           <Select
             value={jurisdictionFilter}
             onValueChange={(value) =>
@@ -354,6 +380,22 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
               <SelectItem value="all">All jurisdictions</SelectItem>
               <SelectItem value="GG">Guernsey</SelectItem>
               <SelectItem value="JE">Jersey</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={taxYearFilter}
+            onValueChange={(value) => setTaxYearFilter(value as TaxYearFilter)}
+          >
+            <SelectTrigger size="sm" className="w-[140px]">
+              <SelectValue placeholder="Tax year" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All tax years</SelectItem>
+              {taxYearOptions.map((year) => (
+                <SelectItem key={year} value={`${year}`}>
+                  {year}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -426,6 +468,7 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
                     <TableCell><Skeleton className="h-4 w-10" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                     <TableCell><Skeleton className="h-5 w-20" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-24" /></TableCell>
                     <TableCell><Skeleton className="h-8 w-8" /></TableCell>
                   </TableRow>
                 ))
@@ -445,9 +488,9 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
               ) : (
                 <TableRow>
                   <TableCell colSpan={columns.length} className="h-24 text-center">
-                    {filter === "all"
-                      ? "No returns found. Sync from the portal to get started."
-                      : `No ${filter} returns found.`}
+                    {hasActiveFilters
+                      ? "No returns match the current filters."
+                      : "No returns found. Sync from the portal to get started."}
                   </TableCell>
                 </TableRow>
               )}
@@ -456,8 +499,8 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
         </div>
         <div className="flex items-center justify-between px-4">
           <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
-            {table.getFilteredSelectedRowModel().rows.length} of{" "}
-            {table.getFilteredRowModel().rows.length} row(s) selected.
+            {table.getSelectedRowModel().rows.length} of{" "}
+            {data?.total ?? 0} row(s) selected.
           </div>
           <div className="flex w-full items-center gap-8 lg:w-fit">
             <div className="hidden items-center gap-2 lg:flex">
@@ -483,8 +526,8 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
               </Select>
             </div>
             <div className="flex w-fit items-center justify-center text-sm font-medium">
-              Page {table.getState().pagination.pageIndex + 1} of{" "}
-              {table.getPageCount() || 1}
+              Page {(data?.page ?? 1)} of{" "}
+              {(data?.totalPages ?? 1) || 1}
             </div>
             <div className="ml-auto flex items-center gap-2 lg:ml-0">
               <Button

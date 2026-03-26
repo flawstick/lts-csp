@@ -40,6 +40,7 @@ type GuidedStepContentProps = {
   selectedFinancialStatementsName: string | null;
   assignedFinancialStatementsFile: VaultFile | null;
   onStepChange: (stepId: string) => void;
+  readOnly?: boolean;
 };
 
 export function GuidedStepContent({
@@ -61,6 +62,7 @@ export function GuidedStepContent({
   selectedFinancialStatementsName,
   assignedFinancialStatementsFile,
   onStepChange,
+  readOnly = false,
 }: GuidedStepContentProps) {
   return (
     <div
@@ -99,6 +101,7 @@ export function GuidedStepContent({
               draftForm={draftForm}
               setDraftForm={setDraftForm}
               missingFieldsByStep={missingFieldsByStep}
+              readOnly={readOnly}
             />
           ) : (
             <UploadStepContent
@@ -111,6 +114,7 @@ export function GuidedStepContent({
               selectedFinancialStatementsName={selectedFinancialStatementsName}
               assignedFinancialStatementsFile={assignedFinancialStatementsFile}
               onStepChange={onStepChange}
+              readOnly={readOnly}
             />
           )}
         </motion.div>
@@ -124,11 +128,13 @@ function SectionStepContent({
   draftForm,
   setDraftForm,
   missingFieldsByStep,
+  readOnly,
 }: {
   resolvedActiveStep: GuidedStep & { kind: "section" };
   draftForm: Partial<SubstanceFormData>;
   setDraftForm: Dispatch<SetStateAction<Partial<SubstanceFormData>>>;
   missingFieldsByStep: Map<string, string[]>;
+  readOnly: boolean;
 }) {
   const missingFields = missingFieldsByStep.get(resolvedActiveStep.id) ?? [];
   const completion = getSectionCompletion(resolvedActiveStep.fields, draftForm);
@@ -169,6 +175,7 @@ function SectionStepContent({
         setDraftForm={setDraftForm}
         surface
         showRequiredBadges
+        disabled={readOnly}
       />
     </div>
   );
@@ -184,6 +191,7 @@ function UploadStepContent({
   selectedFinancialStatementsName: _selectedFinancialStatementsName,
   assignedFinancialStatementsFile,
   onStepChange,
+  readOnly,
 }: {
   draftMissingFields: string[];
   sectionStepIndexByField: Map<string, string>;
@@ -194,6 +202,7 @@ function UploadStepContent({
   selectedFinancialStatementsName: string | null;
   assignedFinancialStatementsFile: VaultFile | null;
   onStepChange: (stepId: string) => void;
+  readOnly: boolean;
 }) {
   const removeFile = (index: number) => {
     setSelectedFinancialFiles((prev) => prev.filter((_, i) => i !== index));
@@ -221,13 +230,25 @@ function UploadStepContent({
       ) : null}
 
       {/* Drop zone */}
-      <label className="group flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border/80 bg-card px-6 py-14 text-center transition-colors hover:border-primary/40 hover:bg-primary/[0.02]">
+      <label
+        className={cn(
+          "group flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border/80 bg-card px-6 py-14 text-center transition-colors",
+          readOnly
+            ? "cursor-not-allowed opacity-70"
+            : "cursor-pointer hover:border-primary/40 hover:bg-primary/[0.02]",
+        )}
+      >
         <input
           type="file"
           multiple
           accept=".pdf,.xlsx,.xls,.csv,.zip,.doc,.docx"
           className="hidden"
+          disabled={readOnly}
           onChange={(event) => {
+            if (readOnly) {
+              event.target.value = "";
+              return;
+            }
             const files = Array.from(event.target.files ?? []);
             if (files.length) {
               setSelectedFinancialFiles((prev) => [...prev, ...files]);

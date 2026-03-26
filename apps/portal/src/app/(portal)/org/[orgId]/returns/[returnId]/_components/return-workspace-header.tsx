@@ -35,6 +35,8 @@ type ReturnWorkspaceHeaderProps = {
   selectedReturn: PortalReturnRecord;
   selectedStatus: ReturnStatusTone;
   onOpenFinishSheet: () => void;
+  isReadOnly?: boolean;
+  readOnlyMessage?: string;
   onDismiss?: () => void;
   onUndismiss?: () => void;
   isDismissing?: boolean;
@@ -45,6 +47,8 @@ export function ReturnWorkspaceHeader({
   selectedReturn,
   selectedStatus,
   onOpenFinishSheet,
+  isReadOnly = false,
+  readOnlyMessage,
   onDismiss,
   onUndismiss,
   isDismissing,
@@ -94,6 +98,11 @@ export function ReturnWorkspaceHeader({
             return section by section and upload the financial statements at the
             end.
           </p>
+          {isReadOnly && readOnlyMessage ? (
+            <p className="max-w-2xl rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800">
+              {readOnlyMessage}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2">
@@ -133,7 +142,11 @@ export function ReturnWorkspaceHeader({
         <Magnet padding={60} magnetStrength={3} wrapperClassName="cursor-pointer" innerClassName="cursor-pointer">
           <HoverCard openDelay={300} closeDelay={100}>
             <HoverCardTrigger asChild>
-              <Button className="cursor-pointer px-5" onClick={onOpenFinishSheet}>
+              <Button
+                className="cursor-pointer px-5"
+                onClick={onOpenFinishSheet}
+                disabled={isReadOnly}
+              >
                 <Sparkles className="size-4" />
                 Guided finish
               </Button>
@@ -141,7 +154,9 @@ export function ReturnWorkspaceHeader({
             <HoverCardContent align="end" side="bottom" className="w-72 space-y-2 p-4">
               <p className="text-sm font-semibold">Guided Finish Flow</p>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Walk through every ESR section step by step, fill in remaining fields, upload your financial statements, and review everything before marking the return as complete.
+                {isReadOnly && readOnlyMessage
+                  ? readOnlyMessage
+                  : "Walk through every ESR section step by step, fill in remaining fields, upload your financial statements, and review everything before marking the return as complete."}
               </p>
               <ol className="space-y-1 text-[11px] text-muted-foreground">
                 <li className="flex items-start gap-2">

@@ -228,8 +228,32 @@ export default function ReturnsPage() {
       case "dismissed":
         return <Badge className="bg-zinc-500/10 text-zinc-500 border-zinc-500/20 shadow-none hover:bg-zinc-500/20">Dismissed</Badge>
       default:
-        return <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20 shadow-none hover:bg-yellow-500/20">Pending</Badge>
+        return <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20 shadow-none hover:bg-yellow-500/20">Awaiting Automation</Badge>
     }
+  }
+
+  const getReadinessBadge = (item: NonNullable<typeof data>["returns"][number]) => {
+    if (item.isSubstanceComplete) {
+      return (
+        <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 shadow-none hover:bg-emerald-500/20">
+          Ready
+        </Badge>
+      )
+    }
+
+    if ((item.missingSubstanceFieldCount ?? 0) > 0) {
+      return (
+        <Badge className="bg-violet-500/10 text-violet-700 border-violet-500/20 shadow-none hover:bg-violet-500/20">
+          {item.missingSubstanceFieldCount} Missing
+        </Badge>
+      )
+    }
+
+    return (
+      <Badge className="bg-slate-500/10 text-slate-700 border-slate-500/20 shadow-none hover:bg-slate-500/20">
+        Needs Form
+      </Badge>
+    )
   }
 
   const isJobComplete = logsData?.job?.status === "completed"
@@ -368,7 +392,7 @@ export default function ReturnsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All statuses</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="pending">Awaiting automation</SelectItem>
                     <SelectItem value="in_progress">In Progress</SelectItem>
                     <SelectItem value="review_required">Review Required</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
@@ -425,6 +449,7 @@ export default function ReturnsPage() {
                     <TableHead>Tax Year</TableHead>
                     <TableHead>External ID</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Readiness</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -438,12 +463,13 @@ export default function ReturnsPage() {
                         <TableCell><Skeleton className="h-4 w-10" /></TableCell>
                         <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                         <TableCell><Skeleton className="h-5 w-20" /></TableCell>
+                        <TableCell><Skeleton className="h-5 w-24" /></TableCell>
                         <TableCell className="text-right"><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
                       </TableRow>
                     ))
                   ) : data?.returns.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                      <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                         {searchQuery || statusFilter || jurisdictionFilter !== "all" || taxYearFilter !== "all"
                           ? "No returns match your filters."
                           : "No returns found. Run a sync job to import returns."}
@@ -475,6 +501,7 @@ export default function ReturnsPage() {
                           {item.externalId || "—"}
                         </TableCell>
                         <TableCell>{getStatusBadge(item.status)}</TableCell>
+                        <TableCell>{getReadinessBadge(item)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
                             {item.status !== "completed" && (

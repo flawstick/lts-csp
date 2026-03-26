@@ -140,6 +140,7 @@ type ReturnFormFieldsProps = {
   columnsClassName?: string;
   surface?: boolean;
   showRequiredBadges?: boolean;
+  disabled?: boolean;
 };
 
 function FieldShell({
@@ -260,6 +261,7 @@ export function ReturnFormFields({
   columnsClassName,
   surface = false,
   showRequiredBadges = false,
+  disabled = false,
 }: ReturnFormFieldsProps) {
   const renderField = (field: string) => {
     const label = FIELD_LABELS[field] ?? field;
@@ -524,7 +526,13 @@ export function ReturnFormFields({
   };
 
   return (
-    <div className="space-y-4">
+    <div
+      className={cn(
+        "space-y-4",
+        disabled && "pointer-events-none opacity-70 select-none",
+      )}
+      aria-disabled={disabled}
+    >
       <div className={cn("grid gap-3 md:grid-cols-2", columnsClassName)}>
         {fields.map((field) => renderField(field))}
       </div>

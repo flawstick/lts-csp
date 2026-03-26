@@ -513,12 +513,29 @@ export const taxReturnRouter = createTRPCRouter({
             link: taxReturns.link,
             pdfUrl: taxReturns.pdfUrl,
             createdAt: taxReturns.createdAt,
+            isSubstanceComplete: sql<boolean | null>`
+              CASE
+                WHEN ${taxReturns.returnType} = 'economic_substance' THEN ${substanceForms.isComplete}
+                ELSE ${jerseyCompanyReturnForms.isComplete}
+              END
+            `,
+            missingSubstanceFieldCount: sql<number>`
+              CASE
+                WHEN ${taxReturns.returnType} = 'economic_substance' THEN COALESCE(jsonb_array_length(${substanceForms.missingFields}), 0)
+                ELSE COALESCE(jsonb_array_length(${jerseyCompanyReturnForms.missingFields}), 0)
+              END
+            `,
             jurisdiction: {
               name: jurisdictions.name,
               code: jurisdictions.code,
             },
           })
           .from(taxReturns)
+          .leftJoin(substanceForms, eq(substanceForms.taxReturnId, taxReturns.id))
+          .leftJoin(
+            jerseyCompanyReturnForms,
+            eq(jerseyCompanyReturnForms.taxReturnId, taxReturns.id),
+          )
           .leftJoin(
             jurisdictions,
             eq(taxReturns.jurisdictionId, jurisdictions.id),

@@ -45,6 +45,7 @@ type ReturnStatusTone =
   | "dismissed";
 type StatusFilter = "all" | ReturnStatusTone;
 type JurisdictionFilter = string;
+type TaxYearFilter = "all" | `${number}`;
 type SortKey = "entity" | "year" | "status" | "updated";
 type SortDirection = "asc" | "desc";
 
@@ -130,6 +131,8 @@ export default function OrgReturnsPage() {
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const currentCalendarYear = useMemo(() => new Date().getUTCFullYear(), []);
+  const [taxYearFilter, setTaxYearFilter] = useState<TaxYearFilter>("all");
   const jurisdictionFilter: JurisdictionFilter = searchParams.get("jurisdiction") ?? "all";
   const setJurisdictionFilter = (value: JurisdictionFilter) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -151,6 +154,16 @@ export default function OrgReturnsPage() {
   );
 
   const returns = useMemo(() => returnsQuery.data ?? [], [returnsQuery.data]);
+  const taxYearOptions = useMemo(() => {
+    const recentYears = Array.from(
+      { length: 8 },
+      (_, index) => currentCalendarYear - index,
+    );
+    const syncedYears = returns.map((row) => row.taxYear);
+    return Array.from(new Set([...recentYears, ...syncedYears])).sort(
+      (left, right) => right - left,
+    );
+  }, [currentCalendarYear, returns]);
   const jurisdictionFilterOptions = useMemo(() => {
     const uniqueJurisdictions = new Map<string, string>();
 
@@ -185,6 +198,13 @@ export default function OrgReturnsPage() {
 
         const status = normalizeStatus(row.status);
         if (statusFilter !== "all" && status !== statusFilter) {
+          return false;
+        }
+
+        if (
+          taxYearFilter !== "all" &&
+          row.taxYear !== Number(taxYearFilter)
+        ) {
           return false;
         }
 
@@ -229,6 +249,7 @@ export default function OrgReturnsPage() {
     sortDirection,
     sortKey,
     statusFilter,
+    taxYearFilter,
   ]);
 
   const totalCount = filtered.length;
@@ -340,6 +361,29 @@ export default function OrgReturnsPage() {
               {jurisdictionFilterOptions.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={taxYearFilter}
+            onValueChange={(value) => {
+              setTaxYearFilter(value as TaxYearFilter);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger
+              aria-label="Filter returns by tax year"
+              className="bg-background h-9 w-[160px]"
+            >
+              <SelectValue placeholder="All tax years" />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="all">All tax years</SelectItem>
+              {taxYearOptions.map((year) => (
+                <SelectItem key={year} value={`${year}`}>
+                  {year}
                 </SelectItem>
               ))}
             </SelectContent>

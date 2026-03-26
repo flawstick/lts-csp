@@ -8,6 +8,7 @@ export type ReturnStatusTone =
 export type TaskKind = "review" | "active" | "esr" | "documents";
 export type TaskFilter = "all" | TaskKind;
 export type StatusFilter = "all" | ReturnStatusTone;
+export type TaxYearFilter = "all" | `${number}`;
 export type SortKey = "entity" | "year" | "status" | "updated";
 export type SortDirection = "asc" | "desc";
 export type PaginationItem = number | "ellipsis-left" | "ellipsis-right";

@@ -19,6 +19,7 @@ import {
   type StatusFilter,
   type TaskFilter,
   type TaskKind,
+  type TaxYearFilter,
 } from "./tasks-table-utils";
 
 type Props = {
@@ -26,10 +27,15 @@ type Props = {
 };
 
 export function OrgTasksTable({ orgId }: Props) {
+  const currentCalendarYear = new Date().getUTCFullYear();
+  const defaultTaxYear = `${currentCalendarYear - 1}` as TaxYearFilter;
   const [query, setQuery] = useState("");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [jurisdictionFilter, setJurisdictionFilter] = useState("all");
+  const [taxYearFilter, setTaxYearFilter] = useState<TaxYearFilter>(
+    defaultTaxYear,
+  );
   const [sortKey, setSortKey] = useState<SortKey>("updated");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [page, setPage] = useState(1);
@@ -87,6 +93,17 @@ export function OrgTasksTable({ orgId }: Props) {
     );
   }, [tasks]);
 
+  const taxYearOptions = useMemo(() => {
+    const recentYears = Array.from(
+      { length: 8 },
+      (_, index) => currentCalendarYear - index,
+    );
+    const syncedYears = tasks.map((row) => row.taxYear);
+    return Array.from(new Set([...recentYears, ...syncedYears])).sort(
+      (left, right) => right - left,
+    );
+  }, [currentCalendarYear, tasks]);
+
   const filteredRows = useMemo(() => {
     const term = deferredQuery.trim().toLowerCase();
 
@@ -107,6 +124,10 @@ export function OrgTasksTable({ orgId }: Props) {
           jurisdictionFilter !== "all" &&
           row.jurisdictionCode !== jurisdictionFilter
         ) {
+          return false;
+        }
+
+        if (taxYearFilter !== "all" && row.taxYear !== Number(taxYearFilter)) {
           return false;
         }
 
@@ -147,7 +168,16 @@ export function OrgTasksTable({ orgId }: Props) {
           (toTimestamp(left.updatedAt) - toTimestamp(right.updatedAt))
         );
       });
-  }, [deferredQuery, jurisdictionFilter, sortDirection, sortKey, statusFilter, taskFilter, tasks]);
+  }, [
+    deferredQuery,
+    jurisdictionFilter,
+    sortDirection,
+    sortKey,
+    statusFilter,
+    taskFilter,
+    tasks,
+    taxYearFilter,
+  ]);
 
   const totalCount = filteredRows.length;
   const pageCount = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -160,13 +190,22 @@ export function OrgTasksTable({ orgId }: Props) {
 
   useEffect(() => {
     setPage(1);
-  }, [deferredQuery, taskFilter, statusFilter, jurisdictionFilter, sortKey, sortDirection]);
+  }, [
+    deferredQuery,
+    taskFilter,
+    statusFilter,
+    jurisdictionFilter,
+    taxYearFilter,
+    sortKey,
+    sortDirection,
+  ]);
 
   const hasFilters =
     query.trim().length > 0 ||
     taskFilter !== "all" ||
     statusFilter !== "all" ||
-    jurisdictionFilter !== "all";
+    jurisdictionFilter !== "all" ||
+    taxYearFilter !== "all";
 
   const toggleSort = (key: SortKey) => {
     setSortDirection((currentDirection) => {
@@ -220,6 +259,9 @@ export function OrgTasksTable({ orgId }: Props) {
         onStatusFilterChange={setStatusFilter}
         jurisdictionFilter={jurisdictionFilter}
         onJurisdictionFilterChange={setJurisdictionFilter}
+        taxYearFilter={taxYearFilter}
+        onTaxYearFilterChange={setTaxYearFilter}
+        taxYearOptions={taxYearOptions}
         jurisdictions={jurisdictions}
         filteredCount={totalCount}
         totalCount={tasks.length}
@@ -230,6 +272,7 @@ export function OrgTasksTable({ orgId }: Props) {
           setTaskFilter("all");
           setStatusFilter("all");
           setJurisdictionFilter("all");
+          setTaxYearFilter(defaultTaxYear);
         }}
       />
 
