@@ -50,6 +50,7 @@ export function OrgTasksTable({ orgId }: Props) {
   const tasks = useMemo(
     () =>
       (returnsQuery.data ?? []).filter((row) => {
+        if (row.status === "dismissed") return false;
         if (row.status === "completed") return false;
         // If pending but has docs and ESR is complete, nothing left to do — hide it
         if (

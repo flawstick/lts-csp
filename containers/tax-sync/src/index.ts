@@ -1,5 +1,5 @@
 import { db, schema } from "@repo/database";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { syncGuernseyReturns } from "./guernsey";
 import { syncJerseyReturns } from "./jersey";
 import { createLogger } from "./logger";
@@ -155,7 +155,11 @@ async function main() {
           ],
           set: {
             entityName: syncedReturn.entityName,
-            status: syncedReturn.status,
+            // Preserve manual dismissals across re-syncs of the same source return.
+            status: sql`CASE
+              WHEN ${schema.taxReturns.status} = 'dismissed' THEN ${schema.taxReturns.status}
+              ELSE ${syncedReturn.status}
+            END`,
             link: syncedReturn.link,
             pdfUrl: syncedReturn.pdfUrl ?? null,
             metadata: syncedReturn.metadata,

@@ -946,6 +946,9 @@ export const taxReturnRouter = createTRPCRouter({
         const searchPattern = `%${search}%`;
         conditions.push(sql`(${tasks.name} ILIKE ${searchPattern})`);
       }
+      conditions.push(
+        sql`(${taxReturns.status} IS NULL OR ${taxReturns.status} <> 'dismissed')`,
+      );
 
       const whereClause =
         conditions.length > 0 ? and(...conditions) : undefined;
@@ -989,6 +992,7 @@ export const taxReturnRouter = createTRPCRouter({
         ctx.db
           .select({ count: sql<number>`count(*)` })
           .from(tasks)
+          .leftJoin(taxReturns, eq(tasks.taxReturnId, taxReturns.id))
           .leftJoin(jurisdictions, eq(tasks.jurisdictionId, jurisdictions.id))
           .where(whereClause),
       ]);
