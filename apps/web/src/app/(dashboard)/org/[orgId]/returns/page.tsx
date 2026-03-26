@@ -215,7 +215,10 @@ export default function ReturnsPage() {
     })
   }
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (
+    status: string,
+    isReadyForAutomation: boolean | null | undefined,
+  ) => {
     switch (status) {
       case "completed":
         return <Badge className="bg-green-500/10 text-green-600 border-green-500/20 shadow-none hover:bg-green-500/20">Completed</Badge>
@@ -228,7 +231,11 @@ export default function ReturnsPage() {
       case "dismissed":
         return <Badge className="bg-zinc-500/10 text-zinc-500 border-zinc-500/20 shadow-none hover:bg-zinc-500/20">Dismissed</Badge>
       default:
-        return <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20 shadow-none hover:bg-yellow-500/20">Awaiting Automation</Badge>
+        if (isReadyForAutomation) {
+          return <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20 shadow-none hover:bg-yellow-500/20">Awaiting Automation</Badge>
+        }
+
+        return <Badge className="bg-slate-500/10 text-slate-700 border-slate-500/20 shadow-none hover:bg-slate-500/20">Pending</Badge>
     }
   }
 
@@ -392,7 +399,7 @@ export default function ReturnsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All statuses</SelectItem>
-                    <SelectItem value="pending">Awaiting automation</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
                     <SelectItem value="in_progress">In Progress</SelectItem>
                     <SelectItem value="review_required">Review Required</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
@@ -500,7 +507,9 @@ export default function ReturnsPage() {
                         <TableCell className="font-mono text-xs text-muted-foreground">
                           {item.externalId || "—"}
                         </TableCell>
-                        <TableCell>{getStatusBadge(item.status)}</TableCell>
+                        <TableCell>
+                          {getStatusBadge(item.status, item.isSubstanceComplete)}
+                        </TableCell>
                         <TableCell>{getReadinessBadge(item)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">

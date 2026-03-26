@@ -136,6 +136,7 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
     header: "Status",
     cell: ({ row }) => {
       const status = row.original.status
+      const isReadyForAutomation = Boolean(row.original.isSubstanceComplete)
       switch (status) {
         case "completed":
           return (
@@ -171,10 +172,18 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
             </Badge>
           )
         default:
+          if (isReadyForAutomation) {
+            return (
+              <Badge variant="outline" className="text-muted-foreground px-1.5">
+                <IconLoader />
+                Awaiting Automation
+              </Badge>
+            )
+          }
+
           return (
             <Badge variant="outline" className="text-muted-foreground px-1.5">
-              <IconLoader />
-              Awaiting Automation
+              Pending
             </Badge>
           )
       }
@@ -359,7 +368,7 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="pending">Awaiting automation</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
               <SelectItem value="in_progress">In Progress</SelectItem>
               <SelectItem value="review_required">Review Required</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>
