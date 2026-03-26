@@ -1,12 +1,10 @@
 # Build stage
-FROM node:20-slim AS builder
-
-RUN corepack enable && corepack prepare pnpm@9.14.2 --activate
+FROM oven/bun:1.3.2 AS builder
 
 WORKDIR /app
 
 # Copy workspace config
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json ./
+COPY bun.lock package.json turbo.json ./
 
 # Copy package sources
 COPY packages/database ./packages/database
@@ -15,12 +13,10 @@ COPY packages/shared ./packages/shared
 COPY containers/task ./containers/task
 
 # Install dependencies
-RUN pnpm install --frozen-lockfile
+RUN bun install
 
 # Production stage - slim Node image (no browser needed - using Browser Use Cloud API)
-FROM node:20-slim AS runner
-
-RUN corepack enable && corepack prepare pnpm@9.14.2 --activate
+FROM oven/bun:1.3.2 AS runner
 
 WORKDIR /app
 
@@ -32,4 +28,4 @@ ENV NODE_ENV=production
 
 WORKDIR /app/containers/task
 
-CMD ["pnpm", "start"]
+CMD ["bun", "run", "start"]

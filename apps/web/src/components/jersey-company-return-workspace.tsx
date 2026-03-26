@@ -73,7 +73,8 @@ type FileInfo = {
   size: number;
   type: string;
   uploadedAt: string;
-  role?: "financial_statements";
+  role?: "financial_statements" | "filed_return_pdf";
+  metadata?: Record<string, unknown>;
 };
 
 type FieldShellProps = {
@@ -187,6 +188,18 @@ function uploadLabel(isUploading: boolean) {
     return "Uploading files...";
   }
   return "Upload files";
+}
+
+function isSupersededFiledReturnPdf(file: FileInfo): boolean {
+  return (
+    file.role !== "filed_return_pdf" &&
+    file.metadata?.kind === "filed_return_pdf" &&
+    typeof file.metadata?.supersededAt === "string"
+  );
+}
+
+function isManagedFiledReturnPdf(file: FileInfo): boolean {
+  return file.role === "filed_return_pdf" || isSupersededFiledReturnPdf(file);
 }
 
 export function JerseyCompanyReturnWorkspace({
@@ -492,6 +505,7 @@ export function JerseyCompanyReturnWorkspace({
   };
 
   const handleAssignFinancialStatements = async (file: FileInfo) => {
+    if (isManagedFiledReturnPdf(file)) return;
     await assignFileRoleMutation.mutateAsync({
       taxReturnId: taxReturn.id,
       fileUrl: file.url,
@@ -811,6 +825,16 @@ export function JerseyCompanyReturnWorkspace({
                                       Financial statements
                                     </span>
                                   ) : null}
+                                  {file.role === "filed_return_pdf" ? (
+                                    <span className="inline-flex rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-blue-700">
+                                      Filed return PDF
+                                    </span>
+                                  ) : null}
+                                  {isSupersededFiledReturnPdf(file) ? (
+                                    <span className="inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                                      Superseded filed PDF
+                                    </span>
+                                  ) : null}
                                 </div>
                                 <div className="text-muted-foreground mt-0.5 flex items-center gap-2 text-xs">
                                   <span>{formatBytes(file.size)}</span>
@@ -843,20 +867,22 @@ export function JerseyCompanyReturnWorkspace({
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
-                                    disabled={
-                                      assignFileRoleMutation.isPending ||
-                                      removeFileMutation.isPending
-                                    }
-                                    onSelect={() => {
-                                      void handleAssignFinancialStatements(file);
-                                    }}
-                                  >
-                                    <FileText className="mr-2 h-4 w-4" />
-                                    {file.role === "financial_statements"
-                                      ? "Clear financials assignment"
-                                      : "Assign as signed financials"}
-                                  </DropdownMenuItem>
+                                  {!isManagedFiledReturnPdf(file) ? (
+                                    <DropdownMenuItem
+                                      disabled={
+                                        assignFileRoleMutation.isPending ||
+                                        removeFileMutation.isPending
+                                      }
+                                      onSelect={() => {
+                                        void handleAssignFinancialStatements(file);
+                                      }}
+                                    >
+                                      <FileText className="mr-2 h-4 w-4" />
+                                      {file.role === "financial_statements"
+                                        ? "Clear financials assignment"
+                                        : "Assign as signed financials"}
+                                    </DropdownMenuItem>
+                                  ) : null}
                                   <DropdownMenuItem
                                     className="text-red-600 focus:text-red-600"
                                     disabled={

@@ -54,10 +54,23 @@ type FileInfo = {
   size: number;
   type: string;
   uploadedAt: string;
-  role?: "financial_statements";
+  role?: "financial_statements" | "filed_return_pdf";
+  metadata?: Record<string, unknown>;
 };
 
 type SectionId = (typeof FORM_SECTIONS)[number]["id"];
+
+function isSupersededFiledReturnPdf(file: FileInfo): boolean {
+  return (
+    file.role !== "filed_return_pdf" &&
+    file.metadata?.kind === "filed_return_pdf" &&
+    typeof file.metadata?.supersededAt === "string"
+  );
+}
+
+function isManagedFiledReturnPdf(file: FileInfo): boolean {
+  return file.role === "filed_return_pdf" || isSupersededFiledReturnPdf(file);
+}
 
 export default function ReturnDetailPage() {
   const params = useParams();
@@ -236,6 +249,7 @@ export default function ReturnDetailPage() {
   const handleAssignFinancialStatements = useCallback(
     async (file: FileInfo) => {
       if (!taxReturn) return;
+      if (isManagedFiledReturnPdf(file)) return;
 
       await assignFileRoleMutation.mutateAsync({
         taxReturnId: taxReturn.id,
@@ -630,6 +644,19 @@ export default function ReturnDetailPage() {
                                     Financial statements PDF
                                   </Badge>
                                 )}
+                                {file.role === "filed_return_pdf" && (
+                                  <Badge className="border-blue-500/20 bg-blue-500/10 text-[10px] tracking-wide uppercase text-blue-700 hover:bg-blue-500/10">
+                                    Filed return PDF
+                                  </Badge>
+                                )}
+                                {isSupersededFiledReturnPdf(file) && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] tracking-wide uppercase"
+                                  >
+                                    Superseded filed PDF
+                                  </Badge>
+                                )}
                               </div>
                               <div className="text-muted-foreground mt-0.5 flex items-center gap-2 text-xs">
                                 <span>{formatBytes(file.size)}</span>
@@ -664,20 +691,22 @@ export default function ReturnDetailPage() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  disabled={
-                                    assignFileRoleMutation.isPending ||
-                                    removeFileMutation.isPending
-                                  }
-                                  onSelect={() => {
-                                    void handleAssignFinancialStatements(file);
-                                  }}
-                                >
-                                  <FileText className="h-4 w-4" />
-                                  {file.role === "financial_statements"
-                                    ? "Clear financials assignment"
-                                    : "Assign as Financials"}
-                                </DropdownMenuItem>
+                                {!isManagedFiledReturnPdf(file) ? (
+                                  <DropdownMenuItem
+                                    disabled={
+                                      assignFileRoleMutation.isPending ||
+                                      removeFileMutation.isPending
+                                    }
+                                    onSelect={() => {
+                                      void handleAssignFinancialStatements(file);
+                                    }}
+                                  >
+                                    <FileText className="h-4 w-4" />
+                                    {file.role === "financial_statements"
+                                      ? "Clear financials assignment"
+                                      : "Assign as Financials"}
+                                  </DropdownMenuItem>
+                                ) : null}
                                 <DropdownMenuItem
                                   variant="destructive"
                                   disabled={

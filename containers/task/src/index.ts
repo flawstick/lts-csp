@@ -3,8 +3,18 @@
  * Runs on ECS, uses Browser Use Cloud API, streams status via Redis
  */
 
-import { db, taxReturns, jobs, tasks, eq } from "@repo/database";
+import { put } from "@vercel/blob";
+import {
+  db,
+  taxReturns,
+  jobs,
+  tasks,
+  eq,
+  type TaxReturnFileCategory,
+  type TaxReturnFileRole,
+} from "@repo/database";
 import { publishJobEvent } from "@repo/redis";
+import type { FileInfo as BrowserUseFileInfo } from "browser-use-sdk/v3";
 import {
   BrowserUseClient,
   type BrowserUseModel,
@@ -21,6 +31,11 @@ const TAX_RETURN_ID = process.env.TAX_RETURN_ID || "";
 const JOB_ID = process.env.JOB_ID || "";
 const TASK_ID = process.env.TASK_ID || "";
 const OVERRIDE_SAVED = process.env.OVERRIDE_SAVED === "true";
+const SUBMISSION_MODE =
+  process.env.SUBMISSION_MODE === "submit_and_capture_pdf"
+    ? "submit_and_capture_pdf"
+    : "prepare_only";
+const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || "";
 const BROWSER_USE_MODEL: BrowserUseModel = "bu-max";
 
 const POLL_INTERVAL_MS = 2000;
@@ -52,14 +67,25 @@ const DETACHED_BROWSER_RECOVERY_PATTERNS = [
   "reconnection failed",
 ];
 
+const FILED_RETURN_PDF_KEYWORDS = [
+  "return",
+  "submission",
+  "receipt",
+  "confirmation",
+  "confirm",
+  "print",
+  "download",
+];
+
 type TaxReturnAttachedFile = {
   url: string;
   name: string;
   size: number;
   type: string;
   uploadedAt: string;
-  category?: string;
-  role?: string;
+  category?: TaxReturnFileCategory;
+  role?: TaxReturnFileRole;
+  metadata?: Record<string, unknown>;
 };
 
 type BrowserSessionInputFile = {
@@ -67,8 +93,33 @@ type BrowserSessionInputFile = {
   sessionFileName: string;
   sessionFilePath: string;
   url: string;
-  category?: string;
-  role?: string;
+  category?: TaxReturnFileCategory;
+  role?: TaxReturnFileRole;
+};
+
+type SubmissionMode = "prepare_only" | "submit_and_capture_pdf";
+
+type BrowserFileSource = "session" | "workspace";
+
+type BrowserUseDownloadCandidate = {
+  path: string;
+  name: string;
+  size: number;
+  lastModified: string;
+  url: string;
+  source: BrowserFileSource;
+  wasPresentAtBaseline: boolean;
+  keywordMatches: string[];
+  score: number;
+};
+
+type CompletionPdfIngestionResult = {
+  status: "uploaded" | "missing" | "failed";
+  fileUrl?: string;
+  fileName?: string;
+  browserUsePath?: string;
+  browserUseUrl?: string;
+  error?: string;
 };
 
 // ============================================================================
@@ -222,8 +273,22 @@ function getTaxReturnFiles(files: unknown): TaxReturnAttachedFile[] {
         typeof row.uploadedAt === "string"
           ? row.uploadedAt
           : new Date().toISOString(),
-      category: typeof row.category === "string" ? row.category : undefined,
-      role: typeof row.role === "string" ? row.role : undefined,
+      category:
+        row.category === "esr" ||
+        row.category === "financial" ||
+        row.category === "supporting" ||
+        row.category === "misc"
+          ? row.category
+          : undefined,
+      role:
+        row.role === "financial_statements" ||
+        row.role === "filed_return_pdf"
+          ? row.role
+          : undefined,
+      metadata:
+        row.metadata && typeof row.metadata === "object"
+          ? (row.metadata as Record<string, unknown>)
+          : undefined,
     });
   }
 
@@ -280,6 +345,345 @@ function getPdfExtension(file: TaxReturnAttachedFile): string {
     return ".pdf";
   }
   return file.type.toLowerCase().includes("pdf") ? ".pdf" : "";
+}
+
+function toTimestamp(value: string | null | undefined): number {
+  if (!value) return 0;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function getPathBaseName(path: string): string {
+  const normalized = path.split("?")[0] ?? path;
+  const segments = normalized.split("/").filter(Boolean);
+  return segments[segments.length - 1] ?? normalized;
+}
+
+function sanitizeFileBaseName(name: string, fallback: string): string {
+  const withoutExtension = name.replace(/\.pdf$/i, "").trim();
+  const safe = withoutExtension
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return safe || fallback;
+}
+
+function buildFiledReturnDisplayName(entityName: string, taxYear: number): string {
+  const safeEntity = sanitizeFileBaseName(entityName, "return");
+  return `${safeEntity}-${taxYear}-filed-return.pdf`;
+}
+
+function isPdfArtifact(file: { path: string; url?: string | null }): boolean {
+  const haystack = `${file.path} ${file.url ?? ""}`.toLowerCase();
+  return haystack.includes(".pdf") || haystack.includes("pdf");
+}
+
+function getBrowserFileBaselineKey(
+  source: BrowserFileSource,
+  path: string,
+): string {
+  return `${source}:${path}`;
+}
+
+function isFinancialStatementsArtifact(
+  file: BrowserUseFileInfo,
+  source: BrowserFileSource,
+  financialStatementsFile: BrowserSessionInputFile | null,
+): boolean {
+  if (!financialStatementsFile) {
+    return false;
+  }
+
+  if (
+    source === "workspace" &&
+    file.path === financialStatementsFile.sessionFilePath
+  ) {
+    return true;
+  }
+
+  const fileName = getPathBaseName(file.path).toLowerCase();
+  return fileName === financialStatementsFile.sessionFileName.toLowerCase();
+}
+
+function scoreCompletionPdfCandidate(
+  file: BrowserUseFileInfo,
+  source: BrowserFileSource,
+  baselineKeys: Set<string>,
+): BrowserUseDownloadCandidate | null {
+  if (!file.url || !isPdfArtifact(file)) {
+    return null;
+  }
+
+  const name = getPathBaseName(file.path);
+  const haystack = `${file.path} ${name}`.toLowerCase();
+  const keywordMatches = FILED_RETURN_PDF_KEYWORDS.filter((token) =>
+    haystack.includes(token),
+  );
+  const wasPresentAtBaseline = baselineKeys.has(
+    getBrowserFileBaselineKey(source, file.path),
+  );
+  const score =
+    (wasPresentAtBaseline ? 0 : 100) +
+    keywordMatches.length * 20 +
+    (source === "session" ? 10 : 0) +
+    Math.floor(toTimestamp(file.lastModified) / 1_000);
+
+  return {
+    path: file.path,
+    name,
+    size: file.size,
+    lastModified: file.lastModified,
+    url: file.url,
+    source,
+    wasPresentAtBaseline,
+    keywordMatches,
+    score,
+  };
+}
+
+function buildCompletionPdfCandidates(params: {
+  sessionFiles: BrowserUseFileInfo[];
+  workspaceFiles: BrowserUseFileInfo[];
+  baselineKeys: Set<string>;
+  financialStatementsFile: BrowserSessionInputFile | null;
+}): BrowserUseDownloadCandidate[] {
+  const candidates: BrowserUseDownloadCandidate[] = [];
+
+  for (const file of params.sessionFiles) {
+    if (
+      isFinancialStatementsArtifact(file, "session", params.financialStatementsFile)
+    ) {
+      continue;
+    }
+
+    const candidate = scoreCompletionPdfCandidate(
+      file,
+      "session",
+      params.baselineKeys,
+    );
+
+    if (candidate) {
+      candidates.push(candidate);
+    }
+  }
+
+  for (const file of params.workspaceFiles) {
+    if (
+      isFinancialStatementsArtifact(
+        file,
+        "workspace",
+        params.financialStatementsFile,
+      )
+    ) {
+      continue;
+    }
+
+    const candidate = scoreCompletionPdfCandidate(
+      file,
+      "workspace",
+      params.baselineKeys,
+    );
+
+    if (candidate) {
+      candidates.push(candidate);
+    }
+  }
+
+  return candidates.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+
+    const timeDiff =
+      toTimestamp(right.lastModified) - toTimestamp(left.lastModified);
+    if (timeDiff !== 0) {
+      return timeDiff;
+    }
+
+    return left.path.localeCompare(right.path);
+  });
+}
+
+async function captureCompletionPdf(params: {
+  client: BrowserUseClient;
+  sessionId: string;
+  workspaceId: string | null;
+  taxReturnId: string;
+  orgId: string;
+  entityName: string;
+  taxYear: number;
+  financialStatementsFile: BrowserSessionInputFile | null;
+  baselineKeys: Set<string>;
+  logFn: typeof log;
+}): Promise<CompletionPdfIngestionResult> {
+  const { client, sessionId, workspaceId, financialStatementsFile, baselineKeys } =
+    params;
+
+  const sessionFiles = await client.getAllSessionFiles(sessionId);
+  const workspaceFiles = workspaceId
+    ? await client.getAllWorkspaceFiles(workspaceId)
+    : [];
+
+  await params.logFn("Collected Browser Use files after submission", {
+    sessionFileCount: sessionFiles.length,
+    workspaceFileCount: workspaceFiles.length,
+  });
+
+  const candidates = buildCompletionPdfCandidates({
+    sessionFiles,
+    workspaceFiles,
+    baselineKeys,
+    financialStatementsFile,
+  });
+
+  await params.logFn("Discovered completion PDF candidates", {
+    candidateCount: candidates.length,
+    candidates: candidates.map((candidate) => ({
+      path: candidate.path,
+      name: candidate.name,
+      source: candidate.source,
+      wasPresentAtBaseline: candidate.wasPresentAtBaseline,
+      keywordMatches: candidate.keywordMatches,
+      lastModified: candidate.lastModified,
+      score: candidate.score,
+    })),
+  });
+
+  const selectedCandidate = candidates[0];
+  if (!selectedCandidate) {
+    return {
+      status: "missing",
+      error: "No downloadable completion PDF was found in the Browser Use files.",
+    };
+  }
+
+  await params.logFn("Selected completion PDF candidate", {
+    path: selectedCandidate.path,
+    name: selectedCandidate.name,
+    source: selectedCandidate.source,
+    lastModified: selectedCandidate.lastModified,
+    keywordMatches: selectedCandidate.keywordMatches,
+  });
+
+  if (!BLOB_READ_WRITE_TOKEN) {
+    return {
+      status: "failed",
+      error: "BLOB_READ_WRITE_TOKEN is missing in the browser task environment.",
+      browserUsePath: selectedCandidate.path,
+      browserUseUrl: selectedCandidate.url,
+    };
+  }
+
+  const response = await fetch(selectedCandidate.url);
+  if (!response.ok) {
+    return {
+      status: "failed",
+      error: `Failed to download completion PDF from Browser Use: ${response.status}`,
+      browserUsePath: selectedCandidate.path,
+      browserUseUrl: selectedCandidate.url,
+    };
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const now = new Date();
+  const uploadedAt = now.toISOString();
+  const blobPath = `portal/${params.orgId}/${params.taxReturnId}/supporting/${now.getTime()}-filed-return.pdf`;
+
+  const blob = await put(
+    blobPath,
+    new Blob([buffer], { type: "application/pdf" }),
+    {
+      access: "public",
+      contentType: "application/pdf",
+      token: BLOB_READ_WRITE_TOKEN,
+    },
+  );
+
+  const currentTaxReturn = await db.query.taxReturns.findFirst({
+    where: eq(taxReturns.id, params.taxReturnId),
+  });
+
+  if (!currentTaxReturn) {
+    return {
+      status: "failed",
+      error: "Tax return disappeared before the completion PDF could be attached.",
+      browserUsePath: selectedCandidate.path,
+      browserUseUrl: selectedCandidate.url,
+    };
+  }
+
+  const existingFiles = getTaxReturnFiles(currentTaxReturn.files);
+  let supersededCount = 0;
+  const nextFiles = existingFiles.map((file) => {
+    if (file.role !== "filed_return_pdf") {
+      return file;
+    }
+
+    supersededCount += 1;
+    return {
+      ...file,
+      role: undefined,
+      metadata: {
+        ...(file.metadata ?? {}),
+        source:
+          typeof file.metadata?.source === "string"
+            ? file.metadata.source
+            : "browser_use_download",
+        kind: "filed_return_pdf",
+        supersededAt: uploadedAt,
+        supersededByJobId: JOB_ID,
+      },
+    };
+  });
+
+  const displayName = buildFiledReturnDisplayName(
+    params.entityName,
+    params.taxYear,
+  );
+
+  nextFiles.push({
+    url: blob.url,
+    name: displayName,
+    size: buffer.length,
+    type: "application/pdf",
+    uploadedAt,
+    category: "supporting",
+    role: "filed_return_pdf",
+    metadata: {
+      source: "browser_use_download",
+      kind: "filed_return_pdf",
+      jobId: JOB_ID,
+      taskId: TASK_ID,
+      browserUseSessionId: sessionId,
+      browserUsePath: selectedCandidate.path,
+      browserUseUrl: selectedCandidate.url,
+    },
+  });
+
+  await db
+    .update(taxReturns)
+    .set({
+      files: nextFiles,
+      updatedAt: now,
+    })
+    .where(eq(taxReturns.id, params.taxReturnId));
+
+  await params.logFn("Attached completion PDF to tax return files", {
+    blobUrl: blob.url,
+    fileName: displayName,
+    supersededCount,
+    browserUsePath: selectedCandidate.path,
+    source: selectedCandidate.source,
+  });
+
+  return {
+    status: "uploaded",
+    fileUrl: blob.url,
+    fileName: displayName,
+    browserUsePath: selectedCandidate.path,
+    browserUseUrl: selectedCandidate.url,
+  };
 }
 
 async function uploadFinancialStatementsFile(
@@ -363,6 +767,7 @@ async function main() {
   await log("Task runner starting", {
     taxReturnId: TAX_RETURN_ID,
     jobId: JOB_ID,
+    submissionMode: SUBMISSION_MODE,
   });
 
   if (!BROWSER_USE_API_KEY) {
@@ -417,6 +822,7 @@ async function main() {
 
     let workspaceId: string | null = null;
     let financialStatementsFile: BrowserSessionInputFile | null = null;
+    let baselineBrowserFileKeys = new Set<string>();
     try {
       const workspace = await client.createWorkspace(
         `tax-return-${TAX_RETURN_ID}`,
@@ -441,10 +847,40 @@ async function main() {
       );
     }
 
+    try {
+      const [baselineSessionFiles, baselineWorkspaceFiles] = await Promise.all([
+        client.getAllSessionFiles(session.id),
+        workspaceId ? client.getAllWorkspaceFiles(workspaceId) : Promise.resolve([]),
+      ]);
+
+      baselineBrowserFileKeys = new Set(
+        [
+          ...baselineSessionFiles.map((file) =>
+            getBrowserFileBaselineKey("session", file.path),
+          ),
+          ...baselineWorkspaceFiles.map((file) =>
+            getBrowserFileBaselineKey("workspace", file.path),
+          ),
+        ],
+      );
+
+      await log("Recorded Browser Use file baselines", {
+        sessionFileCount: baselineSessionFiles.length,
+        workspaceFileCount: baselineWorkspaceFiles.length,
+        uploadedFinancialStatementsPath:
+          financialStatementsFile?.sessionFilePath ?? null,
+      });
+    } catch (error) {
+      await log("Failed to capture Browser Use file baselines", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     await log("Building AI prompt", {
       entity: taxReturn.entityName,
       year: taxReturn.taxYear,
       hasFinancialStatementsFile: Boolean(financialStatementsFile),
+      submissionMode: SUBMISSION_MODE,
     });
 
     // Build prompt
@@ -454,6 +890,7 @@ async function main() {
       portalUrl: taxReturn.jurisdiction?.portalUrl || "https://my.gov.gg",
       returnLink: taxReturn.link || undefined,
       overrideSaved: OVERRIDE_SAVED,
+      submissionMode: SUBMISSION_MODE,
       financialStatementsFile,
       financialStatementsUrl: financialStatementsFile?.url ?? null,
     });
@@ -473,6 +910,7 @@ async function main() {
         workspaceId,
         taxReturnId: TAX_RETURN_ID,
         entityName: taxReturn.entityName,
+        submissionMode: SUBMISSION_MODE,
       },
     });
 
@@ -483,6 +921,7 @@ async function main() {
         .set({
           aiModel: BROWSER_USE_MODEL,
           resultData: {
+            submissionMode: SUBMISSION_MODE,
             liveUrl: session.liveUrl,
             sessionId: session.id,
             workspaceId,
@@ -494,6 +933,7 @@ async function main() {
     await log("Starting Browser Use task", {
       sessionId: session.id,
       model: BROWSER_USE_MODEL,
+      submissionMode: SUBMISSION_MODE,
     });
 
     let currentRunPromise = Promise.resolve(
@@ -727,7 +1167,11 @@ RECOVERY RULES:
 - Do NOT use Python or browser-wrapper recovery helpers such as get_tabs.
 - If a stray tab or blank page is open, use switch or close to return to the main Guernsey portal tab.
 - If you cannot recover the portal tab quickly, navigate directly to: ${recoveryReturnUrl}
-- If you land on a page ending in reviewAndSubmit/summary, this is a saved draft summary. Do NOT click Submit, Confirm, Print, or Download from that page.
+- If you land on a page ending in reviewAndSubmit/summary, ${
+            SUBMISSION_MODE === "submit_and_capture_pdf"
+              ? "treat it as a draft summary until every section has been rechecked in this run. Only use the final submit path after the filing is fully validated and you are ready to download the portal-generated completion PDF."
+              : "this is a saved draft summary. Do NOT click Submit, Confirm, Print, or Download from that page."
+          }
 - From the summary page, use a Change or Edit link to reopen the filing sections and continue the return.
 - Verify the Financial Statements / Accounts upload before leaving that section, and do not continue while the control still says "No file chosen".
 
@@ -781,6 +1225,7 @@ ${prompt}
               completedAt: new Date(),
               errorMessage: focusFailureMessage,
               resultData: {
+                submissionMode: SUBMISSION_MODE,
                 liveUrl: session.liveUrl,
                 browserUseSessionId: session.id,
                 workspaceId,
@@ -839,6 +1284,7 @@ ${prompt}
               .set({
                 status: "paused",
                 resultData: {
+                  submissionMode: SUBMISSION_MODE,
                   output,
                   browserUseSessionId: session.id,
                   liveUrl: session.liveUrl,
@@ -926,6 +1372,45 @@ ${prompt}
           },
         );
 
+        let completionPdf: CompletionPdfIngestionResult | undefined;
+        if (success && SUBMISSION_MODE === "submit_and_capture_pdf") {
+          try {
+            completionPdf = await captureCompletionPdf({
+              client,
+              sessionId: session.id,
+              workspaceId,
+              taxReturnId: TAX_RETURN_ID,
+              orgId: taxReturn.orgId,
+              entityName: taxReturn.entityName,
+              taxYear: taxReturn.taxYear,
+              financialStatementsFile,
+              baselineKeys: baselineBrowserFileKeys,
+              logFn: log,
+            });
+
+            if (completionPdf.status === "missing") {
+              await log("No completion PDF was ingested after submission", {
+                error: completionPdf.error,
+              });
+            } else if (completionPdf.status === "failed") {
+              await log("Completion PDF ingestion failed after submission", {
+                error: completionPdf.error,
+                browserUsePath: completionPdf.browserUsePath,
+              });
+            }
+          } catch (error) {
+            completionPdf = {
+              status: "failed",
+              error:
+                error instanceof Error ? error.message : String(error),
+            };
+            await log("Completion PDF ingestion threw an unexpected error", {
+              error:
+                error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+
         await publishJobEvent({
           type: success ? "job:completed" : "job:failed",
           jobId: JOB_ID,
@@ -934,6 +1419,7 @@ ${prompt}
             output,
             isSuccess: success,
             browserUseSessionId: session.id,
+            completionPdf,
           },
         });
 
@@ -949,10 +1435,12 @@ ${prompt}
               status: success ? "completed" : "failed",
               completedAt: new Date(),
               resultData: {
+                submissionMode: SUBMISSION_MODE,
                 output,
                 browserUseSessionId: session.id,
                 liveUrl: session.liveUrl,
                 workspaceId,
+                completionPdf,
               },
             })
             .where(eq(jobs.id, JOB_ID));
@@ -997,6 +1485,7 @@ ${prompt}
             completedAt: new Date(),
             errorMessage: timeoutMessage,
             resultData: {
+              submissionMode: SUBMISSION_MODE,
               liveUrl: session.liveUrl,
               browserUseSessionId: session.id,
               workspaceId,

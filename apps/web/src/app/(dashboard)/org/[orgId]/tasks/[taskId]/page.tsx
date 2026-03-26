@@ -27,6 +27,8 @@ function normalizeOptionalNumber(value: unknown) {
   return typeof value === "number" ? value : undefined;
 }
 
+type SubmissionMode = "prepare_only" | "submit_and_capture_pdf";
+
 export default function TaskDetailPage() {
   const params = useParams();
   const taskId = params.taskId as string;
@@ -619,14 +621,20 @@ export default function TaskDetailPage() {
     };
   }, [serializeSteps]);
 
-  const handleStart = (overrideSaved = false) => {
+  const handleStart = ({
+    overrideSaved = false,
+    submissionMode = "submit_and_capture_pdf",
+  }: {
+    overrideSaved?: boolean;
+    submissionMode?: SubmissionMode;
+  } = {}) => {
     setEvents([]);
     setSteps([]);
     setLiveUrl(null);
     setCurrentStep(null);
     setFinalOutput(null);
     setChatMessages([]);
-    startJobMutation.mutate({ taskId, overrideSaved });
+    startJobMutation.mutate({ taskId, overrideSaved, submissionMode });
 
     if (task) {
       trackClient({
@@ -638,6 +646,7 @@ export default function TaskDetailPage() {
           jurisdiction: task.taxReturn?.jurisdiction?.name || "unknown",
           entityName: task.name,
           source: overrideSaved ? "retry" : "manual",
+          submissionMode,
         },
       }).catch(console.error);
     }

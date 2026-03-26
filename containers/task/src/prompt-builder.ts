@@ -59,6 +59,7 @@ interface PromptBuilderOptions {
   portalUrl: string;
   returnLink?: string;
   overrideSaved?: boolean;
+  submissionMode?: "prepare_only" | "submit_and_capture_pdf";
   financialStatementsFile?: SessionInputFile | null;
   financialStatementsUrl?: string | null;
 }
@@ -82,6 +83,7 @@ export function buildSubstanceFormPrompt(
     portalUrl,
     returnLink,
     overrideSaved,
+    submissionMode = "prepare_only",
     financialStatementsFile,
     financialStatementsUrl,
   } = options;
@@ -126,7 +128,11 @@ If prompted for CSP or secret credentials:
 
 **IF STUCK:** If you cannot complete a field or encounter an error you cannot resolve, pause the task and report the issue for user intervention.
 
-**SUMMARY PAGE SAFETY:** If the portal lands on a page ending in **reviewAndSubmit/summary**, treat it as a saved draft summary. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action from that page. Use the summary page's **Change** or **Edit** links to re-enter the filing sections and continue the return.
+**SUMMARY PAGE SAFETY:** ${
+  submissionMode === "submit_and_capture_pdf"
+    ? "If the portal lands on a page ending in **reviewAndSubmit/summary** before every section has been checked in this run, treat it as an incomplete draft summary. Use the summary page's **Change** or **Edit** links to re-enter the filing sections and continue the return. Only once the filing is fully validated should you use the final submit path, wait for confirmation, and download the portal-generated completion PDF."
+    : 'If the portal lands on a page ending in **reviewAndSubmit/summary**, treat it as a saved draft summary. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action from that page. Use the summary page\'s **Change** or **Edit** links to re-enter the filing sections and continue the return.'
+}
 
 **TAB / BLANK PAGE RECOVERY:** Use Browser Use native tools only: **switch**, **close**, **navigate**, **go_back**, **click**, **input**, **upload_file**, **evaluate**, **screenshot**. Do **NOT** use Python or browser-wrapper tab recovery helpers such as **get_tabs**. If a bad click opens a stray tab or leaves you on **about:blank**, use **switch** or **close** to get back to the main Guernsey portal tab. If that fails quickly, use **navigate** to return to the filing URL and continue.
 
@@ -259,10 +265,19 @@ ${blockingMissingFields.map((f) => `- ${f}`).join("\n")}
 After filling all sections:
 1. Review the entire form for accuracy
 2. Navigate to the final submission page/screen
-3. **STOP BEFORE CLICKING SUBMIT** - Do NOT click the final submit button
+${
+  submissionMode === "submit_and_capture_pdf"
+    ? `3. Resolve every validation error shown on the portal before continuing
+4. Click the final submit/confirm action and complete the filing
+5. Wait for the post-submission confirmation page or confirmation state
+6. Find the portal-generated completion/receipt/return PDF and download it into the Browser Use session
+7. Do not finish the task until the PDF download has completed, or you have explicitly reported that no downloadable completion PDF exists
+8. If there are validation errors or the portal blocks submission, report them exactly as shown`
+    : `3. **STOP BEFORE CLICKING SUBMIT** - Do NOT click the final submit button
 4. You should be exactly ONE CLICK away from submission - the submit button should be visible and ready
 5. Report that the form is ready for manual submission and describe what button/action remains
-6. If there are validation errors, report them exactly as shown
+6. If there are validation errors, report them exactly as shown`
+}
 `);
 
   return sections.join("\n");

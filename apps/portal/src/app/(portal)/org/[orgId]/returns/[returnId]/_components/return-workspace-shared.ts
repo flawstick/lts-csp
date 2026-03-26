@@ -31,7 +31,8 @@ export type VaultFile = {
   type: string;
   uploadedAt?: string;
   category?: "esr" | "financial" | "supporting" | "misc";
-  role?: "financial_statements";
+  role?: "financial_statements" | "filed_return_pdf";
+  metadata?: Record<string, unknown>;
 };
 
 export const STATUS_LABEL: Record<ReturnStatusTone, string> = {
@@ -129,8 +130,13 @@ export function asVaultFiles(files: unknown): VaultFile[] {
           ? row.category
           : undefined,
       role:
-        row.role === "financial_statements"
-          ? "financial_statements"
+        row.role === "financial_statements" ||
+        row.role === "filed_return_pdf"
+          ? row.role
+          : undefined,
+      metadata:
+        row.metadata && typeof row.metadata === "object"
+          ? (row.metadata as Record<string, unknown>)
           : undefined,
     });
   }

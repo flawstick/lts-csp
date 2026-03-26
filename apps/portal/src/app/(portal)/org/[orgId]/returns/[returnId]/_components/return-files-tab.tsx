@@ -99,6 +99,14 @@ export function ReturnFilesTab({
     ? (selectedFiles.find((f) => f.url === deletingFileUrl) ?? null)
     : null;
 
+  const isSupersededFiledReturnPdf = (file: VaultFile) =>
+    file.role !== "filed_return_pdf" &&
+    file.metadata?.kind === "filed_return_pdf" &&
+    typeof file.metadata?.supersededAt === "string";
+
+  const isManagedFiledReturnPdf = (file: VaultFile) =>
+    file.role === "filed_return_pdf" || isSupersededFiledReturnPdf(file);
+
   const uploadedPdfs = useMemo(
     () => (uploadedFileUrls ?? []).filter((f) => isPdfLike(f)),
     [uploadedFileUrls],
@@ -293,6 +301,16 @@ export function ReturnFilesTab({
                             Financial statements
                           </span>
                         ) : null}
+                        {file.role === "filed_return_pdf" ? (
+                          <span className="inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300">
+                            Filed return PDF
+                          </span>
+                        ) : null}
+                        {isSupersededFiledReturnPdf(file) ? (
+                          <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                            Superseded filed PDF
+                          </span>
+                        ) : null}
                       </div>
                       <p className="text-muted-foreground mt-0.5 text-xs">
                         {formatBytes(file.size)} ·{" "}
@@ -317,29 +335,31 @@ export function ReturnFilesTab({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="max-w-48">
-                        {file.role === "financial_statements" ? (
-                          <DropdownMenuItem
-                            className="cursor-pointer"
-                            disabled={isReadOnly}
-                            onClick={() =>
-                              onUnassignFinancialStatements(file.url)
-                            }
-                          >
-                            <FileText className="size-3.5" />
-                            Unassign financial statements
-                          </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem
-                            className="cursor-pointer"
-                            disabled={isReadOnly}
-                            onClick={() =>
-                              onAssignFinancialStatements(file.url)
-                            }
-                          >
-                            <FileText className="size-3.5" />
-                            Assign as financial statements
-                          </DropdownMenuItem>
-                        )}
+                        {!isManagedFiledReturnPdf(file) ? (
+                          file.role === "financial_statements" ? (
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              disabled={isReadOnly}
+                              onClick={() =>
+                                onUnassignFinancialStatements(file.url)
+                              }
+                            >
+                              <FileText className="size-3.5" />
+                              Unassign financial statements
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              disabled={isReadOnly}
+                              onClick={() =>
+                                onAssignFinancialStatements(file.url)
+                              }
+                            >
+                              <FileText className="size-3.5" />
+                              Assign as financial statements
+                            </DropdownMenuItem>
+                          )
+                        ) : null}
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           variant="destructive"

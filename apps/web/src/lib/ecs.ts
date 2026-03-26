@@ -168,6 +168,7 @@ export interface LaunchBrowserTaskParams {
   taxReturnId: string;
   taskId: string;
   overrideSaved?: boolean;
+  submissionMode?: "prepare_only" | "submit_and_capture_pdf";
 }
 
 export async function launchBrowserTask(params: LaunchBrowserTaskParams) {
@@ -196,8 +197,13 @@ export async function launchBrowserTask(params: LaunchBrowserTaskParams) {
             { name: "DATABASE_URL", value: env.DATABASE_URL },
             { name: "REDIS_URL", value: env.REDIS_URL },
             { name: "BROWSER_USE_API_KEY", value: env.BROWSER_USE_API_KEY || "" },
+            { name: "BLOB_READ_WRITE_TOKEN", value: env.BLOB_READ_WRITE_TOKEN },
             { name: "USE_UK_PROXY", value: "false" }, // Disabled for now due to 504 timeouts
             { name: "OVERRIDE_SAVED", value: params.overrideSaved ? "true" : "false" },
+            {
+              name: "SUBMISSION_MODE",
+              value: params.submissionMode ?? "prepare_only",
+            },
           ],
         },
       ],

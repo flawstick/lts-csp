@@ -40,6 +40,7 @@ type TaxReturnFileRecord = {
   uploadedAt: string;
   category?: z.infer<typeof taxReturnFileCategoryEnum>;
   role?: z.infer<typeof taxReturnFileRoleEnum>;
+  metadata?: Record<string, unknown>;
 };
 
 function decodePortalCredentials(
@@ -314,6 +315,13 @@ export const taxReturnRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.file.role === "filed_return_pdf") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Filed return PDFs are system-managed and cannot be uploaded manually.",
+        });
+      }
+
       const taxReturn = await ctx.db.query.taxReturns.findFirst({
         where: eq(taxReturns.id, input.taxReturnId),
       });
@@ -390,6 +398,13 @@ export const taxReturnRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.role === "filed_return_pdf") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Filed return PDFs are system-managed and cannot be assigned manually.",
+        });
+      }
+
       const taxReturn = await ctx.db.query.taxReturns.findFirst({
         where: eq(taxReturns.id, input.taxReturnId),
       });
@@ -1352,6 +1367,10 @@ export const taxReturnRouter = createTRPCRouter({
       z.object({
         taskId: z.string().uuid(),
         overrideSaved: z.boolean().optional().default(false),
+        submissionMode: z
+          .enum(["prepare_only", "submit_and_capture_pdf"])
+          .optional()
+          .default("prepare_only"),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1405,6 +1424,9 @@ export const taxReturnRouter = createTRPCRouter({
           status: "pending",
           aiModel: "bu-max",
           cloudwatchLogGroup: "/ecs/lts-browser-task",
+          resultData: {
+            submissionMode: input.submissionMode,
+          },
         })
         .returning();
 
@@ -1425,6 +1447,7 @@ export const taxReturnRouter = createTRPCRouter({
           taxReturnId: task.taxReturn.id,
           taskId: input.taskId,
           overrideSaved: input.overrideSaved,
+          submissionMode: input.submissionMode,
         });
 
         // Update job with ECS info
@@ -1435,6 +1458,9 @@ export const taxReturnRouter = createTRPCRouter({
             cloudwatchLogStream: result.cloudwatchLogStream,
             status: "running",
             startedAt: new Date(),
+            resultData: {
+              submissionMode: input.submissionMode,
+            },
           })
           .where(eq(jobs.id, newJob.id));
 

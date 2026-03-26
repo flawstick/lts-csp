@@ -1,5 +1,6 @@
 import {
   BrowserUse,
+  type FileInfo,
   type FileListResponse,
   type MessageListResponse,
   type ProxyCountryCode,
@@ -43,7 +44,10 @@ export class BrowserUseClient {
   }
 
   async getSessionFiles(sessionId: string): Promise<FileListResponse> {
-    return this.client.sessions.files(sessionId, { limit: 100 });
+    return this.client.sessions.files(sessionId, {
+      limit: 100,
+      includeUrls: true,
+    });
   }
 
   async getMessages(
@@ -81,7 +85,44 @@ export class BrowserUseClient {
   }
 
   async getWorkspaceFiles(workspaceId: string): Promise<FileListResponse> {
-    return this.client.workspaces.files(workspaceId, { limit: 100 });
+    return this.client.workspaces.files(workspaceId, {
+      limit: 100,
+      includeUrls: true,
+    });
+  }
+
+  async getAllSessionFiles(sessionId: string): Promise<FileInfo[]> {
+    const files: FileInfo[] = [];
+    let cursor: string | null | undefined = null;
+
+    do {
+      const response = await this.client.sessions.files(sessionId, {
+        limit: 100,
+        includeUrls: true,
+        cursor,
+      });
+      files.push(...response.files);
+      cursor = response.nextCursor;
+    } while (cursor);
+
+    return files;
+  }
+
+  async getAllWorkspaceFiles(workspaceId: string): Promise<FileInfo[]> {
+    const files: FileInfo[] = [];
+    let cursor: string | null | undefined = null;
+
+    do {
+      const response = await this.client.workspaces.files(workspaceId, {
+        limit: 100,
+        includeUrls: true,
+        cursor,
+      });
+      files.push(...response.files);
+      cursor = response.nextCursor;
+    } while (cursor);
+
+    return files;
   }
 
   async uploadFileToWorkspace(

@@ -5,11 +5,12 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "node --import tsx src/index.ts",
+    "dev": "bun x tsx watch src/index.ts",
+    "start": "bun x tsx src/index.ts",
     "docker:build": "docker build -t lts-browser-task -f Dockerfile ../.."
   },
   "dependencies": {
+    "@vercel/blob": "^2.3.0",
     "@repo/database": "workspace:*",
     "@repo/redis": "workspace:*",
     "browser-use-sdk": "^3.3.1",

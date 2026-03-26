@@ -33,6 +33,11 @@ type Job = {
   createdAt: Date | string
 }
 
+type StartOptions = {
+  overrideSaved?: boolean
+  submissionMode?: "prepare_only" | "submit_and_capture_pdf"
+}
+
 type BrowserToolbarProps = {
   jurisdictionName: string | null
   liveUrl: string | null
@@ -48,7 +53,7 @@ type BrowserToolbarProps = {
   onPause: () => void
   onCancel: () => void
   onResume: (jobId: string) => void
-  onStart: (overrideSaved?: boolean) => void
+  onStart: (options?: StartOptions) => void
   onDeleteJob: (jobId: string) => void
   isStartPending: boolean
   isPausePending: boolean
@@ -263,13 +268,42 @@ export function BrowserToolbar({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onStart(false)}>
+              <DropdownMenuItem
+                onClick={() =>
+                  onStart({ submissionMode: "submit_and_capture_pdf" })
+                }
+              >
                 <Play className="mr-2 size-3.5" />
-                Start normally
+                Submit + capture PDF
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onStart(true)}>
+              <DropdownMenuItem
+                onClick={() =>
+                  onStart({
+                    overrideSaved: true,
+                    submissionMode: "submit_and_capture_pdf",
+                  })
+                }
+              >
                 <History className="mr-2 size-3.5" />
-                Override saved (redo all)
+                Override saved + submit
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => onStart({ submissionMode: "prepare_only" })}
+              >
+                <Play className="mr-2 size-3.5" />
+                Prepare only
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  onStart({
+                    overrideSaved: true,
+                    submissionMode: "prepare_only",
+                  })
+                }
+              >
+                <History className="mr-2 size-3.5" />
+                Override saved only
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -1300,6 +1300,14 @@ export const portalReturnsRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.documents.some((doc) => doc.role === "filed_return_pdf")) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Filed return PDFs are system-managed and cannot be uploaded manually.",
+        });
+      }
+
       const account = await ensurePortalAccount(ctx);
       await assertActiveMembership({
         db: ctx.db,
@@ -1360,6 +1368,14 @@ export const portalReturnsRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.role === "filed_return_pdf") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Filed return PDFs are system-managed and cannot be assigned manually.",
+        });
+      }
+
       const account = await ensurePortalAccount(ctx);
       await assertActiveMembership({
         db: ctx.db,

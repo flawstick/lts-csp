@@ -54,6 +54,17 @@ function detectFileType(name: string, type: string): FileTypeFilter {
   return "other";
 }
 
+function isSupersededFiledReturnPdf(file: {
+  role?: "financial_statements" | "filed_return_pdf";
+  metadata?: Record<string, unknown>;
+}) {
+  return (
+    file.role !== "filed_return_pdf" &&
+    file.metadata?.kind === "filed_return_pdf" &&
+    typeof file.metadata?.supersededAt === "string"
+  );
+}
+
 export default function ReturnDocumentsPage() {
   const params = useParams<{ clientSlug: string; returnId: string }>();
   const { clients, error, isLoading } = useDocumentsTree();
@@ -157,7 +168,24 @@ export default function ReturnDocumentsPage() {
                   className="group flex cursor-pointer items-center justify-between gap-3 px-4 py-3 transition hover:bg-muted/35"
                 >
                   <div className="min-w-0 flex-1 overflow-hidden">
-                    <p className="font-medium [overflow-wrap:anywhere]">{file.name}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-medium [overflow-wrap:anywhere]">{file.name}</p>
+                      {file.role === "financial_statements" ? (
+                        <span className="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                          Financial statements
+                        </span>
+                      ) : null}
+                      {file.role === "filed_return_pdf" ? (
+                        <span className="inline-flex rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                          Filed return PDF
+                        </span>
+                      ) : null}
+                      {isSupersededFiledReturnPdf(file) ? (
+                        <span className="inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                          Superseded filed PDF
+                        </span>
+                      ) : null}
+                    </div>
                     <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">
                       {file.type.toUpperCase()} • {formatDateTime(file.uploadedAt)}
                     </p>

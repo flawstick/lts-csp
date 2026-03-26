@@ -16,6 +16,8 @@ type ListMyReturnsRow = {
 
 export type ExplorerFile = {
   name: string;
+  metadata?: Record<string, unknown>;
+  role?: "financial_statements" | "filed_return_pdf";
   size: number;
   type: string;
   uploadedAt: string | null;
@@ -88,6 +90,12 @@ function normalizeFiles(raw: unknown): ExplorerFile[] {
           : typeof file.size === "string"
             ? Number(file.size)
             : 0;
+      const role: ExplorerFile["role"] =
+        file.role === "financial_statements"
+          ? "financial_statements"
+          : file.role === "filed_return_pdf"
+            ? "filed_return_pdf"
+            : undefined;
 
       return [
         {
@@ -96,6 +104,11 @@ function normalizeFiles(raw: unknown): ExplorerFile[] {
           size: Number.isFinite(parsedSize) && parsedSize > 0 ? parsedSize : 0,
           type: typeof file.type === "string" ? file.type : "file",
           uploadedAt: typeof file.uploadedAt === "string" ? file.uploadedAt : null,
+          role,
+          metadata:
+            file.metadata && typeof file.metadata === "object"
+              ? (file.metadata as Record<string, unknown>)
+              : undefined,
         },
       ];
     })

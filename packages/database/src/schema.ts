@@ -138,7 +138,10 @@ export const taxReturnFileCategories = [
 
 export type TaxReturnFileCategory = (typeof taxReturnFileCategories)[number];
 
-export const taxReturnFileRoles = ["financial_statements"] as const;
+export const taxReturnFileRoles = [
+  "financial_statements",
+  "filed_return_pdf",
+] as const;
 
 export type TaxReturnFileRole = (typeof taxReturnFileRoles)[number];
 
@@ -455,6 +458,7 @@ export const taxReturns = createTable(
         uploadedAt: string;
         category?: TaxReturnFileCategory;
         role?: TaxReturnFileRole;
+        metadata?: Record<string, unknown>;
       }>
     >(), // Attached files (Vercel Blob URLs)
     metadata: jsonb().$type<Record<string, unknown>>(),
