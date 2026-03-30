@@ -753,7 +753,7 @@ export default function ReturnsPage() {
                   ))}
                 </TableHeader>
                 <TableBody>
-                  {isLoading ? (
+                  {isLoading || !data ? (
                     Array.from({ length: 10 }).map((_, i) => (
                       <TableRow key={i}>
                         <TableCell><Skeleton className="h-4 w-4 mx-auto" /></TableCell>
@@ -784,7 +784,7 @@ export default function ReturnsPage() {
                   ) : (
                     <TableRow>
                       <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
-                        {searchQuery || statusFilter || jurisdictionFilter !== "all" || taxYearFilter !== "all"
+                        {searchQuery || statusFilter || jurisdictionFilter !== "all" || taxYearFilter !== "all" || readinessFilter !== "all"
                           ? "No returns match your filters."
                           : "No returns found. Run a sync job to import returns."}
                       </TableCell>
