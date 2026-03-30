@@ -4,7 +4,7 @@ set -euo pipefail
 export $(grep -E '^(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_REGION)=' /Users/amirashak/endeavour/LTS/apps/web/.env | tr -d '"' | xargs)
 
 AWS_ACCOUNT_ID="988904099875"
-ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.eu-west-2.amazonaws.com"
+ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 ECR_REPO="${ECR_REGISTRY}/lts-tax-sync"
 TASK_DEFINITION_FAMILY="lts-tax-sync"
 IMAGE_TAG="$(date +%Y%m%d%H%M%S)-$(git -C /Users/amirashak/endeavour/LTS rev-parse --short HEAD)"

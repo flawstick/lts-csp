@@ -224,7 +224,7 @@ export async function launchBrowserTask(params: LaunchBrowserTaskParams) {
               name: "BROWSER_JOB_HEARTBEAT_INTERVAL_MS",
               value: String(env.BROWSER_WORKER_HEARTBEAT_INTERVAL_MS),
             },
-            { name: "USE_UK_PROXY", value: "false" }, // Disabled for now due to 504 timeouts
+            { name: "USE_PROXY", value: "true" }, // NL proxy for Browser Use
             { name: "OVERRIDE_SAVED", value: params.overrideSaved ? "true" : "false" },
             {
               name: "SUBMISSION_MODE",

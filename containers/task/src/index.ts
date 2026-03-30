@@ -1148,7 +1148,7 @@ async function initializeBrowserUseSession(
       });
 
       const session = await client.createSession({
-        ...(useProxy && { proxyCountryCode: "uk" as const }),
+        ...(useProxy && { proxyCountryCode: "nl" as const }),
       });
       createdSessionId = session.id;
 
@@ -1261,7 +1261,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     }
 
     const taxReturnFiles = getTaxReturnFiles(taxReturn.files);
-    const useProxy = process.env.USE_UK_PROXY !== "false";
+    const useProxy = process.env.USE_PROXY !== "false";
 
     session = await initializeBrowserUseSession(client, useProxy);
 

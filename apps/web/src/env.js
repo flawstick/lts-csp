@@ -13,7 +13,7 @@ export const env = createEnv({
       .enum(["development", "test", "production"])
       .default("development"),
     // AWS ECS
-    AWS_REGION: z.string().default("eu-west-2"),
+    AWS_REGION: z.string().default("eu-central-1"),
     AWS_ACCESS_KEY_ID: z.string(),
     AWS_SECRET_ACCESS_KEY: z.string(),
     ECS_CLUSTER: z.string(),
