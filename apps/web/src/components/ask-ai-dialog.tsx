@@ -16,7 +16,7 @@ import {
   DialogPortal,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Dialog as DialogPrimitive } from "radix-ui"
+import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { VisuallyHidden } from "radix-ui"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {

@@ -64,9 +64,8 @@ export default function GuidedFinishPage() {
     ? normalizeStatus(selectedReturn.status)
     : "pending";
   const isGuernseyEsrLocked = Boolean(
-    selectedReturn &&
-      selectedReturn.jurisdictionCode === "GG" &&
-      selectedReturn.returnType === "economic_substance" &&
+    selectedReturn?.jurisdictionCode === "GG" &&
+      selectedReturn?.returnType === "economic_substance" &&
       selectedStatus === "completed",
   );
   const guernseyLockMessage =

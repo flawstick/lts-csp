@@ -1,9 +1,9 @@
 import {
   FIELD_LABELS,
-  FORM_SECTIONS,
   REQUIRED_FIELDS,
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
+import type { FORM_SECTIONS } from "@/lib/schemas/substance-form";
 import type { RouterOutputs } from "@/trpc/react";
 
 export type PortalReturnRecord =

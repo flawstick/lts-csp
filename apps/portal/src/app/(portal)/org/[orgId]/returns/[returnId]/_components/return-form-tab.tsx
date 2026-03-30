@@ -71,7 +71,7 @@ export function ReturnFormTab({
   setActiveSectionId,
   substanceForm,
   isSubstanceFormLoading,
-  draftMissingFields,
+  draftMissingFields: _draftMissingFields,
   isSectionDialogOpen,
   setIsSectionDialogOpen,
   savingSection,

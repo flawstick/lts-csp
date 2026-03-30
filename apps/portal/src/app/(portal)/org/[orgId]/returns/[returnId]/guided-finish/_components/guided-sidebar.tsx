@@ -69,7 +69,7 @@ export function GuidedSidebar({
   entityName,
   draftForm,
   draftMissingFields,
-  visibleSections,
+  visibleSections: _visibleSections,
   progressRatio,
   uploadReady,
   assignedFinancialStatementsFile,
