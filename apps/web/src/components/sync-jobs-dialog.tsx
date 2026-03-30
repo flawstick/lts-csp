@@ -61,12 +61,11 @@ function getLogClass(level: string | null | undefined) {
     return "text-amber-700 dark:text-amber-400"
   }
 
-  if (level === "info") {
-    return "text-foreground"
-  }
-
   return "text-foreground"
 }
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SyncJob = any
 
 export function SyncJobsDialog({
   orgId,
@@ -74,25 +73,29 @@ export function SyncJobsDialog({
   onOpenChange,
   initialJobId,
 }: SyncJobsDialogProps) {
-  const [page, setPage] = React.useState(1)
-  const [pageSize] = React.useState(20)
+  const pageSize = 20
   const [jurisdictionFilter, setJurisdictionFilter] =
     React.useState<JurisdictionFilter>("all")
   const [selectedJobId, setSelectedJobId] = React.useState<string | null>(initialJobId ?? null)
+  const [page, setPage] = React.useState(1)
+  const [allJobs, setAllJobs] = React.useState<SyncJob[]>([])
+  const [hasMore, setHasMore] = React.useState(true)
+  const [loadingMore, setLoadingMore] = React.useState(false)
+  const sentinelRef = React.useRef<HTMLTableRowElement>(null)
 
   React.useEffect(() => {
-    if (!open) {
-      return
-    }
-
+    if (!open) return
     if (initialJobId) {
       setSelectedJobId(initialJobId)
     }
   }, [open, initialJobId])
 
+  // Reset when filter or dialog state changes
   React.useEffect(() => {
     setPage(1)
-  }, [jurisdictionFilter])
+    setAllJobs([])
+    setHasMore(true)
+  }, [jurisdictionFilter, open])
 
   const { data, isLoading, refetch } = api.taxReturn.listSyncJobs.useQuery(
     {
@@ -105,25 +108,58 @@ export function SyncJobsDialog({
     {
       enabled: open,
       refetchOnWindowFocus: false,
-      refetchInterval: open ? 5000 : false,
+      refetchInterval: open && page === 1 ? 5000 : false,
     },
   )
 
+  // Accumulate jobs as pages load
   React.useEffect(() => {
-    if (!data?.jobs?.length) {
-      return
-    }
+    if (!data?.jobs) return
+
+    setAllJobs((prev) => {
+      if (page === 1) return data.jobs
+      const existingIds = new Set(prev.map((j: SyncJob) => j.id))
+      const newJobs = data.jobs.filter((j: SyncJob) => !existingIds.has(j.id))
+      return [...prev, ...newJobs]
+    })
+
+    setHasMore(page < (data.totalPages ?? 1))
+    setLoadingMore(false)
+  }, [data, page])
+
+  // Auto-select first job if none selected
+  React.useEffect(() => {
+    if (!allJobs.length) return
 
     if (!selectedJobId) {
-      setSelectedJobId(data.jobs[0]?.id ?? null)
+      setSelectedJobId(allJobs[0]?.id ?? null)
       return
     }
 
-    const selectedStillVisible = data.jobs.some((job) => job.id === selectedJobId)
-    if (!selectedStillVisible) {
-      setSelectedJobId(data.jobs[0]?.id ?? null)
+    const stillExists = allJobs.some((job: SyncJob) => job.id === selectedJobId)
+    if (!stillExists) {
+      setSelectedJobId(allJobs[0]?.id ?? null)
     }
-  }, [data?.jobs, selectedJobId])
+  }, [allJobs, selectedJobId])
+
+  // IntersectionObserver for infinite scroll
+  React.useEffect(() => {
+    const sentinel = sentinelRef.current
+    if (!sentinel || !hasMore || isLoading || loadingMore) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && hasMore && !isLoading && !loadingMore) {
+          setLoadingMore(true)
+          setPage((p) => p + 1)
+        }
+      },
+      { threshold: 0.1 },
+    )
+
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, isLoading, loadingMore])
 
   const { data: details, isLoading: detailsLoading } = api.taxReturn.getSyncJobLogs.useQuery(
     { jobId: selectedJobId! },
@@ -139,7 +175,7 @@ export function SyncJobsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[94vw] max-w-[96rem] overflow-hidden p-0">
+      <DialogContent className="w-[94vw] sm:max-w-7xl overflow-hidden p-0 gap-0">
         <DialogHeader className="border-b bg-muted/40 px-6 py-4">
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-1">
@@ -148,7 +184,7 @@ export function SyncJobsDialog({
                 Manual and scheduled sync runs with live logs and details.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mr-8">
               <Select
                 value={jurisdictionFilter}
                 onValueChange={(value) =>
@@ -172,11 +208,11 @@ export function SyncJobsDialog({
           </div>
         </DialogHeader>
 
-        <div className="grid max-h-[82vh] min-h-[70vh] grid-cols-1 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="border-r">
-            <div className="overflow-hidden">
+        <div className="grid h-[75vh] grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+          {/* Left panel — job list */}
+          <div className="min-w-0 min-h-0 border-r overflow-y-auto [&_[data-slot=table-container]]:overflow-visible">
               <Table>
-                <TableHeader>
+                <TableHeader className="bg-background sticky top-0 z-10 [&_tr]:bg-muted/40">
                   <TableRow>
                     <TableHead>Status</TableHead>
                     <TableHead>Jurisdiction</TableHead>
@@ -187,7 +223,7 @@ export function SyncJobsDialog({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {isLoading ? (
+                  {isLoading && allJobs.length === 0 ? (
                     Array.from({ length: 8 }).map((_, index) => (
                       <TableRow key={index}>
                         <TableCell><Skeleton className="h-6 w-24" /></TableCell>
@@ -198,46 +234,60 @@ export function SyncJobsDialog({
                         <TableCell className="text-right"><Skeleton className="ml-auto h-8 w-20" /></TableCell>
                       </TableRow>
                     ))
-                  ) : data?.jobs?.length ? (
-                    data.jobs.map((job) => (
-                      <TableRow
-                        key={job.id}
-                        className={`cursor-pointer ${selectedJobId === job.id ? "bg-muted/50" : ""}`}
-                        onClick={() => setSelectedJobId(job.id)}
-                      >
-                        <TableCell>
-                          <SyncJobStatusBadge status={job.status} />
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {job.jurisdiction?.code || "\u2014"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {getTriggerLabel(job.trigger)}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {job.returnsFound ?? "\u2014"}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground text-sm">
-                          {job.startedAt
-                            ? formatDistanceToNow(new Date(job.startedAt), {
-                                addSuffix: true,
-                              })
-                            : formatDistanceToNow(new Date(job.createdAt), {
-                                addSuffix: true,
-                              })}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" asChild onClick={(e) => e.stopPropagation()}>
-                            <Link href={`/org/${orgId}/returns/sync-jobs/${job.id}`}>
-                              <ExternalLink className="mr-2 h-4 w-4" />
-                              Open
-                            </Link>
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                  ) : allJobs.length ? (
+                    <>
+                      {allJobs.map((job: SyncJob) => (
+                        <TableRow
+                          key={job.id}
+                          className={`cursor-pointer ${selectedJobId === job.id ? "bg-muted/50" : ""}`}
+                          onClick={() => setSelectedJobId(job.id)}
+                        >
+                          <TableCell>
+                            <SyncJobStatusBadge status={job.status} />
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              {job.jurisdiction?.code || "\u2014"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {getTriggerLabel(job.trigger)}
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {job.returnsFound ?? "\u2014"}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {job.startedAt
+                              ? formatDistanceToNow(new Date(job.startedAt), {
+                                  addSuffix: true,
+                                })
+                              : formatDistanceToNow(new Date(job.createdAt), {
+                                  addSuffix: true,
+                                })}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="sm" asChild onClick={(e) => e.stopPropagation()}>
+                              <Link href={`/org/${orgId}/returns/sync-jobs/${job.id}`}>
+                                <ExternalLink className="mr-2 h-4 w-4" />
+                                Open
+                              </Link>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {/* Sentinel row for infinite scroll */}
+                      {hasMore && (
+                        <TableRow ref={sentinelRef}>
+                          <TableCell colSpan={6} className="py-3 text-center">
+                            {loadingMore ? (
+                              <Loader2 className="mx-auto h-4 w-4 animate-spin text-muted-foreground" />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Scroll for more</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
                   ) : (
                     <TableRow>
                       <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
@@ -247,13 +297,13 @@ export function SyncJobsDialog({
                   )}
                 </TableBody>
               </Table>
-            </div>
           </div>
 
-          <div className="flex min-h-0 flex-col">
+          {/* Right panel — job details + logs */}
+          <div className="min-w-0 min-h-0 flex flex-col overflow-hidden">
             {selectedJobId && (detailsLoading || currentJob) ? (
               <>
-                <div className="border-b bg-muted/20 px-6 py-4">
+                <div className="shrink-0 border-b bg-muted/20 px-6 py-4">
                   {detailsLoading || !currentJob ? (
                     <div className="space-y-2">
                       <Skeleton className="h-6 w-40" />

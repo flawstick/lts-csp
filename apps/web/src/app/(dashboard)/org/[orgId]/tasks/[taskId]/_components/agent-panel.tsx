@@ -230,7 +230,7 @@ export function AgentPanel({
 
                 return (
                   <HoverCard
-                    key={`step-badge-${stepNum}`}
+                    key={`step-badge-${stepNum}-${index}`}
                     openDelay={200}
                     closeDelay={100}
                   >
