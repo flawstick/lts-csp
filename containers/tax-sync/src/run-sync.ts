@@ -222,7 +222,7 @@ export async function runTaxSyncJob(
           set: {
             entityName: syncedReturn.entityName,
             status: sql`CASE
-              WHEN ${schema.taxReturns.status} IN ('dismissed', 'completed', 'failed', 'review_required') THEN ${schema.taxReturns.status}
+              WHEN ${schema.taxReturns.status} = 'dismissed' THEN ${schema.taxReturns.status}
               ELSE ${syncedReturn.status}
             END`,
             link: syncedReturn.link,
