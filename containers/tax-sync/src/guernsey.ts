@@ -1,35 +1,69 @@
 import * as cheerio from "cheerio";
+import { gotScraping } from "got-scraping";
+import { CookieJar } from "tough-cookie";
 import { authenticate } from "./auth";
 import type { SyncedTaxReturn, SyncLogger } from "./types";
 
 const ITEMS_PER_PAGE = 50;
 const MAX_PAGES = 100;
-const BASE_URL = "https://my.gov.gg/revenue/all-cases";
+const BASE_URL = "https://my.gov.gg/revenue/all-cases-manager";
+const HEADER_GENERATOR_OPTIONS = {
+  browsers: ["chrome"] as const,
+  devices: ["desktop"] as const,
+  operatingSystems: ["macos"] as const,
+};
 
-function getHeaders(sessionCookies: string) {
+function getHeaders() {
   return {
-    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    Accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    Cookie: sessionCookies,
+    "Cache-Control": "max-age=0",
+    "Upgrade-Insecure-Requests": "1",
     "User-Agent":
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
   };
 }
 
 async function fetchPage(
-  sessionCookies: string,
+  cookieJar: CookieJar,
   page: number,
+  logger: SyncLogger,
 ): Promise<string> {
   const url = `${BASE_URL}?taxReferenceType=All&year=All&formStatus=All&items_per_page=${ITEMS_PER_PAGE}&page=${page}`;
-  const response = await fetch(url, {
-    headers: getHeaders(sessionCookies),
+  const response = await gotScraping({
+    url,
+    cookieJar,
+    followRedirect: false,
+    headers: {
+      ...getHeaders(),
+      Referer: BASE_URL,
+    },
+    headerGeneratorOptions: HEADER_GENERATOR_OPTIONS,
   });
 
-  if (!response.ok) {
-    throw new Error(`Guernsey page ${page + 1} failed: ${response.status}`);
+  if (response.statusCode === 302 || response.statusCode === 301) {
+    throw new Error(
+      `Guernsey page ${page + 1} redirected unexpectedly to ${response.headers.location ?? "unknown location"}`,
+    );
   }
 
-  return response.text();
+  if (response.statusCode === 403) {
+    logger.error("Guernsey page forbidden", {
+      page: page + 1,
+      url,
+      bodyPreview: response.body.substring(0, 300),
+    });
+    throw new Error(`Guernsey page ${page + 1} failed: 403`);
+  }
+
+  if (response.statusCode >= 400) {
+    throw new Error(
+      `Guernsey page ${page + 1} failed: ${response.statusCode}`,
+    );
+  }
+
+  return response.body;
 }
 
 function parseGuernseyReturns(html: string): SyncedTaxReturn[] {
@@ -116,7 +150,7 @@ export async function syncGuernseyReturns(input: {
 
   for (let page = 0; page < MAX_PAGES; page += 1) {
     fetchLogger.info("Fetching page", { page: page + 1 });
-    const html = await fetchPage(authResult.cookies, page);
+    const html = await fetchPage(authResult.cookieJar, page, fetchLogger);
     const rows = parseGuernseyReturns(html);
     fetchLogger.info("Parsed page", {
       page: page + 1,

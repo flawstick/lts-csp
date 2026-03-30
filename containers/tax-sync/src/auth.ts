@@ -4,9 +4,11 @@ import { CookieJar } from "tough-cookie";
 
 const IDENTITY_URL = "https://identity.gov.gg";
 const MYGOV_URL = "https://my.gov.gg";
+const PROTECTED_START_URL = `${MYGOV_URL}/revenue/all-cases-manager`;
 
 interface AuthResult {
   cookies: string;
+  cookieJar: CookieJar;
   expiresAt: Date;
 }
 
@@ -43,7 +45,7 @@ export async function authenticate(username: string, password: string): Promise<
   // Step 1: Visit my.gov.gg to get the OAuth redirect URL
   log("Visiting my.gov.gg...");
   const step1 = await gotScraping({
-    url: `${MYGOV_URL}/revenue/all-cases`,
+    url: PROTECTED_START_URL,
     followRedirect: false,
     cookieJar,
     headers: browserHeaders,
@@ -235,5 +237,5 @@ export async function authenticate(username: string, password: string): Promise<
   log(`Session expires: ${expiresAt.toISOString()}`);
 
   const cookieString = finalCookies.map(c => `${c.key}=${c.value}`).join("; ");
-  return { cookies: cookieString, expiresAt };
+  return { cookies: cookieString, cookieJar, expiresAt };
 }
