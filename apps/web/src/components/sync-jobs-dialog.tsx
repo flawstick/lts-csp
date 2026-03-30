@@ -81,7 +81,8 @@ export function SyncJobsDialog({
   const [allJobs, setAllJobs] = React.useState<SyncJob[]>([])
   const [hasMore, setHasMore] = React.useState(true)
   const [loadingMore, setLoadingMore] = React.useState(false)
-  const sentinelRef = React.useRef<HTMLTableRowElement>(null)
+  const sentinelRef = React.useRef<HTMLDivElement>(null)
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
     if (!open) return
@@ -90,12 +91,12 @@ export function SyncJobsDialog({
     }
   }, [open, initialJobId])
 
-  // Reset when filter or dialog state changes
+  // Reset only when filter changes, NOT when dialog opens/closes
   React.useEffect(() => {
     setPage(1)
     setAllJobs([])
     setHasMore(true)
-  }, [jurisdictionFilter, open])
+  }, [jurisdictionFilter])
 
   const { data, isLoading, refetch } = api.taxReturn.listSyncJobs.useQuery(
     {
@@ -142,19 +143,20 @@ export function SyncJobsDialog({
     }
   }, [allJobs, selectedJobId])
 
-  // IntersectionObserver for infinite scroll
+  // IntersectionObserver for infinite scroll — uses the scroll container as root
   React.useEffect(() => {
     const sentinel = sentinelRef.current
-    if (!sentinel || !hasMore || isLoading || loadingMore) return
+    const root = scrollContainerRef.current
+    if (!sentinel || !root || !hasMore || isLoading || loadingMore) return
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && hasMore && !isLoading && !loadingMore) {
+        if (entries[0]?.isIntersecting) {
           setLoadingMore(true)
           setPage((p) => p + 1)
         }
       },
-      { threshold: 0.1 },
+      { root, threshold: 0.1 },
     )
 
     observer.observe(sentinel)
@@ -210,7 +212,7 @@ export function SyncJobsDialog({
 
         <div className="grid h-[75vh] grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
           {/* Left panel — job list */}
-          <div className="min-w-0 min-h-0 border-r overflow-y-auto [&_[data-slot=table-container]]:overflow-visible">
+          <div ref={scrollContainerRef} className="min-w-0 min-h-0 border-r overflow-y-auto [&_[data-slot=table-container]]:overflow-visible">
               <Table>
                 <TableHeader className="bg-background sticky top-0 z-10 [&_tr]:bg-muted/40">
                   <TableRow>
@@ -275,9 +277,8 @@ export function SyncJobsDialog({
                           </TableCell>
                         </TableRow>
                       ))}
-                      {/* Sentinel row for infinite scroll */}
                       {hasMore && (
-                        <TableRow ref={sentinelRef}>
+                        <TableRow>
                           <TableCell colSpan={6} className="py-3 text-center">
                             {loadingMore ? (
                               <Loader2 className="mx-auto h-4 w-4 animate-spin text-muted-foreground" />
@@ -297,6 +298,7 @@ export function SyncJobsDialog({
                   )}
                 </TableBody>
               </Table>
+              {hasMore && <div ref={sentinelRef} className="h-1" />}
           </div>
 
           {/* Right panel — job details + logs */}

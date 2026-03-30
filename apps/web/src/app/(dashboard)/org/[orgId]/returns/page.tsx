@@ -11,6 +11,7 @@ import {
   IconCircleDot,
   IconGlobe,
   IconCalendar,
+  IconShieldCheck,
 } from "@tabler/icons-react"
 import {
   flexRender,
@@ -67,6 +68,7 @@ import { SyncJobsDialog } from "@/components/sync-jobs-dialog"
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | "dismissed" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
 type TaxYearFilter = "all" | `${number}`
+type ReadinessFilter = "all" | "ready" | "missing" | "needs_form"
 
 type TaxReturnRow = {
   id: string
@@ -288,6 +290,7 @@ export default function ReturnsPage() {
   const [taxYearFilter, setTaxYearFilter] = React.useState<TaxYearFilter>(
     `${defaultTaxYear}` as TaxYearFilter,
   )
+  const [readinessFilter, setReadinessFilter] = React.useState<ReadinessFilter>("all")
   const [searchQuery, setSearchQuery] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [syncJobsDialogOpen, setSyncJobsDialogOpen] = React.useState(syncJobsDialogRequested)
@@ -432,8 +435,19 @@ export default function ReturnsPage() {
     [orgId],
   )
 
+  const filteredReturns = React.useMemo(() => {
+    const returns = (data?.returns ?? []) as TaxReturnRow[]
+    if (readinessFilter === "all") return returns
+    return returns.filter((r) => {
+      if (readinessFilter === "ready") return r.isSubstanceComplete === true
+      if (readinessFilter === "missing") return (r.missingSubstanceFieldCount ?? 0) > 0 && !r.isSubstanceComplete
+      if (readinessFilter === "needs_form") return !r.isSubstanceComplete && (r.missingSubstanceFieldCount ?? 0) === 0
+      return true
+    })
+  }, [data?.returns, readinessFilter])
+
   const table = useReactTable({
-    data: (data?.returns ?? []) as TaxReturnRow[],
+    data: filteredReturns,
     columns,
     state: {
       columnVisibility,
@@ -635,6 +649,39 @@ export default function ReturnsPage() {
                           onCheckedChange={() => setTaxYearFilter(`${year}` as TaxYearFilter)}
                         >
                           {year}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </Tooltip>
+                <Tooltip>
+                  <DropdownMenu>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="relative size-8">
+                          <IconShieldCheck className="h-4 w-4" />
+                          {readinessFilter !== "all" && (
+                            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Readiness</TooltipContent>
+                    <DropdownMenuContent align="start" className="w-44">
+                      <DropdownMenuLabel>Readiness</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {([
+                        ["all", "All"],
+                        ["ready", "Ready"],
+                        ["missing", "Missing Fields"],
+                        ["needs_form", "Needs Form"],
+                      ] as const).map(([value, label]) => (
+                        <DropdownMenuCheckboxItem
+                          key={value}
+                          checked={readinessFilter === value}
+                          onCheckedChange={() => setReadinessFilter(value as ReadinessFilter)}
+                        >
+                          {label}
                         </DropdownMenuCheckboxItem>
                       ))}
                     </DropdownMenuContent>
