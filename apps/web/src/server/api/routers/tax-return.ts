@@ -712,6 +712,7 @@ export const taxReturnRouter = createTRPCRouter({
           ])
           .optional(),
         search: z.string().optional(),
+        readiness: z.enum(["ready", "missing", "needs_form"]).optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -723,6 +724,7 @@ export const taxReturnRouter = createTRPCRouter({
         taxYear,
         status,
         search,
+        readiness,
       } = input;
       const offset = (page - 1) * pageSize;
 
@@ -750,6 +752,29 @@ export const taxReturnRouter = createTRPCRouter({
         conditions.push(
           sql`(${taxReturns.entityName} ILIKE ${searchPattern} OR ${taxReturns.externalId} ILIKE ${searchPattern})`,
         );
+      }
+
+      if (readiness) {
+        const isCompleteSql = sql`
+          CASE
+            WHEN ${taxReturns.returnType} = 'economic_substance' THEN ${substanceForms.isComplete}
+            ELSE ${jerseyCompanyReturnForms.isComplete}
+          END
+        `;
+        const missingCountSql = sql`
+          CASE
+            WHEN ${taxReturns.returnType} = 'economic_substance' THEN COALESCE(jsonb_array_length(${substanceForms.missingFields}), 0)
+            ELSE COALESCE(jsonb_array_length(${jerseyCompanyReturnForms.missingFields}), 0)
+          END
+        `;
+
+        if (readiness === "ready") {
+          conditions.push(sql`(${isCompleteSql}) = true`);
+        } else if (readiness === "missing") {
+          conditions.push(sql`(${isCompleteSql}) IS NOT TRUE AND (${missingCountSql}) > 0`);
+        } else if (readiness === "needs_form") {
+          conditions.push(sql`(${isCompleteSql}) IS NOT TRUE AND (${missingCountSql}) = 0`);
+        }
       }
 
       const whereClause =
@@ -801,6 +826,11 @@ export const taxReturnRouter = createTRPCRouter({
         ctx.db
           .select({ count: sql<number>`count(*)` })
           .from(taxReturns)
+          .leftJoin(substanceForms, eq(substanceForms.taxReturnId, taxReturns.id))
+          .leftJoin(
+            jerseyCompanyReturnForms,
+            eq(jerseyCompanyReturnForms.taxReturnId, taxReturns.id),
+          )
           .leftJoin(
             jurisdictions,
             eq(taxReturns.jurisdictionId, jurisdictions.id),

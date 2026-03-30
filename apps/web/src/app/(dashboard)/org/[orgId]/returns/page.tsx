@@ -317,7 +317,7 @@ export default function ReturnsPage() {
   React.useEffect(() => {
     setPagination((prev) => ({ ...prev, pageIndex: 0 }))
     setRowSelection({})
-  }, [jurisdictionFilter, statusFilter, taxYearFilter])
+  }, [jurisdictionFilter, statusFilter, taxYearFilter, readinessFilter])
 
   React.useEffect(() => {
     setSyncJobsDialogOpen(syncJobsDialogRequested)
@@ -333,6 +333,7 @@ export default function ReturnsPage() {
       taxYear: taxYearFilter === "all" ? undefined : Number(taxYearFilter),
       status: statusFilter,
       search: debouncedSearch || undefined,
+      readiness: readinessFilter === "all" ? undefined : readinessFilter,
     },
     {
       refetchOnWindowFocus: false,
@@ -435,19 +436,8 @@ export default function ReturnsPage() {
     [orgId],
   )
 
-  const filteredReturns = React.useMemo(() => {
-    const returns = (data?.returns ?? []) as TaxReturnRow[]
-    if (readinessFilter === "all") return returns
-    return returns.filter((r) => {
-      if (readinessFilter === "ready") return r.isSubstanceComplete === true
-      if (readinessFilter === "missing") return (r.missingSubstanceFieldCount ?? 0) > 0 && !r.isSubstanceComplete
-      if (readinessFilter === "needs_form") return !r.isSubstanceComplete && (r.missingSubstanceFieldCount ?? 0) === 0
-      return true
-    })
-  }, [data?.returns, readinessFilter])
-
   const table = useReactTable({
-    data: filteredReturns,
+    data: (data?.returns ?? []) as TaxReturnRow[],
     columns,
     state: {
       columnVisibility,
