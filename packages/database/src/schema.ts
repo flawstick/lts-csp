@@ -64,6 +64,17 @@ export const taxSyncJobStatusEnum = pgEnum("tax_sync_job_status", [
   "failed",
 ]);
 
+export const taxSyncJobTriggerEnum = pgEnum("tax_sync_job_trigger", [
+  "manual",
+  "scheduler",
+]);
+
+export const taxSyncJobLogLevelEnum = pgEnum("tax_sync_job_log_level", [
+  "info",
+  "warn",
+  "error",
+]);
+
 export const taskTypeEnum = pgEnum("task_type", [
   "tax_return",
   "validation",
@@ -571,6 +582,7 @@ export const taxSyncJobs = createTable(
       .notNull()
       .references(() => jurisdictions.id),
     status: taxSyncJobStatusEnum().notNull().default("pending"),
+    trigger: taxSyncJobTriggerEnum("trigger").notNull().default("manual"),
     ecsTaskArn: varchar("ecs_task_arn", { length: 512 }),
     cloudwatchLogGroup: varchar("cloudwatch_log_group", { length: 256 }),
     cloudwatchLogStream: varchar("cloudwatch_log_stream", { length: 512 }),
@@ -578,6 +590,7 @@ export const taxSyncJobs = createTable(
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     errorMessage: text("error_message"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     createdBy: uuid("created_by").references(() => accounts.id),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -586,6 +599,27 @@ export const taxSyncJobs = createTable(
   (t) => [
     index("lts_tax_sync_job_org_idx").on(t.orgId),
     index("lts_tax_sync_job_status_idx").on(t.status),
+  ],
+);
+
+export const taxSyncJobLogs = createTable(
+  "tax_sync_job_log",
+  (d) => ({
+    id: uuid().primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => taxSyncJobs.id, { onDelete: "cascade" }),
+    level: taxSyncJobLogLevelEnum("level").notNull(),
+    scope: varchar("scope", { length: 256 }),
+    message: text("message").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  }),
+  (t) => [
+    index("lts_tax_sync_job_log_job_idx").on(t.jobId),
+    index("lts_tax_sync_job_log_created_idx").on(t.createdAt),
   ],
 );
 
@@ -1052,7 +1086,7 @@ export const jobsRelations = relations(jobs, ({ one }) => ({
   }),
 }));
 
-export const taxSyncJobsRelations = relations(taxSyncJobs, ({ one }) => ({
+export const taxSyncJobsRelations = relations(taxSyncJobs, ({ one, many }) => ({
   organisation: one(organisations, {
     fields: [taxSyncJobs.orgId],
     references: [organisations.id],
@@ -1064,6 +1098,14 @@ export const taxSyncJobsRelations = relations(taxSyncJobs, ({ one }) => ({
   createdByAccount: one(accounts, {
     fields: [taxSyncJobs.createdBy],
     references: [accounts.id],
+  }),
+  logs: many(taxSyncJobLogs),
+}));
+
+export const taxSyncJobLogsRelations = relations(taxSyncJobLogs, ({ one }) => ({
+  job: one(taxSyncJobs, {
+    fields: [taxSyncJobLogs.jobId],
+    references: [taxSyncJobs.id],
   }),
 }));
 
@@ -1139,6 +1181,8 @@ export type NewJob = typeof jobs.$inferInsert;
 
 export type TaxSyncJob = typeof taxSyncJobs.$inferSelect;
 export type NewTaxSyncJob = typeof taxSyncJobs.$inferInsert;
+export type TaxSyncJobLog = typeof taxSyncJobLogs.$inferSelect;
+export type NewTaxSyncJobLog = typeof taxSyncJobLogs.$inferInsert;
 
 export type SubstanceForm = typeof substanceForms.$inferSelect;
 export type NewSubstanceForm = typeof substanceForms.$inferInsert;

@@ -38,12 +38,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
@@ -55,7 +49,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
@@ -65,10 +58,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Loader2, ExternalLink, RefreshCw, History, Play, Terminal, CheckCircle2, XCircle, Search, X, MoreHorizontal, Trash, FileText } from "@/lib/icons"
+import { Loader2, ExternalLink, RefreshCw, History, Play, Search, X, MoreHorizontal, Trash, FileText } from "@/lib/icons"
 import Link from "next/link"
 import { api } from "@/trpc/react"
 import { Skeleton } from "@/components/ui/skeleton"
+import { SyncJobsDialog } from "@/components/sync-jobs-dialog"
 
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | "dismissed" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
@@ -285,6 +279,7 @@ export default function ReturnsPage() {
   const orgId = params?.orgId as string
   const searchParams = useSearchParams()
   const initialStatus = searchParams.get("status") as StatusFilter
+  const syncJobsDialogRequested = searchParams.get("dialog") === "sync-jobs"
   const currentCalendarYear = React.useMemo(() => new Date().getUTCFullYear(), [])
   const defaultTaxYear = currentCalendarYear - 1
 
@@ -295,8 +290,8 @@ export default function ReturnsPage() {
   )
   const [searchQuery, setSearchQuery] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
-  const [logsDialogOpen, setLogsDialogOpen] = React.useState(false)
-  const [activeJobId, setActiveJobId] = React.useState<string | null>(null)
+  const [syncJobsDialogOpen, setSyncJobsDialogOpen] = React.useState(syncJobsDialogRequested)
+  const [selectedSyncJobId, setSelectedSyncJobId] = React.useState<string | null>(null)
   const [syncJurisdiction, setSyncJurisdiction] = React.useState<"GG" | "JE">("GG")
 
   // TanStack Table state
@@ -322,7 +317,9 @@ export default function ReturnsPage() {
     setRowSelection({})
   }, [jurisdictionFilter, statusFilter, taxYearFilter])
 
-  const utils = api.useUtils()
+  React.useEffect(() => {
+    setSyncJobsDialogOpen(syncJobsDialogRequested)
+  }, [syncJobsDialogRequested])
 
   const { data, isLoading, refetch } = api.taxReturn.list.useQuery(
     {
@@ -364,34 +361,51 @@ export default function ReturnsPage() {
     onSuccess: () => refetch(),
   })
 
-  const { data: activeJob } = api.taxReturn.getActiveSyncJob.useQuery(undefined, {
+  const { data: activeJob } = api.taxReturn.getActiveSyncJob.useQuery({ orgId }, {
     refetchInterval: 3000,
   })
 
-  const { data: logsData } = api.taxReturn.getSyncJobLogs.useQuery(
-    { jobId: activeJobId! },
-    {
-      enabled: !!activeJobId,
-      refetchInterval: logsDialogOpen ? 2000 : 5000,
-    }
-  )
-
   const startSyncMutation = api.taxReturn.startSyncJob.useMutation({
     onSuccess: (data) => {
-      setActiveJobId(data.jobId)
-      setLogsDialogOpen(true)
+      setSelectedSyncJobId(data.jobId)
+      handleSyncJobsDialogChange(true)
     },
     onError: () => {
-      setActiveJobId(null)
+      setSelectedSyncJobId(null)
     },
   })
 
-  // If there's an active job on load, set the jobId but don't auto-open dialog
   React.useEffect(() => {
-    if (activeJob && !activeJobId) {
-      setActiveJobId(activeJob.id)
+    if (activeJob && !selectedSyncJobId) {
+      setSelectedSyncJobId(activeJob.id)
     }
-  }, [activeJob, activeJobId])
+  }, [activeJob, selectedSyncJobId])
+
+  const previousActiveJobIdRef = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (previousActiveJobIdRef.current && !activeJob) {
+      void refetch()
+    }
+
+    previousActiveJobIdRef.current = activeJob?.id ?? null
+  }, [activeJob, refetch])
+
+  const handleSyncJobsDialogChange = (nextOpen: boolean) => {
+    setSyncJobsDialogOpen(nextOpen)
+
+    const nextParams = new URLSearchParams(searchParams.toString())
+    if (nextOpen) {
+      nextParams.set("dialog", "sync-jobs")
+    } else {
+      nextParams.delete("dialog")
+    }
+
+    const nextQuery = nextParams.toString()
+    router.replace(
+      nextQuery ? `/org/${orgId}/returns?${nextQuery}` : `/org/${orgId}/returns`,
+      { scroll: false },
+    )
+  }
 
   const handleStartSync = () => {
     startSyncMutation.mutate({
@@ -411,16 +425,6 @@ export default function ReturnsPage() {
      if (confirm("Are you sure you want to delete this return?")) {
       deleteMutation.mutate([id])
     }
-  }
-
-  const formatLogTime = (timestamp: number | undefined) => {
-    if (!timestamp) return ""
-    return new Date(timestamp).toLocaleTimeString("en-US", {
-      hour12: false,
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    })
   }
 
   const columns = React.useMemo(
@@ -449,21 +453,8 @@ export default function ReturnsPage() {
 
   const selectedCount = Object.keys(rowSelection).length
 
-  const isJobComplete = logsData?.job?.status === "completed"
-  const isJobFailed = logsData?.job?.status === "failed"
-  const isJobRunning = activeJob?.status === "running" && logsData?.job?.status === "running"
-
-  // When job finishes (completed/failed), refresh data and clear state
-  const jobStatus = logsData?.job?.status
-  React.useEffect(() => {
-    if (jobStatus === "completed" || jobStatus === "failed") {
-      refetch()
-      utils.taxReturn.getActiveSyncJob.invalidate()
-      if (!logsDialogOpen) {
-        setActiveJobId(null)
-      }
-    }
-  }, [jobStatus]) // eslint-disable-line react-hooks/exhaustive-deps
+  const isJobRunning =
+    activeJob?.status === "pending" || activeJob?.status === "running"
 
   return (
     <>
@@ -491,11 +482,9 @@ export default function ReturnsPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" asChild>
-                <Link href={`/org/${orgId}/returns/sync-jobs`}>
-                  <History className="mr-2 h-4 w-4" />
-                  Sync Jobs
-                </Link>
+              <Button variant="outline" onClick={() => handleSyncJobsDialogChange(true)}>
+                <History className="mr-2 h-4 w-4" />
+                Sync Jobs
               </Button>
               <Button variant="outline" asChild>
                 <Link href={`/org/${orgId}/returns/scrape`}>
@@ -518,7 +507,7 @@ export default function ReturnsPage() {
                 </SelectContent>
               </Select>
               {isJobRunning ? (
-                <Button variant="outline" onClick={() => setLogsDialogOpen(true)}>
+                <Button variant="outline" onClick={() => handleSyncJobsDialogChange(true)}>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Syncing...
                 </Button>
@@ -844,80 +833,12 @@ export default function ReturnsPage() {
         </div>
         </main>
 
-        {/* Logs Dialog */}
-        <Dialog open={logsDialogOpen} onOpenChange={setLogsDialogOpen}>
-          <DialogContent className="!max-w-5xl !w-[80vw] max-h-[85vh] p-0 gap-0 overflow-hidden">
-            <DialogHeader className="px-4 py-4 border-b bg-muted/50">
-              <DialogTitle className="flex items-center gap-3 text-base font-medium">
-                <div className={`p-2 rounded-md ${
-                  isJobComplete ? "bg-green-500/10" : isJobFailed ? "bg-red-500/10" : "bg-primary/10"
-                }`}>
-                  {isJobComplete ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-600" />
-                  ) : isJobFailed ? (
-                    <XCircle className="h-4 w-4 text-red-600" />
-                  ) : (
-                    <Terminal className="h-4 w-4 text-primary" />
-                  )}
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <span>
-                    {isJobComplete ? "Sync Complete" : isJobFailed ? "Sync Failed" : "Syncing Returns..."}
-                  </span>
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {logsData?.logs?.length || 0} log entries
-                    {logsData?.job?.returnsFound && ` \u2022 ${logsData.job.returnsFound} returns found`}
-                  </span>
-                </div>
-                {isJobRunning && (
-                  <Loader2 className="ml-auto h-4 w-4 animate-spin text-muted-foreground" />
-                )}
-              </DialogTitle>
-            </DialogHeader>
-            <ScrollArea className="h-[60vh] bg-muted/30">
-              <div className="p-4">
-                {logsData?.logs && logsData.logs.length > 0 ? (
-                  <div className="space-y-0.5">
-                    {logsData.logs.map((log, i) => (
-                      <div
-                        key={i}
-                        className="flex gap-4 py-1.5 px-3 -mx-1 rounded-md hover:bg-muted/50 transition-colors"
-                      >
-                        <span className="text-xs text-muted-foreground shrink-0 tabular-nums pt-0.5">
-                          {formatLogTime(log.timestamp)}
-                        </span>
-                        <span className={`text-sm break-all ${
-                          log.message.includes("Error") || log.message.includes("error")
-                            ? "text-red-600 dark:text-red-400"
-                            : log.message.includes("Done") || log.message.includes("Success") || log.message.includes("Synced")
-                              ? "text-green-600 dark:text-green-400"
-                              : "text-foreground"
-                        }`}>
-                          {log.message}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-muted-foreground flex flex-col items-center justify-center h-32">
-                    <Loader2 className="h-6 w-6 animate-spin mb-2" />
-                    <p className="text-sm">Waiting for logs...</p>
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-            {(isJobComplete || isJobFailed) && (
-              <div className="px-5 py-3 border-t bg-muted/30 flex justify-end">
-                <Button onClick={() => {
-                  setLogsDialogOpen(false)
-                  setActiveJobId(null)
-                }}>
-                  Close
-                </Button>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
+        <SyncJobsDialog
+          orgId={orgId}
+          open={syncJobsDialogOpen}
+          onOpenChange={handleSyncJobsDialogChange}
+          initialJobId={selectedSyncJobId}
+        />
     </>
   )
 }

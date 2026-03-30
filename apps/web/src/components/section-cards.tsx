@@ -38,7 +38,7 @@ export function SectionCards({ orgId }: SectionCardsProps) {
             </Link>
           </Button>
           <Button variant="outline" size="sm" className="justify-start" asChild>
-            <Link href={`/org/${orgId}/returns/sync-jobs`} prefetch={true}>
+            <Link href={`/org/${orgId}/returns?dialog=sync-jobs`} prefetch={true}>
               <RefreshCw className="mr-2 h-3 w-3" />
               Sync
             </Link>

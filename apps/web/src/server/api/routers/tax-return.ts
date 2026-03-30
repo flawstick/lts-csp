@@ -12,6 +12,7 @@ import {
   taxReturns,
   jurisdictions,
   taxSyncJobs,
+  taxSyncJobLogs,
   organisations,
   tasks,
   substanceForms,
@@ -19,7 +20,7 @@ import {
   taxReturnFileCategories,
   taxReturnFileRoles,
 } from "@repo/database";
-import { desc, sql, eq, and, lt, inArray } from "drizzle-orm";
+import { asc, desc, sql, eq, and, lt, inArray, or } from "drizzle-orm";
 import {
   CloudWatchLogsClient,
   GetLogEventsCommand,
@@ -199,6 +200,66 @@ async function maybeMarkBrowserJobStale<
     completedAt: new Date(),
     errorMessage: reason,
     resultData: nextResultData,
+  };
+}
+
+const SYNC_JOB_PENDING_STALE_MS = 5 * 60 * 1000;
+const SYNC_JOB_RUNNING_STALE_MS = 30 * 60 * 1000;
+
+async function maybeMarkSyncJobStale<
+  T extends {
+    id: string;
+    status: string;
+    createdAt: Date | string;
+    startedAt?: Date | string | null;
+    completedAt?: Date | string | null;
+    errorMessage?: string | null;
+  },
+>(dbClient: typeof db, job: T): Promise<T> {
+  const now = Date.now();
+  let reason: string | null = null;
+
+  if (job.status === "pending") {
+    const ageMs = now - new Date(job.createdAt).getTime();
+    if (ageMs > SYNC_JOB_PENDING_STALE_MS) {
+      reason = "Sync did not start";
+    }
+  }
+
+  if (job.status === "running") {
+    const lastLog = await dbClient.query.taxSyncJobLogs.findFirst({
+      where: eq(taxSyncJobLogs.jobId, job.id),
+      orderBy: desc(taxSyncJobLogs.createdAt),
+    });
+
+    const lastActivityAt =
+      lastLog?.createdAt ??
+      (job.startedAt ? new Date(job.startedAt) : null) ??
+      new Date(job.createdAt);
+
+    if (now - new Date(lastActivityAt).getTime() > SYNC_JOB_RUNNING_STALE_MS) {
+      reason = "Sync job stopped producing logs";
+    }
+  }
+
+  if (!reason) {
+    return job;
+  }
+
+  await dbClient
+    .update(taxSyncJobs)
+    .set({
+      status: "failed",
+      completedAt: new Date(),
+      errorMessage: reason,
+    })
+    .where(eq(taxSyncJobs.id, job.id));
+
+  return {
+    ...job,
+    status: "failed",
+    completedAt: new Date(),
+    errorMessage: reason,
   };
 }
 
@@ -784,19 +845,33 @@ export const taxReturnRouter = createTRPCRouter({
       const whereClause =
         conditions.length > 0 ? and(...conditions) : undefined;
 
-      // Mark stale "running" jobs as failed (running for more than 10 minutes)
-      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+      const fiveMinutesAgo = new Date(Date.now() - SYNC_JOB_PENDING_STALE_MS);
+      const thirtyMinutesAgo = new Date(Date.now() - SYNC_JOB_RUNNING_STALE_MS);
       await ctx.db
         .update(taxSyncJobs)
         .set({
           status: "failed",
           completedAt: new Date(),
-          errorMessage: "Task timed out or was stopped externally",
+          errorMessage: "Sync did not start",
+        })
+        .where(
+          and(
+            eq(taxSyncJobs.status, "pending"),
+            lt(taxSyncJobs.createdAt, fiveMinutesAgo),
+          ),
+        );
+
+      await ctx.db
+        .update(taxSyncJobs)
+        .set({
+          status: "failed",
+          completedAt: new Date(),
+          errorMessage: "Sync job stopped producing logs",
         })
         .where(
           and(
             eq(taxSyncJobs.status, "running"),
-            lt(taxSyncJobs.startedAt, tenMinutesAgo),
+            lt(taxSyncJobs.startedAt, thirtyMinutesAgo),
           ),
         );
 
@@ -805,14 +880,13 @@ export const taxReturnRouter = createTRPCRouter({
           .select({
             id: taxSyncJobs.id,
             status: taxSyncJobs.status,
-            ecsTaskArn: taxSyncJobs.ecsTaskArn,
-            cloudwatchLogGroup: taxSyncJobs.cloudwatchLogGroup,
-            cloudwatchLogStream: taxSyncJobs.cloudwatchLogStream,
+            trigger: taxSyncJobs.trigger,
             returnsFound: taxSyncJobs.returnsFound,
             startedAt: taxSyncJobs.startedAt,
             completedAt: taxSyncJobs.completedAt,
             errorMessage: taxSyncJobs.errorMessage,
             createdAt: taxSyncJobs.createdAt,
+            metadata: taxSyncJobs.metadata,
             jurisdiction: {
               name: jurisdictions.name,
               code: jurisdictions.code,
@@ -854,99 +928,36 @@ export const taxReturnRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       let job = await ctx.db.query.taxSyncJobs.findFirst({
         where: eq(taxSyncJobs.id, input.jobId),
+        with: {
+          organisation: true,
+          jurisdiction: true,
+        },
       });
 
       if (!job) {
         throw new Error("Job not found");
       }
 
-      if (!job.cloudwatchLogGroup || !job.cloudwatchLogStream) {
-        return { logs: [], job };
-      }
+      job = await maybeMarkSyncJobStale(ctx.db, job);
 
-      const markJobFailed = async (reason: string) => {
-        await ctx.db
-          .update(taxSyncJobs)
-          .set({
-            status: "failed",
-            completedAt: new Date(),
-            errorMessage: reason,
-          })
-          .where(eq(taxSyncJobs.id, job!.id));
-        job = {
-          ...job!,
-          status: "failed",
-          completedAt: new Date(),
-          errorMessage: reason,
-        };
+      const logs = await ctx.db.query.taxSyncJobLogs.findMany({
+        where: eq(taxSyncJobLogs.jobId, input.jobId),
+        orderBy: [asc(taxSyncJobLogs.createdAt), asc(taxSyncJobLogs.id)],
+        limit: 1000,
+      });
+
+      return {
+        job,
+        logs: logs.map((log) => ({
+          id: log.id,
+          timestamp: log.createdAt?.getTime(),
+          message: log.message,
+          level: log.level,
+          scope: log.scope,
+          payload: log.payload,
+        })),
+        pending: job.status === "pending" || job.status === "running",
       };
-
-      try {
-        const client = new CloudWatchLogsClient({ region: "eu-west-2" });
-        const command = new GetLogEventsCommand({
-          logGroupName: job.cloudwatchLogGroup,
-          logStreamName: job.cloudwatchLogStream,
-          startFromHead: true,
-          limit: 500,
-        });
-
-        const response = await client.send(command);
-        const logs = (response.events || []).map((event) => ({
-          timestamp: event.timestamp,
-          message: event.message || "",
-        }));
-
-        if (job.status === "running") {
-          // Detect if the job crashed from logs
-          if (logs.length > 0) {
-            const logText = logs.map((l) => l.message).join("\n");
-            const hasCrashed =
-              logText.includes("ELIFECYCLE") ||
-              logText.includes("exit code 1") ||
-              logText.includes("SyntaxError") ||
-              logText.includes("Error:") ||
-              logText.includes("Cannot find module");
-
-            if (hasCrashed) {
-              await markJobFailed("Task crashed - check logs for details");
-            }
-          } else if (job.startedAt) {
-            // No logs but job claims to be running - check if stale
-            const ageMs = Date.now() - new Date(job.startedAt).getTime();
-            if (ageMs > 60_000) {
-              // Running for >1 min with no logs = dead
-              await markJobFailed("Task died without producing logs");
-            }
-          }
-        }
-
-        return { logs, job };
-      } catch (error) {
-        const isResourceNotFound =
-          (error as { name?: string })?.name === "ResourceNotFoundException";
-
-        // ResourceNotFoundException is expected when ECS task just started
-        if (!isResourceNotFound) {
-          console.error("Failed to fetch CloudWatch logs:", error);
-        }
-
-        // Only mark as failed if running for >30s (give ECS time to create log stream)
-        if (job.status === "running" && job.startedAt) {
-          const ageMs = Date.now() - new Date(job.startedAt).getTime();
-          if (ageMs > 30_000) {
-            await markJobFailed("Task failed - log stream not found");
-          }
-        }
-
-        return {
-          logs: [],
-          job,
-          pending: isResourceNotFound && job.status === "running",
-          error: isResourceNotFound
-            ? "Waiting for logs..."
-            : "Failed to fetch logs",
-        };
-      }
     }),
 
   getJobLogs: publicProcedure
@@ -1070,107 +1081,124 @@ export const taxReturnRouter = createTRPCRouter({
           orgId: org.id,
           jurisdictionId: jurisdiction.id,
           status: "pending",
-          cloudwatchLogGroup: "/ecs/lts-tax-sync",
+          trigger: "manual",
+          metadata: {
+            requestedVia: "platform",
+            executionMode: env.TAX_SYNC_EXECUTION_MODE,
+          },
         })
         .returning();
 
       if (!job) throw new Error("Failed to create job");
 
-      const result = await triggerTaxSync({
+      await ctx.db.insert(taxSyncJobLogs).values({
         jobId: job.id,
-        orgId: org.id,
-        jurisdictionCode: jurisdiction.code,
-        portalUsername: credentials?.username,
-        portalPassword: credentials?.password,
+        level: "info",
+        scope: "manual",
+        message: "Manual sync requested",
+        payload: {
+          jurisdictionCode: jurisdiction.code,
+          mode: env.TAX_SYNC_EXECUTION_MODE,
+        },
       });
 
-      const isEcsLaunch = result.mode === "ecs";
-      const taskId = isEcsLaunch ? result.taskArn?.split("/").pop() : null;
-      const logStream = taskId ? `ecs/lts-tax-sync/${taskId}` : null;
-
-      // Update job with ECS info
-      await ctx.db
-        .update(taxSyncJobs)
-        .set({
-          ecsTaskArn: isEcsLaunch ? result.taskArn ?? null : null,
-          cloudwatchLogGroup: isEcsLaunch ? "/ecs/lts-tax-sync" : null,
-          cloudwatchLogStream: isEcsLaunch ? logStream : null,
-          status: "running",
-          startedAt: new Date(),
-        })
-        .where(eq(taxSyncJobs.id, job.id));
-
-      return {
-        jobId: job.id,
-        taskArn: result.taskArn,
-        jurisdictionCode: jurisdiction.code,
-        mode: result.mode,
-      };
-    }),
-
-  getActiveSyncJob: publicProcedure.query(async ({ ctx }) => {
-    // First, mark stale "running" jobs as failed (running for more than 3 minutes)
-    const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000);
-    await ctx.db
-      .update(taxSyncJobs)
-      .set({
-        status: "failed",
-        completedAt: new Date(),
-        errorMessage: "Task crashed or timed out",
-      })
-      .where(
-        and(
-          eq(taxSyncJobs.status, "running"),
-          lt(taxSyncJobs.startedAt, threeMinutesAgo),
-        ),
-      );
-
-    const activeJob = await ctx.db.query.taxSyncJobs.findFirst({
-      where: eq(taxSyncJobs.status, "running"),
-      orderBy: desc(taxSyncJobs.createdAt),
-    });
-
-    // If we have an active job, check CloudWatch logs for crash indicators
-    if (activeJob?.cloudwatchLogGroup && activeJob?.cloudwatchLogStream) {
       try {
-        const client = new CloudWatchLogsClient({ region: "eu-west-2" });
-        const command = new GetLogEventsCommand({
-          logGroupName: activeJob.cloudwatchLogGroup,
-          logStreamName: activeJob.cloudwatchLogStream,
-          startFromHead: true,
-          limit: 100,
+        const result = await triggerTaxSync({
+          jobId: job.id,
+          orgId: org.id,
+          jurisdictionCode: jurisdiction.code,
+          portalUsername: credentials?.username,
+          portalPassword: credentials?.password,
         });
 
-        const response = await client.send(command);
-        const logText = (response.events || [])
-          .map((e) => e.message || "")
-          .join("\n");
+        await ctx.db.insert(taxSyncJobLogs).values({
+          jobId: job.id,
+          level: "info",
+          scope: "manual",
+          message: "Sync dispatched",
+          payload: {
+            mode: result.mode,
+            taskArn: result.taskArn ?? null,
+            accepted: result.accepted ?? null,
+          },
+        });
 
-        const hasCrashed =
-          logText.includes("ELIFECYCLE") ||
-          logText.includes("exit code 1") ||
-          logText.includes("SyntaxError") ||
-          logText.includes("Cannot find module");
-
-        if (hasCrashed) {
+        if (result.mode === "ecs") {
           await ctx.db
             .update(taxSyncJobs)
             .set({
-              status: "failed",
-              completedAt: new Date(),
-              errorMessage: "Task crashed - check logs for details",
+              ecsTaskArn: result.taskArn ?? null,
+              cloudwatchLogGroup: "/ecs/lts-tax-sync",
+              cloudwatchLogStream: result.taskArn
+                ? `ecs/lts-tax-sync/${result.taskArn.split("/").pop()}`
+                : null,
             })
-            .where(eq(taxSyncJobs.id, activeJob.id));
-
-          return null; // No active job anymore
+            .where(eq(taxSyncJobs.id, job.id));
         }
-      } catch {
-        // Ignore CloudWatch errors here
-      }
-    }
 
-    return activeJob ?? null;
-  }),
+        return {
+          jobId: job.id,
+          taskArn: result.taskArn,
+          jurisdictionCode: jurisdiction.code,
+          mode: result.mode,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+
+        await ctx.db
+          .update(taxSyncJobs)
+          .set({
+            status: "failed",
+            completedAt: new Date(),
+            errorMessage: message,
+          })
+          .where(eq(taxSyncJobs.id, job.id));
+
+        await ctx.db.insert(taxSyncJobLogs).values({
+          jobId: job.id,
+          level: "error",
+          scope: "manual",
+          message: "Failed to dispatch sync",
+          payload: {
+            error: message,
+          },
+        });
+
+        throw error;
+      }
+    }),
+
+  getActiveSyncJob: publicProcedure
+    .input(z.object({ orgId: z.string().uuid().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const filters = [
+        or(eq(taxSyncJobs.status, "pending"), eq(taxSyncJobs.status, "running")),
+      ];
+
+      if (input?.orgId) {
+        filters.push(eq(taxSyncJobs.orgId, input.orgId));
+      }
+
+      let activeJob = await ctx.db.query.taxSyncJobs.findFirst({
+        where: and(...filters),
+        orderBy: desc(taxSyncJobs.createdAt),
+        with: {
+          organisation: true,
+          jurisdiction: true,
+        },
+      });
+
+      if (!activeJob) {
+        return null;
+      }
+
+      activeJob = await maybeMarkSyncJobStale(ctx.db, activeJob);
+      if (activeJob.status === "failed") {
+        return null;
+      }
+
+      return activeJob;
+    }),
 
   deleteFailedSyncJobs: publicProcedure.mutation(async ({ ctx }) => {
     const result = await ctx.db

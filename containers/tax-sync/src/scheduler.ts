@@ -260,6 +260,7 @@ async function runSchedulerCycleInternal() {
       const result = await runTaxSyncJob({
         orgId: target.orgId,
         jurisdictionCode: target.jurisdictionCode,
+        trigger: "scheduler",
         portalUsername: target.portalUsername,
         portalPassword: target.portalPassword,
         logger: targetLogger,

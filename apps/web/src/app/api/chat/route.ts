@@ -57,11 +57,11 @@ Detailed view for a specific return:
 - Substance form data viewer with section navigation
 - File attachments and documents
 
-### Sync Jobs — [Sync Jobs](/org/{orgId}/returns/sync-jobs)
+### Sync Jobs — [Sync Jobs](/org/{orgId}/returns?dialog=sync-jobs)
 Manage portal synchronisation:
 - View sync job history with timestamps and status
 - Trigger new sync for Guernsey or Jersey
-- Live log viewer for active sync jobs
+- Inspect persisted logs for manual and scheduled sync jobs
 
 ### Tasks — [Tasks](/org/{orgId}/tasks)
 Processing task management:

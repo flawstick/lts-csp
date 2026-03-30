@@ -16,12 +16,10 @@ export default async function DashboardLayout({
   const defaultOpen = sidebarStateCookie?.value !== "false"
 
   return (
-    <SidebarProvider defaultOpen={defaultOpen} className="bg-sidebar overflow-hidden">
+    <SidebarProvider defaultOpen={defaultOpen} className="bg-sidebar">
       <AppSidebar />
-      <SidebarInset className="!bg-container min-w-0 overflow-hidden">
-        <div className="flex h-full w-full flex-col overflow-hidden">
-          {children}
-        </div>
+      <SidebarInset className="flex !bg-container min-h-0 min-w-0 flex-col overflow-hidden">
+        {children}
       </SidebarInset>
     </SidebarProvider>
   )

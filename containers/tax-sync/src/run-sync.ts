@@ -1,14 +1,16 @@
 import { db, schema } from "@repo/database";
 import { eq, sql } from "drizzle-orm";
 import { syncGuernseyReturns } from "./guernsey";
+import { createTaxSyncJobLogger } from "./job-logger";
 import { syncJerseyReturns } from "./jersey";
-import { createLogger } from "./logger";
+import { combineLoggers, createLogger } from "./logger";
 import type { SyncedTaxReturn, SyncedReturnType, SyncLogger } from "./types";
 
 export interface EnsureTaxSyncJobInput {
   jobId?: string;
   orgId: string;
   jurisdictionCode: string;
+  trigger?: "manual" | "scheduler";
 }
 
 export interface RunTaxSyncJobInput extends EnsureTaxSyncJobInput {
@@ -101,6 +103,7 @@ export async function ensureTaxSyncJobId(
       orgId: input.orgId,
       jurisdictionId: jurisdiction.id,
       status: "pending",
+      trigger: input.trigger ?? "manual",
     })
     .returning({ id: schema.taxSyncJobs.id });
 
@@ -119,14 +122,20 @@ export async function runTaxSyncJob(
     jobId: input.jobId,
     orgId: input.orgId,
     jurisdictionCode,
+    trigger: input.trigger,
   });
-  const logger =
+  const consoleLogger =
     input.logger ?? createLogger("WORKER", jurisdictionCode, jobId.slice(0, 8));
+  const logger = combineLoggers(
+    consoleLogger,
+    createTaxSyncJobLogger(jobId, "WORKER", jurisdictionCode, jobId.slice(0, 8)),
+  );
 
   logger.info("Worker starting", {
     jobId,
     orgId: input.orgId,
     jurisdictionCode,
+    trigger: input.trigger ?? "manual",
   });
 
   try {
@@ -234,6 +243,7 @@ export async function runTaxSyncJob(
     logger.info("Worker completed", {
       returnsFound: syncedReturns.length,
     });
+    await logger.flush();
 
     return {
       jobId,
@@ -253,6 +263,7 @@ export async function runTaxSyncJob(
       completedAt: new Date(),
       errorMessage: message,
     });
+    await logger.flush();
 
     throw error;
   }

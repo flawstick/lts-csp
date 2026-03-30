@@ -151,9 +151,9 @@ If prompted for CSP or secret credentials:
 }
 - Once you are on the case **view** page, click **"Assign to user"**.
 - A list of users will appear.
-- Click **"Assign"** on the **first "Amir Isaac"** that appears in the list.
-- If that assignment does not work, does not stick, or the case still does not appear assigned correctly, repeat the action and click **"Assign"** on the **other "Amir Isaac"** entry.
-- If the case is already assigned to someone already, including **Amir Isaac**, still reassign it: click **"Assign to another user"** and then pick the **first "Amir Isaac"** again.
+- Click **"Assign"** on the **second "Amir Isaac"** that appears in the list (not the first one).
+- If that assignment does not work, does not stick, or the case still does not appear assigned correctly, repeat the action and click **"Assign"** on the **other "Amir Isaac"** entry (the first one).
+- If the case is already assigned to someone already, including **Amir Isaac**, still reassign it: click **"Assign to another user"** and then pick the **second "Amir Isaac"** again.
 - Only after the case has been freshly assigned to **Amir Isaac** in this run should you continue with the filing workflow.
 - After assignment, return to the filing/processing page and continue the return.
 

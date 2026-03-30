@@ -64,6 +64,13 @@
       "when": 1774840671238,
       "tag": "0008_unknown_tempest",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1774853807355,
+      "tag": "0009_charming_secret_warriors",
+      "breakpoints": true
     }
   ]
 }

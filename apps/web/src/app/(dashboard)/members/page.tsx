@@ -326,7 +326,7 @@ export default function PlatformMembersPage() {
             </BreadcrumbList>
           </Breadcrumb>
         </PageHeader>
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
+        <main className="flex-1 overflow-auto p-4 sm:p-6">
           <div className="flex items-center justify-between">
             <div>
               <Skeleton className="h-8 w-48 mb-2" />
@@ -403,7 +403,7 @@ export default function PlatformMembersPage() {
               </Table>
             </CardContent>
           </Card>
-        </div>
+        </main>
       </>
     )
   }
@@ -423,7 +423,7 @@ export default function PlatformMembersPage() {
           </BreadcrumbList>
         </Breadcrumb>
       </PageHeader>
-      <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
+      <main className="flex-1 overflow-auto p-4 sm:p-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold">Platform Members</h1>
@@ -701,7 +701,7 @@ export default function PlatformMembersPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
+      </main>
 
       {/* Remove Member Confirmation Dialog */}
       <AlertDialog open={!!memberToRemove} onOpenChange={(open) => !open && setMemberToRemove(null)}>

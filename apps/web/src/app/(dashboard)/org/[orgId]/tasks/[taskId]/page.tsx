@@ -791,7 +791,7 @@ export default function TaskDetailPage() {
   // ── Main render ────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
+    <div className="flex h-full max-h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
       <TaskHeader
         orgId={orgId}
         taskName={task.name}

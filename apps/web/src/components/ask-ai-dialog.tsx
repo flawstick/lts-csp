@@ -224,7 +224,7 @@ export function AskAiDialog({ open, onOpenChange, orgName, userAvatarUrl, userFu
                           transition={{ duration: 0.2, ease: "easeOut" }}
                           className={cn(
                             "flex gap-2.5",
-                            msg.role === "user" ? "flex-row-reverse" : "flex-row",
+                            msg.role === "user" ? "flex-row-reverse pl-8" : "flex-row pr-8",
                           )}
                         >
                           {msg.role === "assistant" ? (
