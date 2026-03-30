@@ -16,6 +16,7 @@ import {
 import {
   flexRender,
   getCoreRowModel,
+  getPaginationRowModel,
   useReactTable,
   type ColumnDef,
   type VisibilityState,
@@ -323,11 +324,13 @@ export default function ReturnsPage() {
     setSyncJobsDialogOpen(syncJobsDialogRequested)
   }, [syncJobsDialogRequested])
 
+  const isReadinessActive = readinessFilter !== "all"
+
   const { data, isLoading, refetch } = api.taxReturn.list.useQuery(
     {
       orgId,
-      page: pagination.pageIndex + 1,
-      pageSize: pagination.pageSize,
+      page: isReadinessActive ? 1 : pagination.pageIndex + 1,
+      pageSize: isReadinessActive ? 100 : pagination.pageSize,
       jurisdictionCode:
         jurisdictionFilter === "all" ? undefined : jurisdictionFilter,
       taxYear: taxYearFilter === "all" ? undefined : Number(taxYearFilter),
@@ -456,12 +459,13 @@ export default function ReturnsPage() {
     },
     getRowId: (row) => row.id,
     enableRowSelection: true,
-    manualPagination: true,
-    pageCount: data?.totalPages ?? 1,
+    manualPagination: !isReadinessActive,
+    pageCount: isReadinessActive ? undefined : (data?.totalPages ?? 1),
     onRowSelectionChange: setRowSelection,
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange: setPagination,
     getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: isReadinessActive ? getPaginationRowModel() : undefined,
   })
 
   const selectedCount = Object.keys(rowSelection).length
@@ -798,7 +802,7 @@ export default function ReturnsPage() {
             <div className="flex items-center justify-between px-4">
               <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
                 {selectedCount} of{" "}
-                {data?.total ?? 0} row(s) selected.
+                {isReadinessActive ? filteredReturns.length : (data?.total ?? 0)} row(s) selected.
               </div>
               <div className="flex w-full items-center gap-8 lg:w-fit">
                 <div className="hidden items-center gap-2 lg:flex">
@@ -824,8 +828,8 @@ export default function ReturnsPage() {
                   </Select>
                 </div>
                 <div className="flex w-fit items-center justify-center text-sm font-medium">
-                  Page {data?.page ?? 1} of{" "}
-                  {(data?.totalPages ?? 1) || 1}
+                  Page {table.getState().pagination.pageIndex + 1} of{" "}
+                  {table.getPageCount() || 1}
                 </div>
                 <div className="ml-auto flex items-center gap-2 lg:ml-0">
                   <Button
