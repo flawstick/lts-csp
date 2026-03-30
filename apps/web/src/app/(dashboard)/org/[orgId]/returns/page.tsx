@@ -58,7 +58,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Loader2, ExternalLink, RefreshCw, History, Play, Search, X, MoreHorizontal, Trash, FileText } from "@/lib/icons"
+import { ExternalLink, RefreshCw, History, Search, X, MoreHorizontal, Trash, FileText } from "@/lib/icons"
 import Link from "next/link"
 import { api } from "@/trpc/react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -292,7 +292,6 @@ export default function ReturnsPage() {
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [syncJobsDialogOpen, setSyncJobsDialogOpen] = React.useState(syncJobsDialogRequested)
   const [selectedSyncJobId, setSelectedSyncJobId] = React.useState<string | null>(null)
-  const [syncJurisdiction, setSyncJurisdiction] = React.useState<"GG" | "JE">("GG")
 
   // TanStack Table state
   const [rowSelection, setRowSelection] = React.useState({})
@@ -365,16 +364,6 @@ export default function ReturnsPage() {
     refetchInterval: 3000,
   })
 
-  const startSyncMutation = api.taxReturn.startSyncJob.useMutation({
-    onSuccess: (data) => {
-      setSelectedSyncJobId(data.jobId)
-      handleSyncJobsDialogChange(true)
-    },
-    onError: () => {
-      setSelectedSyncJobId(null)
-    },
-  })
-
   React.useEffect(() => {
     if (activeJob && !selectedSyncJobId) {
       setSelectedSyncJobId(activeJob.id)
@@ -405,13 +394,6 @@ export default function ReturnsPage() {
       nextQuery ? `/org/${orgId}/returns?${nextQuery}` : `/org/${orgId}/returns`,
       { scroll: false },
     )
-  }
-
-  const handleStartSync = () => {
-    startSyncMutation.mutate({
-      orgId,
-      jurisdictionCode: syncJurisdiction,
-    })
   }
 
   const handleDeleteSelected = () => {
@@ -453,9 +435,6 @@ export default function ReturnsPage() {
 
   const selectedCount = Object.keys(rowSelection).length
 
-  const isJobRunning =
-    activeJob?.status === "pending" || activeJob?.status === "running"
-
   return (
     <>
       <PageHeader>
@@ -486,41 +465,6 @@ export default function ReturnsPage() {
                 <History className="mr-2 h-4 w-4" />
                 Sync Jobs
               </Button>
-              <Button variant="outline" asChild>
-                <Link href={`/org/${orgId}/returns/scrape`}>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Manual Sync
-                </Link>
-              </Button>
-              <Select
-                value={syncJurisdiction}
-                onValueChange={(value) =>
-                  setSyncJurisdiction(value as "GG" | "JE")
-                }
-              >
-                <SelectTrigger className="w-[150px]">
-                  <SelectValue placeholder="Jurisdiction" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="GG">Guernsey</SelectItem>
-                  <SelectItem value="JE">Jersey</SelectItem>
-                </SelectContent>
-              </Select>
-              {isJobRunning ? (
-                <Button variant="outline" onClick={() => handleSyncJobsDialogChange(true)}>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Syncing...
-                </Button>
-              ) : (
-                <Button onClick={handleStartSync} disabled={startSyncMutation.isPending}>
-                  {startSyncMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Play className="mr-2 h-4 w-4" />
-                  )}
-                  Scrape Returns
-                </Button>
-              )}
             </div>
           </div>
 
