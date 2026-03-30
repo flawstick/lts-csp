@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 
 import {
   SidebarGroup,
@@ -24,11 +24,18 @@ export function NavMain({
   }[]
 }) {
   const pathname = usePathname()
+  const router = useRouter()
   const [mounted, setMounted] = React.useState(false)
 
   React.useEffect(() => {
     setMounted(true)
   }, [])
+
+  React.useEffect(() => {
+    for (const item of items) {
+      router.prefetch(item.url)
+    }
+  }, [items, router])
 
   return (
     <SidebarGroup className="pb-0">
@@ -48,7 +55,12 @@ export function NavMain({
                 )
               })}
             >
-              <Link href={item.url} prefetch={true}>
+              <Link
+                href={item.url}
+                prefetch={true}
+                onMouseEnter={() => router.prefetch(item.url)}
+                onFocus={() => router.prefetch(item.url)}
+              >
                 {item.icon && <item.icon />}
                 <span>{item.title}</span>
               </Link>

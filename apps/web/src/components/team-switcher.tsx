@@ -27,6 +27,20 @@ export function TeamSwitcher() {
   const router = useRouter()
   const pathname = usePathname()
 
+  const getOrgDestination = React.useCallback((orgId: string) => {
+    if (pathname.startsWith("/org/")) {
+      return pathname.replace(/^\/org\/[^/]+/, `/org/${orgId}`)
+    }
+
+    return `/org/${orgId}`
+  }, [pathname])
+
+  React.useEffect(() => {
+    for (const org of orgs) {
+      router.prefetch(getOrgDestination(org.id))
+    }
+  }, [getOrgDestination, orgs, router])
+
   if (isLoading) {
     return (
       <SidebarMenu className="h-full">
@@ -94,13 +108,10 @@ export function TeamSwitcher() {
                 <DropdownMenuItem
                   key={org.id}
                   onClick={() => {
-                    if (pathname.startsWith("/org/")) {
-                      const newPath = pathname.replace(/^\/org\/[^/]+/, `/org/${org.id}`)
-                      router.push(newPath)
-                    } else {
-                      router.push(`/org/${org.id}`)
-                    }
+                    router.push(getOrgDestination(org.id))
                   }}
+                  onMouseEnter={() => router.prefetch(getOrgDestination(org.id))}
+                  onFocus={() => router.prefetch(getOrgDestination(org.id))}
                   className="flex items-center justify-between gap-2"
                 >
                   <span className="flex min-w-0 flex-1 items-center gap-2">
