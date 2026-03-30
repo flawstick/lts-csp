@@ -26,7 +26,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
+
 } from "@/components/ui/dialog"
 import {
   AlertDialog,
@@ -233,6 +233,7 @@ export default function TasksPage() {
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
   const [taskToDelete, setTaskToDelete] = React.useState<string | null>(null)
+  const [detailTask, setDetailTask] = React.useState<TaskRow | null>(null)
   const [isRefetching, setIsRefetching] = React.useState(false)
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
   const [sorting, setSorting] = React.useState<SortingState>([])
@@ -555,162 +556,39 @@ export default function TasksPage() {
                               if (cell.column.id === "actions") {
                                 return (
                                   <TableCell key={cell.id} className="text-right" onClick={(e) => e.stopPropagation()}>
-                                    <Dialog>
-                                      <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                          <Button
-                                            variant="ghost"
-                                            className="data-[state=open]:bg-muted text-muted-foreground flex size-8"
-                                            size="icon"
-                                          >
-                                            <IconDotsVertical />
-                                            <span className="sr-only">Open menu</span>
-                                          </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end" className="w-40">
-                                          <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                          <DropdownMenuItem asChild>
-                                            <Link href={`/org/${orgId}/tasks/${task.id}`}>
-                                              <Monitor className="mr-2 h-4 w-4" />
-                                              Open Task
-                                            </Link>
-                                          </DropdownMenuItem>
-                                          <DialogTrigger asChild>
-                                            <DropdownMenuItem>
-                                              <ExternalLink className="mr-2 h-4 w-4" />
-                                              View Details
-                                            </DropdownMenuItem>
-                                          </DialogTrigger>
-                                          <DropdownMenuSeparator />
-                                          <DropdownMenuItem
-                                            variant="destructive"
-                                            onClick={() => handleDeleteSingle(task.id)}
-                                          >
-                                            <Trash className="mr-2 h-4 w-4" />
-                                            Delete
-                                          </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                      </DropdownMenu>
-
-                                      <DialogContent className="max-w-2xl">
-                                        <DialogHeader>
-                                          <DialogTitle className="flex items-center gap-2">
-                                            {task.name}
-                                            {getStatusBadge(task.status)}
-                                          </DialogTitle>
-                                          <DialogDescription>
-                                            Task ID: <span className="font-mono text-xs">{task.id}</span>
-                                          </DialogDescription>
-                                        </DialogHeader>
-                                        <div className="grid gap-4 py-4">
-                                          <div className="grid grid-cols-2 gap-4">
-                                            <div className="space-y-1">
-                                              <h4 className="text-sm font-medium text-muted-foreground">Task Type</h4>
-                                              <p>{getTaskTypeLabel(task.taskType)}</p>
-                                            </div>
-                                            <div className="space-y-1">
-                                              <h4 className="text-sm font-medium text-muted-foreground">Created At</h4>
-                                              <p>{new Date(task.createdAt).toLocaleString()}</p>
-                                            </div>
-                                          </div>
-
-                                          <div className="space-y-2 border rounded-lg p-4 bg-muted/30">
-                                            <h4 className="text-sm font-medium">Associated Tax Return</h4>
-                                            {task.taxReturn ? (
-                                              <div className="grid gap-2 text-sm">
-                                                <div className="flex justify-between">
-                                                  <span className="text-muted-foreground">Entity:</span>
-                                                  <span className="font-medium">{task.taxReturn.entityName}</span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                  <span className="text-muted-foreground">Tax Year:</span>
-                                                  <span>{task.taxReturn.taxYear}</span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                  <span className="text-muted-foreground">Jurisdiction:</span>
-                                                  <span>{task.jurisdiction?.name || "\u2014"}</span>
-                                                </div>
-                                                <div className="pt-2 mt-2 border-t flex justify-end">
-                                                  <Button variant="secondary" size="sm" asChild>
-                                                    <Link href={`/org/${orgId}/returns/${task.taxReturn.id}`}>
-                                                      View Return
-                                                    </Link>
-                                                  </Button>
-                                                </div>
-                                              </div>
-                                            ) : (
-                                              <p className="text-sm text-muted-foreground">No tax return associated.</p>
-                                            )}
-                                          </div>
-
-                                          {task.substanceForm && (
-                                            <div className="space-y-2 border rounded-lg p-4 bg-muted/30">
-                                              <div className="flex items-center justify-between">
-                                                <h4 className="text-sm font-medium">Substance Form Status</h4>
-                                                {task.substanceForm.isComplete ? (
-                                                  <span className="inline-flex rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400">
-                                                    Complete
-                                                  </span>
-                                                ) : (
-                                                  <span className="inline-flex rounded-lg border border-amber-500/50 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400">
-                                                    {(task.substanceForm.missingFields as string[])?.length ?? 0} Fields Missing
-                                                  </span>
-                                                )}
-                                              </div>
-                                              <div className="pt-2 flex justify-end">
-                                                <Button variant="secondary" size="sm" asChild>
-                                                  <Link href={`/org/${orgId}/tasks/${task.id}/substance-form`}>
-                                                    View Form
-                                                  </Link>
-                                                </Button>
-                                              </div>
-                                            </div>
-                                          )}
-
-                                          {task.status === "pending" && (
-                                            <div className="flex items-center gap-2 p-3 bg-blue-500/10 text-blue-700 rounded-md text-sm border border-blue-500/20">
-                                              <Play className="h-4 w-4" />
-                                              Ready to start processing.
-                                            </div>
-                                          )}
-                                        </div>
-                                        <DialogFooter className="gap-2 sm:gap-0">
-                                          {(task.status === "in_progress" ||
-                                            task.status === "running" ||
-                                            task.status === "queued" ||
-                                            task.status === "starting" ||
-                                            task.status === "paused") && (
-                                            <Button className="w-full sm:w-auto" asChild>
-                                              <Link href={`/org/${orgId}/tasks/${task.id}`}>
-                                                <Monitor className="h-4 w-4 mr-2" />
-                                                {task.status === "paused" ? "Open Task" : "View Live Stream"}
-                                              </Link>
-                                            </Button>
-                                          )}
-                                          {task.status === "pending" && (
-                                            <>
-                                              <Button variant="destructive" className="w-full sm:w-auto sm:mr-auto">
-                                                <Ban className="h-4 w-4 mr-2" />
-                                                Cancel Task
-                                              </Button>
-                                              {task.substanceForm && !task.substanceForm.isComplete ? (
-                                                <Button disabled className="w-full sm:w-auto">
-                                                  <AlertCircle className="h-4 w-4 mr-2" />
-                                                  Missing fields
-                                                </Button>
-                                              ) : (
-                                                <Button className="w-full sm:w-auto" asChild>
-                                                  <Link href={`/org/${orgId}/tasks/${task.id}`}>
-                                                    <Play className="h-4 w-4 mr-2" />
-                                                    Open & Start
-                                                  </Link>
-                                                </Button>
-                                              )}
-                                            </>
-                                          )}
-                                        </DialogFooter>
-                                      </DialogContent>
-                                    </Dialog>
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button
+                                          variant="ghost"
+                                          className="data-[state=open]:bg-muted text-muted-foreground flex size-8"
+                                          size="icon"
+                                        >
+                                          <IconDotsVertical />
+                                          <span className="sr-only">Open menu</span>
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end" className="w-40">
+                                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                        <DropdownMenuItem asChild>
+                                          <Link href={`/org/${orgId}/tasks/${task.id}`}>
+                                            <Monitor className="mr-2 h-4 w-4" />
+                                            Open Task
+                                          </Link>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onSelect={() => setDetailTask(task)}>
+                                          <ExternalLink className="mr-2 h-4 w-4" />
+                                          View Details
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          variant="destructive"
+                                          onClick={() => handleDeleteSingle(task.id)}
+                                        >
+                                          <Trash className="mr-2 h-4 w-4" />
+                                          Delete
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
                                   </TableCell>
                                 )
                               }
@@ -852,6 +730,131 @@ export default function TasksPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <Dialog open={!!detailTask} onOpenChange={(open) => { if (!open) setDetailTask(null) }}>
+          <DialogContent className="max-w-2xl">
+            {detailTask && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    {detailTask.name}
+                    {getStatusBadge(detailTask.status)}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Task ID: <span className="font-mono text-xs">{detailTask.id}</span>
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-medium text-muted-foreground">Task Type</h4>
+                      <p>{getTaskTypeLabel(detailTask.taskType)}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-medium text-muted-foreground">Created At</h4>
+                      <p>{new Date(detailTask.createdAt).toLocaleString()}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 border rounded-lg p-4 bg-muted/30">
+                    <h4 className="text-sm font-medium">Associated Tax Return</h4>
+                    {detailTask.taxReturn ? (
+                      <div className="grid gap-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Entity:</span>
+                          <span className="font-medium">{detailTask.taxReturn.entityName}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Tax Year:</span>
+                          <span>{detailTask.taxReturn.taxYear}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Jurisdiction:</span>
+                          <span>{detailTask.jurisdiction?.name || "\u2014"}</span>
+                        </div>
+                        <div className="pt-2 mt-2 border-t flex justify-end">
+                          <Button variant="secondary" size="sm" asChild>
+                            <Link href={`/org/${orgId}/returns/${detailTask.taxReturn.id}`}>
+                              View Return
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No tax return associated.</p>
+                    )}
+                  </div>
+
+                  {detailTask.substanceForm && (
+                    <div className="space-y-2 border rounded-lg p-4 bg-muted/30">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium">Substance Form Status</h4>
+                        {detailTask.substanceForm.isComplete ? (
+                          <span className="inline-flex rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400">
+                            Complete
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-lg border border-amber-500/50 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400">
+                            {(detailTask.substanceForm.missingFields as string[])?.length ?? 0} Fields Missing
+                          </span>
+                        )}
+                      </div>
+                      <div className="pt-2 flex justify-end">
+                        <Button variant="secondary" size="sm" asChild>
+                          <Link href={`/org/${orgId}/tasks/${detailTask.id}/substance-form`}>
+                            View Form
+                          </Link>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {detailTask.status === "pending" && (
+                    <div className="flex items-center gap-2 p-3 bg-blue-500/10 text-blue-700 rounded-md text-sm border border-blue-500/20">
+                      <Play className="h-4 w-4" />
+                      Ready to start processing.
+                    </div>
+                  )}
+                </div>
+                <DialogFooter className="gap-2 sm:gap-0">
+                  {(detailTask.status === "in_progress" ||
+                    detailTask.status === "running" ||
+                    detailTask.status === "queued" ||
+                    detailTask.status === "starting" ||
+                    detailTask.status === "paused") && (
+                    <Button className="w-full sm:w-auto" asChild>
+                      <Link href={`/org/${orgId}/tasks/${detailTask.id}`}>
+                        <Monitor className="h-4 w-4 mr-2" />
+                        {detailTask.status === "paused" ? "Open Task" : "View Live Stream"}
+                      </Link>
+                    </Button>
+                  )}
+                  {detailTask.status === "pending" && (
+                    <>
+                      <Button variant="destructive" className="w-full sm:w-auto sm:mr-auto">
+                        <Ban className="h-4 w-4 mr-2" />
+                        Cancel Task
+                      </Button>
+                      {detailTask.substanceForm && !detailTask.substanceForm.isComplete ? (
+                        <Button disabled className="w-full sm:w-auto">
+                          <AlertCircle className="h-4 w-4 mr-2" />
+                          Missing fields
+                        </Button>
+                      ) : (
+                        <Button className="w-full sm:w-auto" asChild>
+                          <Link href={`/org/${orgId}/tasks/${detailTask.id}`}>
+                            <Play className="h-4 w-4 mr-2" />
+                            Open & Start
+                          </Link>
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </DialogFooter>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
     </>
   )
 }

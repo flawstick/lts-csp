@@ -5,6 +5,7 @@ import {
 } from "node:http";
 import { createLogger } from "./logger";
 import { ensureTaxSyncJobId, runTaxSyncJob } from "./run-sync";
+import { getSchedulerState, startScheduler } from "./scheduler";
 
 interface ScrapeRequestBody {
   jobId?: string;
@@ -110,6 +111,7 @@ const server = createServer(async (request, response) => {
         ok: true,
         service: "tax-sync-handler",
         activeJobs: activeJobs.size,
+        scheduler: getSchedulerState(),
       });
       return;
     }
@@ -179,3 +181,5 @@ server.listen(PORT, "0.0.0.0", () => {
     authEnabled: Boolean(AUTH_TOKEN),
   });
 });
+
+startScheduler();

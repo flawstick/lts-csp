@@ -799,6 +799,7 @@ export default function TaskDetailPage() {
         jurisdictionName={jurisdictionName}
         entityName={entityName}
         isConnected={isConnected}
+        taxReturnId={task.taxReturn?.id}
       />
 
       <div className="flex-1 overflow-hidden">
@@ -807,7 +808,12 @@ export default function TaskDetailPage() {
           <ResizablePanel defaultSize={70} minSize={30}>
             <div className="flex h-full flex-col">
               <BrowserToolbar
+                orgId={orgId}
                 jurisdictionName={jurisdictionName}
+                entityName={entityName}
+                taskStatus={browserStatus ?? task.status}
+                isConnected={isConnected}
+                taxReturnId={task.taxReturn?.id}
                 liveUrl={liveUrl}
                 iframeRef={iframeRef}
                 allJobs={allJobs}
