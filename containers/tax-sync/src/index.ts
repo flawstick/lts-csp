@@ -20,18 +20,6 @@ function resolveCredentials(): { username: string; password: string } | null {
     };
   }
 
-  if (JURISDICTION_CODE === "GG") {
-    const username = process.env.MYGOV_USERNAME?.trim();
-    const password = process.env.MYGOV_PASSWORD?.trim();
-    return username && password ? { username, password } : null;
-  }
-
-  if (JURISDICTION_CODE === "JE") {
-    const username = process.env.JSYTAX_USERNAME?.trim();
-    const password = process.env.JSYTAX_PASSWORD?.trim();
-    return username && password ? { username, password } : null;
-  }
-
   return null;
 }
 
@@ -86,7 +74,7 @@ async function main() {
     const credentials = resolveCredentials();
     if (!credentials) {
       throw new Error(
-        `No portal credentials available for ${JURISDICTION_CODE}. Expected PORTAL_USERNAME/PORTAL_PASSWORD or jurisdiction-specific env vars.`,
+        `No portal credentials available for ${JURISDICTION_CODE}. Expected explicit PORTAL_USERNAME/PORTAL_PASSWORD for this one-off run.`,
       );
     }
 

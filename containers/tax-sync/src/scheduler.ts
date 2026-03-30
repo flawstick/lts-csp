@@ -82,24 +82,6 @@ function parsePositiveIntEnv(value: string | undefined, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function hasFallbackCredentialsForJurisdiction(jurisdictionCode: string) {
-  if (jurisdictionCode === "GG") {
-    return Boolean(
-      process.env.MYGOV_USERNAME?.trim() && process.env.MYGOV_PASSWORD?.trim(),
-    );
-  }
-
-  if (jurisdictionCode === "JE") {
-    return Boolean(
-      process.env.JSYTAX_USERNAME?.trim() && process.env.JSYTAX_PASSWORD?.trim(),
-    );
-  }
-
-  return Boolean(
-    process.env.PORTAL_USERNAME?.trim() && process.env.PORTAL_PASSWORD?.trim(),
-  );
-}
-
 function getRequestedJurisdictions() {
   const requested = parseCsvEnv(process.env.TAX_SYNC_SCHEDULER_JURISDICTIONS)
     .map((entry) => entry.toUpperCase());
@@ -202,12 +184,7 @@ async function resolveSchedulerTargets(): Promise<SchedulerTarget[]> {
         setting?.portalCredentialsEncrypted,
       );
 
-      if (
-        !(
-          (credentials?.username && credentials?.password) ||
-          hasFallbackCredentialsForJurisdiction(jurisdictionCode)
-        )
-      ) {
+      if (!(credentials?.username && credentials?.password)) {
         schedulerLogger.warn("Skipping target without credentials", {
           orgId: organisation.id,
           orgSlug: organisation.slug,

@@ -202,26 +202,6 @@ async function maybeMarkBrowserJobStale<
   };
 }
 
-function resolveJurisdictionFallbackCredentials(
-  jurisdictionCode: string,
-): { username?: string; password?: string } | null {
-  const normalizedCode = jurisdictionCode.trim().toUpperCase();
-
-  if (normalizedCode === "GG") {
-    const username = process.env.MYGOV_USERNAME?.trim();
-    const password = process.env.MYGOV_PASSWORD?.trim();
-    return username || password ? { username, password } : null;
-  }
-
-  if (normalizedCode === "JE") {
-    const username = process.env.JSYTAX_USERNAME?.trim();
-    const password = process.env.JSYTAX_PASSWORD?.trim();
-    return username || password ? { username, password } : null;
-  }
-
-  return null;
-}
-
 function getBrowserUseSessionId(
   resultData: Record<string, unknown> | null | undefined,
 ): string | null {
@@ -1073,10 +1053,15 @@ export const taxReturnRouter = createTRPCRouter({
             eq(jurisdictionSettings.jurisdictionId, jurisdiction.id),
           ),
         });
-      const credentials =
-        decryptPortalCredentials(
-          jurisdictionSetting?.portalCredentialsEncrypted,
-        ) ?? resolveJurisdictionFallbackCredentials(jurisdiction.code);
+      const credentials = decryptPortalCredentials(
+        jurisdictionSetting?.portalCredentialsEncrypted,
+      );
+
+      if (!credentials?.username || !credentials?.password) {
+        throw new Error(
+          `Portal credentials for ${jurisdiction.name} are not configured for this organisation. Update them in organisation settings first.`,
+        );
+      }
 
       // Create job record
       const [job] = await ctx.db

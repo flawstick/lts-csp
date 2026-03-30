@@ -45,28 +45,6 @@ function resolveCredentials(
     };
   }
 
-  const genericUsername = process.env.PORTAL_USERNAME?.trim();
-  const genericPassword = process.env.PORTAL_PASSWORD?.trim();
-
-  if (genericUsername && genericPassword) {
-    return {
-      username: genericUsername,
-      password: genericPassword,
-    };
-  }
-
-  if (input.jurisdictionCode === "GG") {
-    const username = process.env.MYGOV_USERNAME?.trim();
-    const password = process.env.MYGOV_PASSWORD?.trim();
-    return username && password ? { username, password } : null;
-  }
-
-  if (input.jurisdictionCode === "JE") {
-    const username = process.env.JSYTAX_USERNAME?.trim();
-    const password = process.env.JSYTAX_PASSWORD?.trim();
-    return username && password ? { username, password } : null;
-  }
-
   return null;
 }
 
@@ -164,7 +142,7 @@ export async function runTaxSyncJob(
 
     if (!credentials) {
       throw new Error(
-        `No portal credentials available for ${jurisdictionCode}. Expected request credentials, PORTAL_USERNAME/PORTAL_PASSWORD, or jurisdiction-specific env vars.`,
+        `No portal credentials available for ${jurisdictionCode}. Expected org-specific credentials from jurisdiction settings or explicit request credentials.`,
       );
     }
 
