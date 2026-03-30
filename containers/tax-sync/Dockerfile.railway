@@ -3,12 +3,19 @@ FROM oven/bun:1 AS base
 WORKDIR /app
 
 COPY package.json bun.lock turbo.json ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/portal/package.json apps/portal/package.json
 COPY packages/database/package.json packages/database/package.json
+COPY packages/redis/package.json packages/redis/package.json
+COPY packages/shared/package.json packages/shared/package.json
+COPY containers/task/package.json containers/task/package.json
 COPY containers/tax-sync/package.json containers/tax-sync/package.json
 
 RUN bun install --frozen-lockfile
 
 COPY packages/database ./packages/database
+COPY packages/redis ./packages/redis
+COPY packages/shared ./packages/shared
 COPY containers/tax-sync ./containers/tax-sync
 
 ENV NODE_ENV=production
