@@ -135,8 +135,8 @@ export const FEATURE_FLAGS: Record<FeatureFlagKey, FeatureFlag> = {
   },
   ecs_region: {
     key: "ecs_region",
-    defaultValue: "eu-central-1",
-    description: "AWS ECS region for task processing (Frankfurt by default)",
+    defaultValue: "eu-west-2",
+    description: "AWS ECS region for task processing (London by default)",
     category: "processing",
   },
   max_concurrent_jobs: {

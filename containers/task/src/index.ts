@@ -1148,7 +1148,7 @@ async function initializeBrowserUseSession(
       });
 
       const session = await client.createSession({
-        ...(useProxy && { proxyCountryCode: "nl" as const }),
+        ...(useProxy && { proxyCountryCode: "uk" as const }),
       });
       createdSessionId = session.id;
 
@@ -1196,6 +1196,16 @@ async function initializeBrowserUseSession(
 
 async function markActiveRuntimeFailed(errorMessage: string) {
   const runtime = getRequiredRuntime();
+
+  // Don't overwrite a "cancelled" status set by the user
+  const currentJob = await db.query.jobs.findFirst({
+    where: eq(jobs.id, runtime.jobId),
+    columns: { status: true },
+  });
+  if (currentJob?.status === "cancelled") {
+    return;
+  }
+
   runtime.resultData = mergeResultData(runtime.resultData, {
     startupError: errorMessage,
     lastHeartbeatAt: Date.now(),
@@ -1261,7 +1271,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     }
 
     const taxReturnFiles = getTaxReturnFiles(taxReturn.files);
-    const useProxy = process.env.USE_PROXY !== "false";
+    const useProxy = process.env.USE_UK_PROXY !== "false";
 
     session = await initializeBrowserUseSession(client, useProxy);
 
@@ -1408,14 +1418,33 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       submissionMode,
     });
 
-    let currentRunPromise = Promise.resolve(
-      client.runTask(prompt, {
-        sessionId: session.id,
-        model: BROWSER_USE_MODEL,
-        timeoutMs: MAX_RUNTIME_MS,
-        workspaceId: workspaceId ?? undefined,
-      }),
-    );
+    const runResponse = await client.runTask(prompt, {
+      sessionId: session.id,
+      model: BROWSER_USE_MODEL,
+      timeoutMs: MAX_RUNTIME_MS,
+      workspaceId: workspaceId ?? undefined,
+    });
+
+    await log("runTask response", {
+      phase: "startup",
+      requestedSessionId: session.id,
+      returnedSessionId: runResponse.id,
+      returnedStatus: runResponse.status,
+      match: session.id === runResponse.id,
+    });
+
+    // If the API returned a different session, poll that one instead
+    if (runResponse.id && runResponse.id !== session.id) {
+      await log("Session ID mismatch - switching to returned session", {
+        phase: "startup",
+        oldSessionId: session.id,
+        newSessionId: runResponse.id,
+        newLiveUrl: runResponse.liveUrl,
+      });
+      session = { ...runResponse, liveUrl: runResponse.liveUrl ?? session.liveUrl };
+    }
+
+    let currentRunPromise = Promise.resolve(runResponse);
 
     const startTime = Date.now();
     let lastStepCount = 0;
@@ -1540,6 +1569,15 @@ ${prompt}
 
       const browserSession = await client.getSession(session.id);
       const newMessages = await client.getMessages(session.id, lastMessageId);
+
+      await log("Poll cycle", {
+        phase: "run",
+        sessionStatus: browserSession.status,
+        stepCount: browserSession.stepCount,
+        messageCount: newMessages.messages.length,
+        lastMessageId,
+      }, { publish: false });
+
       const orderedMessages = [...newMessages.messages].sort(
         (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
       );
@@ -1689,12 +1727,24 @@ ${prompt}
       }
 
       if (isTerminalSessionStatus(browserSession.status)) {
+        // Check if the job was cancelled in the DB before treating as success
+        const jobStatusCheck = await db.query.jobs.findFirst({
+          where: eq(jobs.id, runtime.jobId),
+          columns: { status: true },
+        });
+        if (jobStatusCheck?.status === "cancelled") {
+          await log("Job cancelled by user (detected at terminal state)");
+          terminalStateHandled = true;
+          break;
+        }
+
         const runResult = await currentRunPromise.catch(() => null);
         const output = normalizeBrowserUseOutput(
           runResult?.output ?? browserSession.output,
         );
         const success =
           browserSession.status === "idle" &&
+          !output.toLowerCase().includes("cancelled") &&
           (runResult?.isTaskSuccessful ??
             browserSession.isTaskSuccessful ??
             true);
@@ -1854,27 +1904,34 @@ ${prompt}
           },
         });
 
-        await db
-          .update(taxReturns)
-          .set({ status: success ? "completed" : "failed" })
-          .where(eq(taxReturns.id, runtime.taxReturnId));
-        await db
-          .update(tasks)
-          .set({ status: success ? "completed" : "failed" })
-          .where(eq(tasks.id, runtime.taskId));
-        await updateActiveJobRecord({
-          set: {
-            status: success ? "completed" : "failed",
-            completedAt: new Date(),
-          },
-          resultDataPatch: {
-            output,
-            browserUseSessionId: session.id,
-            liveUrl: session.liveUrl,
-            workspaceId,
-            completionPdf,
-          },
+        // Don't overwrite a "cancelled" status set by the user
+        const preUpdateJob = await db.query.jobs.findFirst({
+          where: eq(jobs.id, runtime.jobId),
+          columns: { status: true },
         });
+        if (preUpdateJob?.status !== "cancelled") {
+          await db
+            .update(taxReturns)
+            .set({ status: success ? "completed" : "failed" })
+            .where(eq(taxReturns.id, runtime.taxReturnId));
+          await db
+            .update(tasks)
+            .set({ status: success ? "completed" : "failed" })
+            .where(eq(tasks.id, runtime.taskId));
+          await updateActiveJobRecord({
+            set: {
+              status: success ? "completed" : "failed",
+              completedAt: new Date(),
+            },
+            resultDataPatch: {
+              output,
+              browserUseSessionId: session.id,
+              liveUrl: session.liveUrl,
+              workspaceId,
+              completionPdf,
+            },
+          });
+        }
 
         terminalStateHandled = true;
         break;

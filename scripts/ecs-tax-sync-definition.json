@@ -9,14 +9,14 @@
   "containerDefinitions": [
     {
       "name": "lts-tax-sync",
-      "image": "988904099875.dkr.ecr.eu-central-1.amazonaws.com/lts-tax-sync:latest",
+      "image": "988904099875.dkr.ecr.eu-west-2.amazonaws.com/lts-tax-sync:latest",
       "essential": true,
       "environment": [],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/lts-tax-sync",
-          "awslogs-region": "eu-central-1",
+          "awslogs-region": "eu-west-2",
           "awslogs-stream-prefix": "ecs",
           "awslogs-create-group": "true"
         }

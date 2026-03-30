@@ -16,26 +16,10 @@ export async function GET(
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
-    start(controller) {
+    async start(controller) {
       const sub = getSub();
 
-      // Send initial connection message
-      controller.enqueue(
-        encoder.encode(`data: ${JSON.stringify({ type: "connected", jobId })}\n\n`)
-      );
-
-      // Send keepalive comments every 15 seconds to prevent connection timeout
-      const keepaliveInterval = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(`: keepalive\n\n`));
-        } catch {
-          clearInterval(keepaliveInterval);
-        }
-      }, 15000);
-
-      // Subscribe to job events
-      void sub.subscribe(CHANNELS.JOB_EVENTS);
-
+      // Register message handler BEFORE subscribing so no events are missed
       const messageHandler = (_channel: string, message: string) => {
         try {
           const event = JSON.parse(message) as JobEvent;
@@ -52,6 +36,23 @@ export async function GET(
       };
 
       sub.on("message", messageHandler);
+
+      // Await subscribe so the connection is fully ready before we signal "connected"
+      await sub.subscribe(CHANNELS.JOB_EVENTS);
+
+      // Send initial connection message AFTER subscribe is ready
+      controller.enqueue(
+        encoder.encode(`data: ${JSON.stringify({ type: "connected", jobId })}\n\n`)
+      );
+
+      // Send keepalive comments every 15 seconds to prevent connection timeout
+      const keepaliveInterval = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(`: keepalive\n\n`));
+        } catch {
+          clearInterval(keepaliveInterval);
+        }
+      }, 15000);
 
       // Cleanup on close
       request.signal.addEventListener("abort", () => {

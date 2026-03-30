@@ -1,3 +1,4 @@
+import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Loader2, Monitor, Play } from "@/lib/icons";
 
@@ -10,6 +11,13 @@ type BrowserFrameProps = {
   onStart: () => void;
 };
 
+function useThemedUrl(url: string | null) {
+  const { resolvedTheme } = useTheme();
+  if (!url) return null;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}theme=${resolvedTheme === "dark" ? "dark" : "light"}`;
+}
+
 export function BrowserFrame({
   liveUrl,
   iframeRef,
@@ -18,14 +26,18 @@ export function BrowserFrame({
   isStartPending,
   onStart,
 }: BrowserFrameProps) {
-  if (liveUrl) {
+  const themedUrl = useThemedUrl(liveUrl);
+
+  const isTerminal = jobStatus === "completed" || jobStatus === "failed" || jobStatus === "cancelled";
+
+  if (themedUrl && !isTerminal) {
     return (
-      <div className="bg-background relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1 bg-neutral-900 dark:bg-neutral-950">
         <iframe
           ref={iframeRef}
-          src={liveUrl}
-          className="size-full border-0"
-          allow="clipboard-write"
+          src={themedUrl}
+          className="absolute inset-0 h-full w-full border-0"
+          allow="clipboard-write; autoplay"
         />
       </div>
     );

@@ -135,7 +135,7 @@ export async function GET(request: Request) {
       }
 
       try {
-        const client = new CloudWatchLogsClient({ region: "eu-central-1" })
+        const client = new CloudWatchLogsClient({ region: "eu-west-2" })
         const command = new GetLogEventsCommand({
           logGroupName: job.cloudwatchLogGroup,
           logStreamName: job.cloudwatchLogStream,

@@ -5,7 +5,6 @@ import {
   type MessageListResponse,
   type ProxyCountryCode,
   type SessionResponse,
-  type SessionRun,
   type StopStrategy,
   type WorkspaceView,
 } from "browser-use-sdk/v3";
@@ -60,7 +59,7 @@ export class BrowserUseClient {
     });
   }
 
-  runTask(
+  async runTask(
     task: string,
     request: {
       sessionId: string;
@@ -69,15 +68,19 @@ export class BrowserUseClient {
       proxyCountryCode?: ProxyCountryCode;
       workspaceId?: string;
     },
-  ): SessionRun<string> {
-    return this.client.run(task, {
-      sessionId: request.sessionId,
-      keepAlive: true,
+  ): Promise<SessionResponse> {
+    // Call sessions.create directly with snake_case field names.
+    // The SDK's client.run() passes camelCase which the API ignores,
+    // causing it to create a new session instead of dispatching to
+    // the existing one.
+    return this.client.sessions.create({
+      task,
+      session_id: request.sessionId,
+      keep_alive: true,
       model: request.model ?? "bu-max",
-      timeout: request.timeoutMs,
-      proxyCountryCode: request.proxyCountryCode,
-      workspaceId: request.workspaceId,
-    });
+      proxy_country_code: request.proxyCountryCode,
+      workspace_id: request.workspaceId,
+    } as any);
   }
 
   async createWorkspace(name?: string): Promise<WorkspaceView> {
