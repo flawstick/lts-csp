@@ -29,6 +29,7 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
+  SidebarTrigger,
 } from "@/components/ui/sidebar"
 import {
   Dialog,
@@ -189,11 +190,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     : baseSettingsItems
 
   return (
-    <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader>
+    <Sidebar collapsible="icon" className="border-sidebar-border/70 bg-sidebar border-r" {...props}>
+      <SidebarHeader className="relative h-14 shrink-0 border-b p-0 group-data-[collapsible=icon]:border-b-0 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2">
         <TeamSwitcher />
+        <SidebarTrigger className="absolute right-3 top-1/2 z-10 -translate-y-1/2 shrink-0 rounded-lg group-data-[collapsible=icon]:hidden" />
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="px-2.5 transition-[padding] duration-200 ease-linear group-data-[collapsible=icon]:px-0">
         <NavMain label="Platform" items={platformItems} />
         <NavMain label="Settings" items={settingsItems} />
       </SidebarContent>

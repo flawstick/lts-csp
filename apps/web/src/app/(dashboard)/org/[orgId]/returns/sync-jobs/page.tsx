@@ -9,8 +9,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { PageHeader } from "@/components/page-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -128,9 +127,7 @@ export default function SyncJobsPage() {
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur sticky top-0 z-10">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
+      <PageHeader>
             <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem className="hidden md:block">
@@ -146,10 +143,9 @@ export default function SyncJobsPage() {
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
-          </div>
-        </header>
+        </PageHeader>
 
-        <div className="flex flex-1 flex-col gap-6 p-6 bg-muted/10">
+        <div className="flex flex-1 flex-col gap-6 p-6">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <div className="flex items-center gap-2">

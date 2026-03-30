@@ -10,8 +10,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -284,24 +283,22 @@ export default function ReturnsPage() {
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur sticky top-0 z-10">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="/">LTS</BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden md:block" />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Tax Returns</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-          </div>
-        </header>
+      <PageHeader>
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem className="hidden md:block">
+                <BreadcrumbLink href="/">LTS</BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator className="hidden md:block" />
+              <BreadcrumbItem>
+                <BreadcrumbPage>Tax Returns</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+        </PageHeader>
 
-        <div className="flex flex-1 flex-col gap-6 p-6 bg-muted/10">
+        <main className="flex-1 overflow-auto">
+        <div className="flex flex-1 flex-col gap-6 p-6">
           <div className="flex items-start justify-between">
             <div className="space-y-1">
               <h2 className="text-2xl font-bold tracking-tight">Tax Returns</h2>
@@ -601,6 +598,7 @@ export default function ReturnsPage() {
             )}
           </div>
         </div>
+        </main>
 
         {/* Logs Dialog */}
         <Dialog open={logsDialogOpen} onOpenChange={setLogsDialogOpen}>

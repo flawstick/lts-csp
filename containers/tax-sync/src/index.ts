@@ -155,9 +155,9 @@ async function main() {
           ],
           set: {
             entityName: syncedReturn.entityName,
-            // Preserve manual dismissals across re-syncs of the same source return.
+            // Don't regress returns that were dismissed or touched by automation.
             status: sql`CASE
-              WHEN ${schema.taxReturns.status} = 'dismissed' THEN ${schema.taxReturns.status}
+              WHEN ${schema.taxReturns.status} IN ('dismissed', 'completed', 'failed', 'review_required') THEN ${schema.taxReturns.status}
               ELSE ${syncedReturn.status}
             END`,
             link: syncedReturn.link,

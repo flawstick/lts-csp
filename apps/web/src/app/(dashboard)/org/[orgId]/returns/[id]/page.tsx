@@ -30,8 +30,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { Separator } from "@/components/ui/separator";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { PageHeader } from "@/components/page-header";
 import {
   FIELD_LABELS,
   FORM_SECTIONS,
@@ -320,8 +319,7 @@ export default function ReturnDetailPage() {
 
   return (
     <>
-      <header className="bg-background/95 sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 border-b px-4 backdrop-blur">
-        <SidebarTrigger className="-ml-1" />
+      <PageHeader>
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem className="hidden md:block">
@@ -335,7 +333,7 @@ export default function ReturnDetailPage() {
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-      </header>
+      </PageHeader>
 
       <div className="flex-1 overflow-auto p-6">
         <div className="mx-auto max-w-5xl space-y-8">

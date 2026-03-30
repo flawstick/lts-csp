@@ -9,8 +9,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { PageHeader } from "@/components/page-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -91,13 +90,7 @@ export default function Page() {
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] duration-300 ease-in-out group-has-data-[collapsible=icon]/sidebar-wrapper:h-12 border-b bg-background/95 backdrop-blur sticky top-0 z-10">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-[orientation=vertical]:h-4"
-            />
+      <PageHeader>
             <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem className="hidden md:block">
@@ -109,9 +102,8 @@ export default function Page() {
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
-          </div>
-        </header>
-        <div className="flex flex-1 flex-col gap-6 p-6 pt-6 bg-muted/10">
+        </PageHeader>
+        <div className="flex flex-1 flex-col gap-6 p-6 pt-6">
           {/* Header Section */}
           <div className="flex items-center justify-between">
             <div className="space-y-1">

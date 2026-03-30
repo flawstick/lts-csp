@@ -11,7 +11,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { PageHeader } from "@/components/page-header"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -186,10 +186,9 @@ export default function OrgSettingsPage() {
   if (isLoading || !org) {
     return (
       <>
-        <header className="flex h-14 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
+        <PageHeader>
           <Skeleton className="h-4 w-32" />
-        </header>
+        </PageHeader>
         <div className="flex flex-1 flex-col p-6">
           <div className="mx-auto w-full max-w-2xl space-y-6">
             <div className="space-y-1">
@@ -227,8 +226,7 @@ export default function OrgSettingsPage() {
 
   return (
     <>
-      <header className="flex h-14 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
+      <PageHeader>
         <Breadcrumb>
             <BreadcrumbList>
               <BreadcrumbItem className="hidden md:block">
@@ -240,7 +238,7 @@ export default function OrgSettingsPage() {
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
-        </header>
+        </PageHeader>
 
         <div className="flex flex-1 flex-col p-6">
           <div className="mx-auto w-full max-w-2xl space-y-6">

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ChevronsUpDown, Building2 } from "@/lib/icons"
+import { ChevronsUpDown, Building2, Check } from "@/lib/icons"
 import { useOrgFromUrl } from "@/lib/org-context"
 import { useRouter, usePathname } from "next/navigation"
 
@@ -10,8 +10,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -27,13 +29,17 @@ export function TeamSwitcher() {
 
   if (isLoading) {
     return (
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton size="lg" className="animate-pulse">
-            <div className="bg-neutral-200 dark:bg-neutral-700 flex aspect-square size-8 items-center justify-center rounded-lg" />
-            <div className="grid flex-1 gap-1">
-              <div className="h-4 w-20 rounded bg-neutral-200 dark:bg-neutral-700" />
-              <div className="h-3 w-16 rounded bg-neutral-100 dark:bg-neutral-800" />
+      <SidebarMenu className="h-full">
+        <SidebarMenuItem className="h-full group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center">
+          <SidebarMenuButton
+            size="lg"
+            disabled
+            aria-busy="true"
+            className="!h-full w-full rounded-none px-5 group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:rounded-lg group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:justify-center"
+          >
+            <Skeleton className="h-6 w-6 shrink-0 rounded-md" />
+            <div className="grid flex-1 gap-1 group-data-[collapsible=icon]:hidden">
+              <Skeleton className="h-3.5 w-24" />
             </div>
           </SidebarMenuButton>
         </SidebarMenuItem>
@@ -46,75 +52,75 @@ export function TeamSwitcher() {
   }
 
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
+    <SidebarMenu className="h-full">
+      <SidebarMenuItem className="h-full group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              className="!h-full w-full cursor-pointer rounded-none px-5 pr-14 transition-[padding,width] duration-200 ease-linear hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:rounded-lg group-data-[collapsible=icon]:!p-0 group-data-[collapsible=icon]:justify-center"
             >
               {currentOrg.logoUrl ? (
                 <img
                   src={currentOrg.logoUrl}
                   alt={currentOrg.name}
-                  className="h-8 max-w-12 object-contain"
+                  className="h-6 w-6 shrink-0 rounded-md object-contain"
                 />
               ) : (
-                <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                  <Building2 className="size-4" />
+                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-500/15 text-blue-600">
+                  <Building2 className="size-3.5" />
                 </div>
               )}
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">{currentOrg.name}</span>
-                <span className="truncate text-xs text-muted-foreground">Organisation</span>
-              </div>
-              <ChevronsUpDown className="ml-auto" />
+              <span className="max-w-[10rem] truncate whitespace-nowrap text-sm font-medium transition-[max-width,opacity] duration-200 ease-linear group-data-[collapsible=icon]:hidden">
+                {currentOrg.name}
+              </span>
+              <ChevronsUpDown className="size-3.5 shrink-0 opacity-50 transition-opacity duration-150 ease-linear group-data-[collapsible=icon]:hidden" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
+            className="w-(--radix-dropdown-menu-trigger-width) min-w-64 rounded-xl"
             align="start"
             side={isMobile ? "bottom" : "right"}
-            sideOffset={4}
+            sideOffset={8}
           >
-            <DropdownMenuLabel className="text-muted-foreground text-xs">
-              Organisations
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Switch organisation
             </DropdownMenuLabel>
-            {orgs.map((org) => (
-              <DropdownMenuItem
-                key={org.id}
-                onClick={() => {
-                  // Navigate to the same page but with the new org ID
-                  // The URL change will trigger useOrgFromUrl to update the current org
-                  if (pathname.startsWith('/org/')) {
-                    // Replace the orgId in the current path
-                    const newPath = pathname.replace(/^\/org\/[^/]+/, `/org/${org.id}`)
-                    router.push(newPath)
-                  } else {
-                    // If not on an org page, navigate to the org dashboard
-                    router.push(`/org/${org.id}`)
-                  }
-                }}
-                className="gap-2 p-2"
-              >
-                {org.logoUrl ? (
-                  <img
-                    src={org.logoUrl}
-                    alt={org.name}
-                    className="h-6 max-w-8 object-contain"
-                  />
-                ) : (
-                  <div className="flex size-6 items-center justify-center rounded-md border">
-                    <Building2 className="size-3.5 shrink-0" />
-                  </div>
-                )}
-                {org.name}
-                {org.id === currentOrg.id && (
-                  <span className="ml-auto text-xs text-muted-foreground">Current</span>
-                )}
-              </DropdownMenuItem>
-            ))}
+            <DropdownMenuSeparator />
+            {orgs.map((org) => {
+              const selected = org.id === currentOrg.id
+
+              return (
+                <DropdownMenuItem
+                  key={org.id}
+                  onClick={() => {
+                    if (pathname.startsWith("/org/")) {
+                      const newPath = pathname.replace(/^\/org\/[^/]+/, `/org/${org.id}`)
+                      router.push(newPath)
+                    } else {
+                      router.push(`/org/${org.id}`)
+                    }
+                  }}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <span className="flex min-w-0 flex-1 items-center gap-2">
+                    {org.logoUrl ? (
+                      <img
+                        src={org.logoUrl}
+                        alt={org.name}
+                        className="h-6 w-6 rounded-md object-contain"
+                      />
+                    ) : (
+                      <div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-500/15 text-blue-600">
+                        <Building2 className="size-3.5" />
+                      </div>
+                    )}
+                    <span className="truncate whitespace-nowrap font-medium">{org.name}</span>
+                  </span>
+                  {selected ? <Check className="size-4 text-blue-600" /> : null}
+                </DropdownMenuItem>
+              )
+            })}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

@@ -4,7 +4,7 @@ import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { PageHeader } from "@/components/page-header"
 
 export default function OrgSettingsRedirect() {
   const router = useRouter()
@@ -38,10 +38,9 @@ export default function OrgSettingsRedirect() {
   // Show loading state while redirecting
   return (
     <>
-      <header className="flex h-14 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
+      <PageHeader>
         <Skeleton className="h-4 w-32" />
-      </header>
+      </PageHeader>
       <div className="flex flex-1 flex-col p-6">
         <div className="mx-auto w-full max-w-2xl space-y-6">
           <div className="space-y-1">

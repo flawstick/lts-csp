@@ -8,8 +8,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { PageHeader } from "@/components/page-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -161,9 +160,7 @@ export default function NewTaskPage() {
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center gap-2">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
+      <PageHeader>
             <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem className="hidden md:block">
@@ -179,8 +176,7 @@ export default function NewTaskPage() {
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
-          </div>
-        </header>
+        </PageHeader>
 
         <div className="flex flex-1 flex-col gap-4 p-4 pt-0 max-w-3xl">
           <Card>

@@ -118,6 +118,15 @@ If prompted for CSP or secret credentials:
 2. You should see the Economic Substance Register form for: ${taxReturn.entityName}
 3. Tax Year: ${taxReturn.taxYear}
 
+## CASE ASSIGNMENT — DO THIS BEFORE PROCESSING THE RETURN
+- Before filling or reviewing any return fields, make sure the case is assigned to **Amir Isaac**.
+- Once you are inside the case, click **"Assign to user"**.
+- A list of users will appear.
+- Click **"Assign"** on the **first "Amir Isaac"** that appears in the list.
+- If that assignment does not work, does not stick, or the case still does not appear assigned correctly, repeat the action and click **"Assign"** on the **other "Amir Isaac"** entry.
+- Only after the case is successfully assigned to **Amir Isaac** should you continue with the filing workflow.
+- If the case is already assigned to **Amir Isaac**, continue without changing it.
+
 ## IMPORTANT INSTRUCTIONS
 
 **CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "${DEFAULT_CERTIFICATE_TYPE}" (this is always the correct option).
