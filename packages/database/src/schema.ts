@@ -49,6 +49,7 @@ export const taskStatusEnum = pgEnum("task_status", [
 export const jobStatusEnum = pgEnum("job_status", [
   "pending",
   "queued",
+  "starting",
   "running",
   "paused",
   "completed",

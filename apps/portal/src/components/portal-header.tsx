@@ -30,7 +30,7 @@ import { PortalCommandMenu } from "@/components/portal-command-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
 const AVATAR_LIMIT = 6;
 
@@ -57,6 +57,8 @@ function memberAvatarSrc(member: {
 
 export function PortalHeader() {
   const pathname = usePathname();
+  const { state: sidebarState } = useSidebar();
+  const [mounted, setMounted] = useState(false);
   const [askAiOpen, setAskAiOpen] = useState(false);
   const [askAiInitialPrompt, setAskAiInitialPrompt] = useState<string | null>(null);
 
@@ -70,6 +72,8 @@ export function PortalHeader() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     const onAskAiOpen = (e: Event) => {
@@ -138,13 +142,17 @@ export function PortalHeader() {
   const CurrentIcon = navigation.currentIcon;
 
   return (
-    <header className="bg-card/95 sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b px-4 backdrop-blur-xl">
+    <header className="bg-container sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b px-4">
       <div className="flex min-w-0 items-center gap-3">
-        <SidebarTrigger className="-ml-1 rounded-lg" />
-        <Separator
-          orientation="vertical"
-          className="mr-1 h-4 data-vertical:self-center"
-        />
+        {mounted && sidebarState === "collapsed" && (
+          <>
+            <SidebarTrigger className="-ml-1 rounded-lg" />
+            <Separator
+              orientation="vertical"
+              className="mr-1 h-4 data-vertical:self-center"
+            />
+          </>
+        )}
         <div className="min-w-0">
           <div className="text-foreground flex items-center gap-2 sm:hidden">
             <CurrentIcon className="size-4 shrink-0" />
@@ -166,7 +174,7 @@ export function PortalHeader() {
                   className={cn(
                     "inline-flex max-w-[15rem] items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors",
                     crumb.isCurrent
-                      ? "bg-muted text-foreground"
+                      ? "border bg-white text-foreground dark:bg-muted"
                       : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
                   )}
                 >

@@ -10,6 +10,7 @@ import {
 } from "@repo/database";
 import { NextResponse } from "next/server";
 import { launchBrowserTask } from "@/lib/ecs";
+import { env } from "@/env";
 
 // Debug route to launch browser task for a tax return
 // FOR DEVELOPMENT ONLY
@@ -96,8 +97,14 @@ export async function POST(request: Request) {
       .values({
         taskId: task.id,
         jobNumber: 1,
-        status: "pending",
+        status: "queued",
         aiModel: "bu-max",
+        cloudwatchLogGroup: env.ECS_LOG_GROUP,
+        resultData: {
+          submissionMode: "prepare_only",
+          overrideSaved: false,
+          startupTimeoutMs: env.BROWSER_STARTUP_TIMEOUT_MS,
+        },
       })
       .returning();
 
@@ -114,14 +121,16 @@ export async function POST(request: Request) {
       jobId: job.id,
       taxReturnId: taxReturn.id,
       taskId: task.id,
+      workerMode: "single",
     });
 
     // Update job with ECS info
     await db
       .update(jobs)
       .set({
-        status: "queued",
         ecsTaskArn: ecsResult.taskArn || null,
+        cloudwatchLogGroup: ecsResult.cloudwatchLogGroup,
+        cloudwatchLogStream: ecsResult.cloudwatchLogStream,
       })
       .where(eq(jobs.id, job.id));
 

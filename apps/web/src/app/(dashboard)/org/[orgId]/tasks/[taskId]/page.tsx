@@ -71,7 +71,7 @@ export default function TaskDetailPage() {
         {
           id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
           role: "assistant",
-          content: "Task started. I'm now automating the form submission...",
+          content: "Task queued. Allocating browser worker...",
           timestamp: Date.now(),
         },
       ]);
@@ -119,11 +119,12 @@ export default function TaskDetailPage() {
 
   const activeJob = task?.jobs?.find(
     (j) =>
-      j.status === "running" || j.status === "queued" || j.status === "paused",
+      j.status === "queued" ||
+      j.status === "starting" ||
+      j.status === "running" ||
+      j.status === "paused",
   );
-  const runningJob = task?.jobs?.find(
-    (j) => j.status === "running" || j.status === "queued",
-  );
+  const runningJob = task?.jobs?.find((j) => j.status === "running");
   const pausedJob = task?.jobs?.find((j) => j.status === "paused");
   const latestJob = task?.jobs?.[0];
   const selectedJob = selectedJobId
@@ -158,8 +159,8 @@ export default function TaskDetailPage() {
   }, [steps]);
 
   useEffect(() => {
-    activeJobIdRef.current = runningJob?.id || pausedJob?.id || null;
-  }, [runningJob?.id, pausedJob?.id]);
+    activeJobIdRef.current = activeJob?.id || pausedJob?.id || null;
+  }, [activeJob?.id, pausedJob?.id]);
 
   const getStoredLiveUrl = useCallback(
     (job: { resultData?: unknown } | null | undefined) => {
@@ -270,10 +271,17 @@ export default function TaskDetailPage() {
       } else {
         const messages: ChatMessage[] = [];
 
+        const fallbackMessage =
+          job.status === "queued"
+            ? "Task queued. Allocating browser worker..."
+            : job.status === "starting"
+              ? "A browser worker claimed this task and is connecting Browser Use..."
+              : `Task started at ${new Date(job.startedAt || job.createdAt).toLocaleString()}`;
+
         messages.push({
           id: `start-${job.id}`,
           role: "assistant",
-          content: `Task started at ${new Date(job.startedAt || job.createdAt).toLocaleString()}`,
+          content: fallbackMessage,
           timestamp: new Date(job.startedAt || job.createdAt).getTime(),
         });
 
@@ -335,7 +343,8 @@ export default function TaskDetailPage() {
         setSelectedJobId(jobToSelect.id);
         if (
           jobToSelect.status !== "running" &&
-          jobToSelect.status !== "queued"
+          jobToSelect.status !== "queued" &&
+          jobToSelect.status !== "starting"
         ) {
           loadJobChat(jobToSelect);
         }
@@ -356,6 +365,7 @@ export default function TaskDetailPage() {
       if (
         job.status === "running" ||
         job.status === "queued" ||
+        job.status === "starting" ||
         job.status === "paused"
       ) {
         connectToSSE(job.id);
@@ -411,6 +421,32 @@ export default function TaskDetailPage() {
             }
 
             // Steps are shown in the timeline, not duplicated in chat
+          }
+
+          if (data.type === "job:started") {
+            setChatMessages((prev) => {
+              if (
+                prev.some((message) =>
+                  message.content.includes(
+                    "I'm now automating the form submission...",
+                  ),
+                )
+              ) {
+                return prev;
+              }
+
+              return [
+                ...prev,
+                {
+                  id: `started-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                  role: "assistant",
+                  content:
+                    "Task started. I'm now automating the form submission...",
+                  timestamp: Date.now(),
+                },
+              ];
+            });
+            refetch();
           }
 
           if (data.type === "job:requires_attention") {
@@ -534,6 +570,7 @@ export default function TaskDetailPage() {
       browserJob &&
       (browserJob.status === "running" ||
         browserJob.status === "queued" ||
+        browserJob.status === "starting" ||
         browserJob.status === "paused")
     ) {
       if (connectedJobIdRef.current !== browserJob.id) {
@@ -565,6 +602,7 @@ export default function TaskDetailPage() {
       !activeJobForPolling ||
       (activeJobForPolling.status !== "running" &&
         activeJobForPolling.status !== "queued" &&
+        activeJobForPolling.status !== "starting" &&
         activeJobForPolling.status !== "paused")
     ) {
       return;
@@ -592,7 +630,7 @@ export default function TaskDetailPage() {
 
   // Save chat and steps when they change (only for active jobs)
   useEffect(() => {
-    const activeJobForSave = runningJob || pausedJob;
+    const activeJobForSave = activeJob || pausedJob;
     if (activeJobForSave && (chatMessages.length > 1 || steps.length > 0)) {
       saveJobData(activeJobForSave.id, chatMessages, steps);
     }
@@ -747,6 +785,7 @@ export default function TaskDetailPage() {
 
   const jurisdictionName = task.taxReturn?.jurisdiction?.name ?? null;
   const entityName = task.taxReturn?.entityName ?? null;
+  const browserStatus = selectedJob?.status ?? activeJob?.status ?? null;
   const isRunning = !!runningJob;
 
   // ── Main render ────────────────────────────────────────────────
@@ -756,7 +795,7 @@ export default function TaskDetailPage() {
       <TaskHeader
         orgId={orgId}
         taskName={task.name}
-        taskStatus={task.status}
+        taskStatus={browserStatus ?? task.status}
         jurisdictionName={jurisdictionName}
         entityName={entityName}
         isConnected={isConnected}
@@ -776,6 +815,7 @@ export default function TaskDetailPage() {
                 selectedJob={selectedJob}
                 isBrowserFullscreen={isBrowserFullscreen}
                 setIsBrowserFullscreen={setIsBrowserFullscreen}
+                activeJob={activeJob ?? null}
                 runningJob={runningJob ?? null}
                 pausedJob={pausedJob ?? null}
                 onSelectJob={handleSelectJob}
@@ -794,7 +834,8 @@ export default function TaskDetailPage() {
               <BrowserFrame
                 liveUrl={liveUrl}
                 iframeRef={iframeRef}
-                isRunning={isRunning}
+                jobStatus={browserStatus}
+                errorMessage={selectedJob?.errorMessage ?? null}
                 isStartPending={startJobMutation.isPending}
                 onStart={() => handleStart()}
               />
@@ -826,6 +867,7 @@ export default function TaskDetailPage() {
               }
               pausedJob={pausedJob}
               runningJob={runningJob}
+              activeJobStatus={browserStatus}
               currentStep={currentStep}
               steps={steps}
               chatMessages={chatMessages}

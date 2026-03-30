@@ -64,7 +64,7 @@ export function TaskHeader({
         ) : null}
 
         <Badge variant="outline" className={`gap-1 text-[10px] font-semibold uppercase tracking-wider ${statusConfig.className}`}>
-          {(taskStatus === "running" || taskStatus === "in_progress") ? (
+          {(taskStatus === "running" || taskStatus === "in_progress" || taskStatus === "starting") ? (
             <span className="relative flex size-1.5">
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-blue-400 opacity-75" />
               <span className="relative inline-flex size-1.5 rounded-full bg-blue-500" />

@@ -6,7 +6,7 @@
   "main": "./src/index.ts",
   "scripts": {
     "dev": "bun x tsx watch src/index.ts",
-    "start": "bun x tsx src/index.ts",
+    "start": "bun src/index.ts",
     "docker:build": "docker build -t lts-browser-task -f Dockerfile ../.."
   },
   "dependencies": {

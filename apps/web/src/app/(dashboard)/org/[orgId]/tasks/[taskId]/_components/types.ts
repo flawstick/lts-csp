@@ -33,6 +33,18 @@ export interface ChatMessage {
 
 export function getStatusConfig(status: string) {
   switch (status) {
+    case "queued":
+      return {
+        label: "Queued",
+        className:
+          "border-yellow-500/30 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
+      };
+    case "starting":
+      return {
+        label: "Starting",
+        className:
+          "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400",
+      };
     case "completed":
       return {
         label: "Completed",

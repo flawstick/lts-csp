@@ -10,6 +10,7 @@ import {
   jobs,
   tasks,
   eq,
+  sql,
   type TaxReturnFileCategory,
   type TaxReturnFileRole,
 } from "@repo/database";
@@ -27,16 +28,35 @@ import { buildSubstanceFormPrompt } from "./prompt-builder";
 // ============================================================================
 
 const BROWSER_USE_API_KEY = process.env.BROWSER_USE_API_KEY || "";
-const TAX_RETURN_ID = process.env.TAX_RETURN_ID || "";
-const JOB_ID = process.env.JOB_ID || "";
-const TASK_ID = process.env.TASK_ID || "";
-const OVERRIDE_SAVED = process.env.OVERRIDE_SAVED === "true";
-const SUBMISSION_MODE =
+const ENV_TAX_RETURN_ID = process.env.TAX_RETURN_ID || "";
+const ENV_JOB_ID = process.env.JOB_ID || "";
+const ENV_TASK_ID = process.env.TASK_ID || "";
+const ENV_OVERRIDE_SAVED = process.env.OVERRIDE_SAVED === "true";
+const ENV_SUBMISSION_MODE =
   process.env.SUBMISSION_MODE === "submit_and_capture_pdf"
     ? "submit_and_capture_pdf"
     : "prepare_only";
 const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || "";
 const BROWSER_USE_MODEL: BrowserUseModel = "bu-max";
+const WORKER_MODE =
+  process.env.WORKER_MODE === "single"
+    ? "single"
+    : process.env.WORKER_MODE === "service"
+      ? "service"
+      : ENV_JOB_ID && ENV_TAX_RETURN_ID
+        ? "single"
+        : "service";
+const BROWSER_STARTUP_TIMEOUT_MS = Number(
+  process.env.BROWSER_STARTUP_TIMEOUT_MS || 45_000,
+);
+const BROWSER_JOB_POLL_INTERVAL_MS = Number(
+  process.env.BROWSER_JOB_POLL_INTERVAL_MS || 1_500,
+);
+const BROWSER_JOB_HEARTBEAT_INTERVAL_MS = Number(
+  process.env.BROWSER_JOB_HEARTBEAT_INTERVAL_MS || 10_000,
+);
+const CLOUDWATCH_LOG_GROUP = process.env.CLOUDWATCH_LOG_GROUP || "/ecs/lts-task";
+const WORKER_CONTAINER_NAME = process.env.WORKER_CONTAINER_NAME || "lts-task";
 
 const POLL_INTERVAL_MS = 2000;
 const MAX_RUNTIME_MS = 30 * 60 * 1000;
@@ -122,6 +142,73 @@ type CompletionPdfIngestionResult = {
   error?: string;
 };
 
+type ActiveJobRuntime = {
+  jobId: string;
+  taskId: string;
+  taxReturnId: string;
+  overrideSaved: boolean;
+  submissionMode: SubmissionMode;
+  resultData: Record<string, unknown>;
+  workerId: string;
+  workerTaskArn: string | null;
+  workerLogStream: string | null;
+  startupTimeoutMs: number;
+};
+
+type WorkerMetadata = {
+  workerId: string;
+  workerTaskArn: string | null;
+  workerLogStream: string | null;
+};
+
+type ClaimedJobRow = {
+  id: string;
+  taskId: string;
+  taxReturnId: string;
+  resultData: Record<string, unknown> | null;
+};
+
+let activeRuntime: ActiveJobRuntime | null = null;
+let workerMetadata: WorkerMetadata = {
+  workerId: `local-${process.pid}`,
+  workerTaskArn: null,
+  workerLogStream: null,
+};
+let shuttingDown = false;
+
+function getActiveRuntime() {
+  return activeRuntime;
+}
+
+function getRequiredRuntime() {
+  const runtime = getActiveRuntime();
+  if (!runtime) {
+    throw new Error("No active browser job runtime is set");
+  }
+
+  return runtime;
+}
+
+function currentJobId() {
+  return getActiveRuntime()?.jobId ?? ENV_JOB_ID;
+}
+
+function currentTaskId() {
+  return getActiveRuntime()?.taskId ?? ENV_TASK_ID;
+}
+
+function currentTaxReturnId() {
+  return getActiveRuntime()?.taxReturnId ?? ENV_TAX_RETURN_ID;
+}
+
+function currentSubmissionMode(): SubmissionMode {
+  return getActiveRuntime()?.submissionMode ?? ENV_SUBMISSION_MODE;
+}
+
+function currentOverrideSaved() {
+  return getActiveRuntime()?.overrideSaved ?? ENV_OVERRIDE_SAVED;
+}
+
 // ============================================================================
 // Logging + Redis Publishing
 // ============================================================================
@@ -131,17 +218,40 @@ async function log(
   data?: Record<string, unknown>,
   options?: { publish?: boolean },
 ) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${message}`, data ? JSON.stringify(data) : "");
+  const runtime = getActiveRuntime();
+  const payload = {
+    timestamp: new Date().toISOString(),
+    level: "info",
+    workerMode: WORKER_MODE,
+    workerId: runtime?.workerId ?? workerMetadata.workerId,
+    jobId: runtime?.jobId ?? null,
+    taskId: runtime?.taskId ?? null,
+    taxReturnId: runtime?.taxReturnId ?? null,
+    sessionId:
+      typeof runtime?.resultData.sessionId === "string"
+        ? runtime.resultData.sessionId
+        : typeof runtime?.resultData.browserUseSessionId === "string"
+          ? runtime.resultData.browserUseSessionId
+          : null,
+    message,
+    ...(data ?? {}),
+  };
+
+  console.log(JSON.stringify(payload));
 
   if (options?.publish === false) {
+    return;
+  }
+
+  const jobId = currentJobId();
+  if (!jobId) {
     return;
   }
 
   try {
     await publishJobEvent({
       type: "job:step",
-      jobId: JOB_ID,
+      jobId,
       timestamp: Date.now(),
       data: { message, ...data },
     });
@@ -149,10 +259,15 @@ async function log(
 }
 
 async function publishStatus(status: string, data: Record<string, unknown>) {
+  const jobId = currentJobId();
+  if (!jobId) {
+    return;
+  }
+
   try {
     await publishJobEvent({
       type: "job:progress",
-      jobId: JOB_ID,
+      jobId,
       timestamp: Date.now(),
       data: { status, ...data },
     });
@@ -168,6 +283,117 @@ function isTerminalSessionStatus(status: BrowserUseSessionStatus): boolean {
     status === "timed_out" ||
     status === "error"
   );
+}
+
+function normalizeResultData(
+  value: unknown,
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return { ...(value as Record<string, unknown>) };
+}
+
+function mergeResultData(
+  existing: Record<string, unknown>,
+  patch?: Record<string, unknown>,
+) {
+  if (!patch) {
+    return existing;
+  }
+
+  return {
+    ...existing,
+    ...patch,
+  };
+}
+
+async function updateActiveJobRecord(params: {
+  set?: Record<string, unknown>;
+  resultDataPatch?: Record<string, unknown>;
+}) {
+  const runtime = getRequiredRuntime();
+  runtime.resultData = mergeResultData(runtime.resultData, params.resultDataPatch);
+
+  const nextValues: Record<string, unknown> = {
+    ...(params.set ?? {}),
+    resultData: runtime.resultData,
+  };
+
+  await db.update(jobs).set(nextValues).where(eq(jobs.id, runtime.jobId));
+}
+
+async function heartbeatActiveJob() {
+  const runtime = getActiveRuntime();
+  if (!runtime) {
+    return;
+  }
+
+  runtime.resultData = mergeResultData(runtime.resultData, {
+    lastHeartbeatAt: Date.now(),
+  });
+
+  await db
+    .update(jobs)
+    .set({
+      resultData: runtime.resultData,
+    })
+    .where(eq(jobs.id, runtime.jobId));
+}
+
+function extractRows<T>(result: unknown): T[] {
+  if (Array.isArray(result)) {
+    return result as T[];
+  }
+
+  if (
+    result &&
+    typeof result === "object" &&
+    "rows" in result &&
+    Array.isArray((result as { rows?: unknown[] }).rows)
+  ) {
+    return (result as { rows: T[] }).rows;
+  }
+
+  return [];
+}
+
+async function loadWorkerMetadata(): Promise<WorkerMetadata> {
+  const taskMetadataUrl = process.env.ECS_CONTAINER_METADATA_URI_V4
+    ? `${process.env.ECS_CONTAINER_METADATA_URI_V4}/task`
+    : null;
+
+  if (!taskMetadataUrl) {
+    return workerMetadata;
+  }
+
+  try {
+    const response = await fetch(taskMetadataUrl);
+    if (!response.ok) {
+      throw new Error(
+        `Metadata request failed: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const metadata = (await response.json()) as {
+      TaskARN?: string;
+    };
+    const taskArn =
+      typeof metadata.TaskARN === "string" ? metadata.TaskARN : null;
+    const taskId = taskArn?.split("/").pop() ?? `local-${process.pid}`;
+
+    return {
+      workerId: taskId,
+      workerTaskArn: taskArn,
+      workerLogStream: taskId
+        ? `ecs/${WORKER_CONTAINER_NAME}/${taskId}`
+        : null,
+    };
+  } catch (error) {
+    console.error("Failed to load ECS task metadata", error);
+    return workerMetadata;
+  }
 }
 
 function normalizeBrowserUseOutput(output: unknown): string {
@@ -632,7 +858,7 @@ async function captureCompletionPdf(params: {
             : "browser_use_download",
         kind: "filed_return_pdf",
         supersededAt: uploadedAt,
-        supersededByJobId: JOB_ID,
+        supersededByJobId: currentJobId(),
       },
     };
   });
@@ -653,8 +879,8 @@ async function captureCompletionPdf(params: {
     metadata: {
       source: "browser_use_download",
       kind: "filed_return_pdf",
-      jobId: JOB_ID,
-      taskId: TASK_ID,
+      jobId: currentJobId(),
+      taskId: currentTaskId(),
       browserUseSessionId: sessionId,
       browserUsePath: selectedCandidate.path,
       browserUseUrl: selectedCandidate.url,
@@ -763,71 +989,347 @@ async function uploadFinancialStatementsFile(
 // Main
 // ============================================================================
 
-async function main() {
-  await log("Task runner starting", {
-    taxReturnId: TAX_RETURN_ID,
-    jobId: JOB_ID,
-    submissionMode: SUBMISSION_MODE,
+function parseSubmissionMode(value: unknown): SubmissionMode {
+  return value === "submit_and_capture_pdf"
+    ? "submit_and_capture_pdf"
+    : "prepare_only";
+}
+
+function parseOverrideSaved(value: unknown) {
+  return value === true;
+}
+
+async function persistClaimMetadata(runtime: ActiveJobRuntime) {
+  const now = Date.now();
+  runtime.resultData = mergeResultData(runtime.resultData, {
+    submissionMode: runtime.submissionMode,
+    overrideSaved: runtime.overrideSaved,
+    workerId: runtime.workerId,
+    workerTaskArn: runtime.workerTaskArn,
+    workerLogStream: runtime.workerLogStream,
+    queueClaimedAt: now,
+    startupStartedAt: now,
+    startupTimeoutMs: runtime.startupTimeoutMs,
+    logWindowStartAt: now,
+    lastHeartbeatAt: now,
   });
 
-  if (!BROWSER_USE_API_KEY) {
-    await log("ERROR: BROWSER_USE_API_KEY is required");
-    process.exit(1);
+  await db
+    .update(jobs)
+    .set({
+      status: "starting",
+      ecsTaskArn: runtime.workerTaskArn,
+      cloudwatchLogGroup: CLOUDWATCH_LOG_GROUP,
+      cloudwatchLogStream: runtime.workerLogStream,
+      resultData: runtime.resultData,
+    })
+    .where(eq(jobs.id, runtime.jobId));
+}
+
+async function claimNextQueuedJob(): Promise<ActiveJobRuntime | null> {
+  const result = await db.execute(sql`
+    with next_job as (
+      select
+        j.id,
+        j.task_id as "taskId",
+        t.tax_return_id as "taxReturnId",
+        coalesce(j.result_data, '{}'::jsonb) as "resultData"
+      from lts_job j
+      inner join lts_task t on t.id = j.task_id
+      where
+        j.status = 'queued'
+        and t.tax_return_id is not null
+      order by j.created_at asc
+      for update skip locked
+      limit 1
+    )
+    update lts_job as j
+    set
+      status = 'starting',
+      ecs_task_arn = ${workerMetadata.workerTaskArn},
+      cloudwatch_log_group = ${CLOUDWATCH_LOG_GROUP},
+      cloudwatch_log_stream = ${workerMetadata.workerLogStream}
+    from next_job
+    where j.id = next_job.id
+    returning
+      j.id,
+      next_job."taskId",
+      next_job."taxReturnId",
+      next_job."resultData";
+  `);
+
+  const claimed = extractRows<ClaimedJobRow>(result)[0];
+  if (!claimed) {
+    return null;
   }
 
-  if (!TAX_RETURN_ID) {
-    await log("ERROR: TAX_RETURN_ID is required");
-    process.exit(1);
+  const resultData = normalizeResultData(claimed.resultData);
+  const runtime: ActiveJobRuntime = {
+    jobId: claimed.id,
+    taskId: claimed.taskId,
+    taxReturnId: claimed.taxReturnId,
+    overrideSaved: parseOverrideSaved(resultData.overrideSaved),
+    submissionMode: parseSubmissionMode(resultData.submissionMode),
+    resultData,
+    workerId: workerMetadata.workerId,
+    workerTaskArn: workerMetadata.workerTaskArn,
+    workerLogStream: workerMetadata.workerLogStream,
+    startupTimeoutMs:
+      typeof resultData.startupTimeoutMs === "number"
+        ? resultData.startupTimeoutMs
+        : BROWSER_STARTUP_TIMEOUT_MS,
+  };
+
+  await persistClaimMetadata(runtime);
+  return runtime;
+}
+
+async function prepareSingleJobRuntime(): Promise<ActiveJobRuntime> {
+  const jobId = ENV_JOB_ID;
+  const taskId = ENV_TASK_ID;
+  const taxReturnId = ENV_TAX_RETURN_ID;
+
+  if (!jobId || !taskId || !taxReturnId) {
+    throw new Error("JOB_ID, TASK_ID, and TAX_RETURN_ID are required in single mode");
   }
+
+  const job = await db.query.jobs.findFirst({
+    where: eq(jobs.id, jobId),
+  });
+
+  if (!job) {
+    throw new Error("Job not found");
+  }
+
+  const resultData = normalizeResultData(job.resultData);
+  const runtime: ActiveJobRuntime = {
+    jobId,
+    taskId,
+    taxReturnId,
+    overrideSaved:
+      parseOverrideSaved(resultData.overrideSaved) || ENV_OVERRIDE_SAVED,
+    submissionMode:
+      parseSubmissionMode(resultData.submissionMode) ?? ENV_SUBMISSION_MODE,
+    resultData,
+    workerId: workerMetadata.workerId,
+    workerTaskArn: workerMetadata.workerTaskArn,
+    workerLogStream: workerMetadata.workerLogStream,
+    startupTimeoutMs:
+      typeof resultData.startupTimeoutMs === "number"
+        ? resultData.startupTimeoutMs
+        : BROWSER_STARTUP_TIMEOUT_MS,
+  };
+
+  await persistClaimMetadata(runtime);
+  return runtime;
+}
+
+async function initializeBrowserUseSession(
+  client: BrowserUseClient,
+  useProxy: boolean,
+) {
+  const runtime = getRequiredRuntime();
+  const deadline = Date.now() + runtime.startupTimeoutMs;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= 2 && Date.now() < deadline; attempt += 1) {
+    let createdSessionId: string | null = null;
+
+    try {
+      await publishStatus("starting", {
+        goal: "Connecting Browser Use session",
+        message: "Connecting Browser Use session",
+      });
+
+      await log("Creating Browser Use session", {
+        phase: "startup",
+        attempt,
+        useProxy,
+      });
+
+      const session = await client.createSession({
+        ...(useProxy && { proxyCountryCode: "uk" as const }),
+      });
+      createdSessionId = session.id;
+
+      if (!session.id) {
+        throw new Error("Browser Use did not return a session id");
+      }
+
+      const sessionDetails = await client.getSession(session.id);
+      const liveUrl = session.liveUrl || sessionDetails.liveUrl;
+      if (!liveUrl) {
+        throw new Error("Browser Use did not return a live URL");
+      }
+
+      await client.getMessages(session.id, null);
+
+      return {
+        ...sessionDetails,
+        id: session.id,
+        liveUrl,
+      };
+    } catch (error) {
+      lastError =
+        error instanceof Error ? error : new Error(String(error));
+
+      await log("Browser Use startup attempt failed", {
+        phase: "startup",
+        attempt,
+        error: lastError.message,
+      });
+
+      if (createdSessionId) {
+        try {
+          await client.stopSession(createdSessionId, "session");
+        } catch {}
+      }
+
+      if (attempt >= 2 || Date.now() >= deadline) {
+        break;
+      }
+    }
+  }
+
+  throw lastError ?? new Error("Browser Use session failed to initialize");
+}
+
+async function markActiveRuntimeFailed(errorMessage: string) {
+  const runtime = getRequiredRuntime();
+  runtime.resultData = mergeResultData(runtime.resultData, {
+    startupError: errorMessage,
+    lastHeartbeatAt: Date.now(),
+  });
+
+  await db
+    .update(taxReturns)
+    .set({ status: "failed" })
+    .where(eq(taxReturns.id, runtime.taxReturnId));
+
+  await db
+    .update(tasks)
+    .set({ status: "failed" })
+    .where(eq(tasks.id, runtime.taskId));
+
+  await db
+    .update(jobs)
+    .set({
+      status: "failed",
+      completedAt: new Date(),
+      errorMessage,
+      resultData: runtime.resultData,
+    })
+    .where(eq(jobs.id, runtime.jobId));
+}
+
+async function runBrowserJob(runtime: ActiveJobRuntime) {
+  activeRuntime = runtime;
+  const submissionMode = runtime.submissionMode;
+  const overrideSaved = runtime.overrideSaved;
+
+  await log("Browser job starting", {
+    phase: "startup",
+    submissionMode,
+  });
 
   const client = new BrowserUseClient(BROWSER_USE_API_KEY);
+  const heartbeat = setInterval(() => {
+    void heartbeatActiveJob().catch((error) => {
+      console.error("Failed to update browser worker heartbeat", error);
+    });
+  }, BROWSER_JOB_HEARTBEAT_INTERVAL_MS);
+
+  let session:
+    | (Awaited<ReturnType<BrowserUseClient["getSession"]>> & {
+        liveUrl?: string | null;
+      })
+    | null = null;
+  let workspaceId: string | null = null;
 
   try {
-    // Update job status
-    if (JOB_ID) {
-      await db
-        .update(jobs)
-        .set({
-          status: "running",
-          startedAt: new Date(),
-          aiModel: BROWSER_USE_MODEL,
-        })
-        .where(eq(jobs.id, JOB_ID));
-    }
-
-    // Fetch tax return with substance form
     await log("Fetching tax return data");
     const taxReturn = await db.query.taxReturns.findFirst({
-      where: eq(taxReturns.id, TAX_RETURN_ID),
+      where: eq(taxReturns.id, runtime.taxReturnId),
       with: { substanceForm: true, jurisdiction: true },
     });
 
-    if (!taxReturn) throw new Error("Tax return not found");
-    if (!taxReturn.substanceForm) throw new Error("Substance form not found");
+    if (!taxReturn) {
+      throw new Error("Tax return not found");
+    }
+    if (!taxReturn.substanceForm) {
+      throw new Error("Substance form not found");
+    }
+
     const taxReturnFiles = getTaxReturnFiles(taxReturn.files);
-
-    // Create Browser Use session (try without proxy first, then with UK proxy)
     const useProxy = process.env.USE_UK_PROXY !== "false";
-    await log(
-      `Creating Browser Use session ${useProxy ? "with UK proxy" : "without proxy"}`,
-    );
-    const session = await client.createSession({
-      ...(useProxy && { proxyCountryCode: "uk" as const }),
+
+    session = await initializeBrowserUseSession(client, useProxy);
+
+    const latestJobStatus = await db.query.jobs.findFirst({
+      where: eq(jobs.id, runtime.jobId),
+      columns: { status: true },
     });
 
-    await log("Session created", {
+    if (latestJobStatus?.status === "cancelled") {
+      await log("Job was cancelled during startup", { phase: "startup" });
+      try {
+        await client.stopSession(session.id, "session");
+      } catch {}
+      return;
+    }
+
+    runtime.resultData = mergeResultData(runtime.resultData, {
+      browserUseSessionId: session.id,
       sessionId: session.id,
-      liveUrl: session.liveUrl,
+      liveUrl: session.liveUrl ?? null,
+      startupCompletedAt: Date.now(),
+      startupError: null,
+      lastHeartbeatAt: Date.now(),
     });
 
-    let workspaceId: string | null = null;
+    await db
+      .update(jobs)
+      .set({
+        status: "running",
+        startedAt: new Date(),
+        aiModel: BROWSER_USE_MODEL,
+        resultData: runtime.resultData,
+      })
+      .where(eq(jobs.id, runtime.jobId));
+
+    await publishJobEvent({
+      type: "job:started",
+      jobId: runtime.jobId,
+      timestamp: Date.now(),
+      data: {
+        liveUrl: session.liveUrl,
+        sessionId: session.id,
+        workspaceId: null,
+        taxReturnId: runtime.taxReturnId,
+        entityName: taxReturn.entityName,
+        submissionMode,
+      },
+    });
+
     let financialStatementsFile: BrowserSessionInputFile | null = null;
     let baselineBrowserFileKeys = new Set<string>();
+
     try {
       const workspace = await client.createWorkspace(
-        `tax-return-${TAX_RETURN_ID}`,
+        `tax-return-${runtime.taxReturnId}`,
       );
       workspaceId = workspace.id;
+
+      runtime.resultData = mergeResultData(runtime.resultData, {
+        workspaceId,
+      });
+      await db
+        .update(jobs)
+        .set({
+          resultData: runtime.resultData,
+        })
+        .where(eq(jobs.id, runtime.jobId));
+
       await log("Browser Use workspace created", {
         workspaceId,
       });
@@ -850,7 +1352,9 @@ async function main() {
     try {
       const [baselineSessionFiles, baselineWorkspaceFiles] = await Promise.all([
         client.getAllSessionFiles(session.id),
-        workspaceId ? client.getAllWorkspaceFiles(workspaceId) : Promise.resolve([]),
+        workspaceId
+          ? client.getAllWorkspaceFiles(workspaceId)
+          : Promise.resolve([]),
       ]);
 
       baselineBrowserFileKeys = new Set(
@@ -880,17 +1384,16 @@ async function main() {
       entity: taxReturn.entityName,
       year: taxReturn.taxYear,
       hasFinancialStatementsFile: Boolean(financialStatementsFile),
-      submissionMode: SUBMISSION_MODE,
+      submissionMode,
     });
 
-    // Build prompt
     const prompt = buildSubstanceFormPrompt({
       taxReturn: taxReturn as any,
       substanceForm: taxReturn.substanceForm as any,
       portalUrl: taxReturn.jurisdiction?.portalUrl || "https://my.gov.gg",
       returnLink: taxReturn.link || undefined,
-      overrideSaved: OVERRIDE_SAVED,
-      submissionMode: SUBMISSION_MODE,
+      overrideSaved,
+      submissionMode,
       financialStatementsFile,
       financialStatementsUrl: financialStatementsFile?.url ?? null,
     });
@@ -899,41 +1402,10 @@ async function main() {
       taxReturn.jurisdiction?.portalUrl ||
       "https://my.gov.gg";
 
-    // Publish live URL immediately
-    await publishJobEvent({
-      type: "job:started",
-      jobId: JOB_ID,
-      timestamp: Date.now(),
-      data: {
-        liveUrl: session.liveUrl,
-        sessionId: session.id,
-        workspaceId,
-        taxReturnId: TAX_RETURN_ID,
-        entityName: taxReturn.entityName,
-        submissionMode: SUBMISSION_MODE,
-      },
-    });
-
-    // Update job with live URL
-    if (JOB_ID) {
-      await db
-        .update(jobs)
-        .set({
-          aiModel: BROWSER_USE_MODEL,
-          resultData: {
-            submissionMode: SUBMISSION_MODE,
-            liveUrl: session.liveUrl,
-            sessionId: session.id,
-            workspaceId,
-          },
-        })
-        .where(eq(jobs.id, JOB_ID));
-    }
-
     await log("Starting Browser Use task", {
       sessionId: session.id,
       model: BROWSER_USE_MODEL,
-      submissionMode: SUBMISSION_MODE,
+      submissionMode,
     });
 
     let currentRunPromise = Promise.resolve(
@@ -945,7 +1417,6 @@ async function main() {
       }),
     );
 
-    // Poll for completion
     const startTime = Date.now();
     let lastStepCount = 0;
     let lastMessageId: string | null = null;
@@ -956,9 +1427,8 @@ async function main() {
     while (Date.now() - startTime < MAX_RUNTIME_MS) {
       await sleep(POLL_INTERVAL_MS);
 
-      // Check if user paused/cancelled the job from frontend
       const currentJobStatus = await db.query.jobs.findFirst({
-        where: eq(jobs.id, JOB_ID),
+        where: eq(jobs.id, runtime.jobId),
         columns: { status: true },
       });
 
@@ -976,7 +1446,7 @@ async function main() {
         await log("Job paused by user - waiting for resume");
         await publishJobEvent({
           type: "job:requires_attention",
-          jobId: JOB_ID,
+          jobId: runtime.jobId,
           timestamp: Date.now(),
           data: {
             liveUrl: session.liveUrl,
@@ -986,7 +1456,6 @@ async function main() {
           },
         });
 
-        // Stop the active task but keep the session/browser alive for manual work.
         try {
           await client.stopSession(session.id, "task");
           const stoppedStatus = await waitForSessionToLeaveRunning(
@@ -1008,13 +1477,12 @@ async function main() {
         lastMessageId = pausedCursor.lastMessageId;
         lastStepCount = pausedCursor.lastStepCount;
 
-        // Wait for resume
         const pauseStartTime = Date.now();
         let resumed = false;
         while (Date.now() - pauseStartTime < MAX_PAUSE_DURATION_MS) {
           await sleep(PAUSE_CHECK_INTERVAL_MS);
           const checkJob = await db.query.jobs.findFirst({
-            where: eq(jobs.id, JOB_ID),
+            where: eq(jobs.id, runtime.jobId),
             columns: { status: true },
           });
 
@@ -1037,6 +1505,7 @@ ${prompt}
             resumed = true;
             break;
           }
+
           if (checkJob?.status === "cancelled") {
             await log("Job cancelled during pause");
             try {
@@ -1051,22 +1520,16 @@ ${prompt}
           break;
         }
 
-        // Check if we timed out or cancelled
         const finalCheck = await db.query.jobs.findFirst({
-          where: eq(jobs.id, JOB_ID),
+          where: eq(jobs.id, runtime.jobId),
           columns: { status: true },
         });
         if (!resumed || finalCheck?.status !== "running") {
           if (finalCheck?.status === "paused") {
             await log("Pause timeout - marking as failed");
-            await db
-              .update(jobs)
-              .set({
-                status: "failed",
-                completedAt: new Date(),
-                errorMessage: "Timed out waiting for user intervention",
-              })
-              .where(eq(jobs.id, JOB_ID));
+            await markActiveRuntimeFailed(
+              "Timed out waiting for user intervention",
+            );
             terminalStateHandled = true;
           }
           break;
@@ -1078,8 +1541,7 @@ ${prompt}
       const browserSession = await client.getSession(session.id);
       const newMessages = await client.getMessages(session.id, lastMessageId);
       const orderedMessages = [...newMessages.messages].sort(
-        (a, b) =>
-          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
       );
       const publishedMessageUpdate = orderedMessages.length > 0;
       let sawDetachedBrowserRecoveryError = false;
@@ -1103,6 +1565,7 @@ ${prompt}
         await log(
           summary,
           {
+            phase: "run",
             type: message.type,
             role: message.role,
             sessionId: session.id,
@@ -1133,6 +1596,7 @@ ${prompt}
         await log(
           `Step ${browserSession.stepCount}: ${browserSession.lastStepSummary}`,
           {
+            phase: "run",
             sessionId: session.id,
           },
           { publish: false },
@@ -1148,6 +1612,7 @@ ${prompt}
           await log(
             "Browser Use lost tab focus repeatedly - restarting with recovery instructions",
             {
+              phase: "recovery",
               sessionId: session.id,
               recoveryReturnUrl,
               failureCount: detachedBrowserRecoveryFailures,
@@ -1168,7 +1633,7 @@ RECOVERY RULES:
 - If a stray tab or blank page is open, use switch or close to return to the main Guernsey portal tab.
 - If you cannot recover the portal tab quickly, navigate directly to: ${recoveryReturnUrl}
 - If you land on a page ending in reviewAndSubmit/summary, ${
-            SUBMISSION_MODE === "submit_and_capture_pdf"
+            submissionMode === "submit_and_capture_pdf"
               ? "treat it as a draft summary until every section has been rechecked in this run. Only use the final submit path after the filing is fully validated and you are ready to download the portal-generated completion PDF."
               : "this is a saved draft summary. Do NOT click Submit, Confirm, Print, or Download from that page."
           }
@@ -1197,13 +1662,14 @@ ${prompt}
           "Browser Use lost browser focus repeatedly after a detached tab/blank page and could not recover automatically.";
 
         await log(focusFailureMessage, {
+          phase: "recovery",
           sessionId: session.id,
           failureCount: detachedBrowserRecoveryFailures,
         });
 
         await publishJobEvent({
           type: "job:failed",
-          jobId: JOB_ID,
+          jobId: runtime.jobId,
           timestamp: Date.now(),
           data: {
             error: focusFailureMessage,
@@ -1212,27 +1678,7 @@ ${prompt}
           },
         });
 
-        await db
-          .update(taxReturns)
-          .set({ status: "failed" })
-          .where(eq(taxReturns.id, TAX_RETURN_ID));
-
-        if (JOB_ID) {
-          await db
-            .update(jobs)
-            .set({
-              status: "failed",
-              completedAt: new Date(),
-              errorMessage: focusFailureMessage,
-              resultData: {
-                submissionMode: SUBMISSION_MODE,
-                liveUrl: session.liveUrl,
-                browserUseSessionId: session.id,
-                workspaceId,
-              },
-            })
-            .where(eq(jobs.id, JOB_ID));
-        }
+        await markActiveRuntimeFailed(focusFailureMessage);
 
         try {
           await client.stopSession(session.id, "task");
@@ -1253,7 +1699,6 @@ ${prompt}
             browserSession.isTaskSuccessful ??
             true);
 
-        // Check if the agent needs user intervention (e.g., login required)
         const needsAttention =
           !success &&
           REQUIRES_ATTENTION_KEYWORDS.some((keyword) =>
@@ -1265,7 +1710,7 @@ ${prompt}
 
           await publishJobEvent({
             type: "job:requires_attention",
-            jobId: JOB_ID,
+            jobId: runtime.jobId,
             timestamp: Date.now(),
             data: {
               output,
@@ -1277,38 +1722,33 @@ ${prompt}
             },
           });
 
-          // Update job to paused status
-          if (JOB_ID) {
-            await db
-              .update(jobs)
-              .set({
-                status: "paused",
-                resultData: {
-                  submissionMode: SUBMISSION_MODE,
-                  output,
-                  browserUseSessionId: session.id,
-                  liveUrl: session.liveUrl,
-                  sessionId: session.id,
-                  pausedAt: Date.now(),
-                  pauseReason: output,
-                },
-              })
-              .where(eq(jobs.id, JOB_ID));
-          }
+          await updateActiveJobRecord({
+            set: {
+              status: "paused",
+            },
+            resultDataPatch: {
+              output,
+              browserUseSessionId: session.id,
+              liveUrl: session.liveUrl,
+              sessionId: session.id,
+              pausedAt: Date.now(),
+              pauseReason: output,
+            },
+          });
 
-          // Wait for user to resume or timeout
           await log("Waiting for user to complete action and resume...");
           const pauseStartTime = Date.now();
 
           while (Date.now() - pauseStartTime < MAX_PAUSE_DURATION_MS) {
             await sleep(PAUSE_CHECK_INTERVAL_MS);
 
-            // Check if job status changed (user clicked resume)
             const currentJob = await db.query.jobs.findFirst({
-              where: eq(jobs.id, JOB_ID),
+              where: eq(jobs.id, runtime.jobId),
             });
 
-            if (!currentJob) break;
+            if (!currentJob) {
+              break;
+            }
 
             if (currentJob.status === "running") {
               await log(
@@ -1342,25 +1782,18 @@ ${prompt}
             }
           }
 
-          // If we're still paused after max duration, fail
           const finalJobCheck = await db.query.jobs.findFirst({
-            where: eq(jobs.id, JOB_ID),
+            where: eq(jobs.id, runtime.jobId),
           });
 
           if (finalJobCheck?.status === "paused") {
             await log("Pause timeout - marking as failed");
-            await db
-              .update(jobs)
-              .set({
-                status: "failed",
-                completedAt: new Date(),
-                errorMessage: "Timed out waiting for user intervention",
-              })
-              .where(eq(jobs.id, JOB_ID));
+            await markActiveRuntimeFailed("Timed out waiting for user intervention");
+            terminalStateHandled = true;
             break;
           }
 
-          continue; // Continue the main polling loop with the new task
+          continue;
         }
 
         await log(
@@ -1373,13 +1806,13 @@ ${prompt}
         );
 
         let completionPdf: CompletionPdfIngestionResult | undefined;
-        if (success && SUBMISSION_MODE === "submit_and_capture_pdf") {
+        if (success && submissionMode === "submit_and_capture_pdf") {
           try {
             completionPdf = await captureCompletionPdf({
               client,
               sessionId: session.id,
               workspaceId,
-              taxReturnId: TAX_RETURN_ID,
+              taxReturnId: runtime.taxReturnId,
               orgId: taxReturn.orgId,
               entityName: taxReturn.entityName,
               taxYear: taxReturn.taxYear,
@@ -1401,19 +1834,17 @@ ${prompt}
           } catch (error) {
             completionPdf = {
               status: "failed",
-              error:
-                error instanceof Error ? error.message : String(error),
+              error: error instanceof Error ? error.message : String(error),
             };
             await log("Completion PDF ingestion threw an unexpected error", {
-              error:
-                error instanceof Error ? error.message : String(error),
+              error: error instanceof Error ? error.message : String(error),
             });
           }
         }
 
         await publishJobEvent({
           type: success ? "job:completed" : "job:failed",
-          jobId: JOB_ID,
+          jobId: runtime.jobId,
           timestamp: Date.now(),
           data: {
             output,
@@ -1423,28 +1854,27 @@ ${prompt}
           },
         });
 
-        // Update DB
         await db
           .update(taxReturns)
           .set({ status: success ? "completed" : "failed" })
-          .where(eq(taxReturns.id, TAX_RETURN_ID));
-        if (JOB_ID) {
-          await db
-            .update(jobs)
-            .set({
-              status: success ? "completed" : "failed",
-              completedAt: new Date(),
-              resultData: {
-                submissionMode: SUBMISSION_MODE,
-                output,
-                browserUseSessionId: session.id,
-                liveUrl: session.liveUrl,
-                workspaceId,
-                completionPdf,
-              },
-            })
-            .where(eq(jobs.id, JOB_ID));
-        }
+          .where(eq(taxReturns.id, runtime.taxReturnId));
+        await db
+          .update(tasks)
+          .set({ status: success ? "completed" : "failed" })
+          .where(eq(tasks.id, runtime.taskId));
+        await updateActiveJobRecord({
+          set: {
+            status: success ? "completed" : "failed",
+            completedAt: new Date(),
+          },
+          resultDataPatch: {
+            output,
+            browserUseSessionId: session.id,
+            liveUrl: session.liveUrl,
+            workspaceId,
+            completionPdf,
+          },
+        });
 
         terminalStateHandled = true;
         break;
@@ -1462,44 +1892,36 @@ ${prompt}
     if (!terminalStateHandled) {
       const timeoutMessage =
         "Browser Use session timed out before reaching a terminal state";
-      void currentRunPromise.catch(() => undefined);
       await log(timeoutMessage, { sessionId: session.id });
-
       await publishJobEvent({
         type: "job:failed",
-        jobId: JOB_ID,
+        jobId: runtime.jobId,
         timestamp: Date.now(),
         data: { error: timeoutMessage, browserUseSessionId: session.id },
       });
-
-      await db
-        .update(taxReturns)
-        .set({ status: "failed" })
-        .where(eq(taxReturns.id, TAX_RETURN_ID));
-
-      if (JOB_ID) {
-        await db
-          .update(jobs)
-          .set({
-            status: "failed",
-            completedAt: new Date(),
-            errorMessage: timeoutMessage,
-            resultData: {
-              submissionMode: SUBMISSION_MODE,
-              liveUrl: session.liveUrl,
-              browserUseSessionId: session.id,
-              workspaceId,
-            },
-          })
-          .where(eq(jobs.id, JOB_ID));
-      }
+      await markActiveRuntimeFailed(timeoutMessage);
     }
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
 
-    // Cleanup
-    try {
-      await client.stopSession(session.id);
-      await log("Session stopped");
-    } catch {}
+    await log("Fatal error", { error: errorMessage });
+    await publishJobEvent({
+      type: "job:failed",
+      jobId: runtime.jobId,
+      timestamp: Date.now(),
+      data: { error: errorMessage },
+    });
+    await markActiveRuntimeFailed(errorMessage);
+  } finally {
+    clearInterval(heartbeat);
+
+    if (session) {
+      try {
+        await client.stopSession(session.id);
+        await log("Session stopped");
+      } catch {}
+    }
 
     if (workspaceId) {
       try {
@@ -1508,31 +1930,86 @@ ${prompt}
       } catch {}
     }
 
-    process.exit(0);
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    await log("Fatal error", { error: errorMsg });
+    activeRuntime = null;
+  }
+}
 
-    await publishJobEvent({
-      type: "job:failed",
-      jobId: JOB_ID,
-      timestamp: Date.now(),
-      data: { error: errorMsg },
-    });
-
-    if (JOB_ID) {
-      await db
-        .update(jobs)
-        .set({
-          status: "failed",
-          completedAt: new Date(),
-          errorMessage: errorMsg,
-        })
-        .where(eq(jobs.id, JOB_ID));
+async function runWorkerLoop() {
+  while (!shuttingDown) {
+    const claimedJob = await claimNextQueuedJob();
+    if (!claimedJob) {
+      await sleep(BROWSER_JOB_POLL_INTERVAL_MS);
+      continue;
     }
 
+    await runBrowserJob(claimedJob);
+  }
+}
+
+async function failActiveRuntimeForShutdown() {
+  const runtime = getActiveRuntime();
+  if (!runtime) {
+    return;
+  }
+
+  const shutdownMessage =
+    "Browser worker interrupted during ECS shutdown or deployment";
+  try {
+    await markActiveRuntimeFailed(shutdownMessage);
+  } catch (error) {
+    console.error("Failed to mark active browser job as interrupted", error);
+  }
+
+  const sessionId =
+    typeof runtime.resultData.sessionId === "string"
+      ? runtime.resultData.sessionId
+      : typeof runtime.resultData.browserUseSessionId === "string"
+        ? runtime.resultData.browserUseSessionId
+        : null;
+
+  if (sessionId) {
+    try {
+      const client = new BrowserUseClient(BROWSER_USE_API_KEY);
+      await client.stopSession(sessionId, "session");
+    } catch (error) {
+      console.error("Failed to stop active Browser Use session on shutdown", error);
+    }
+  }
+}
+
+async function main() {
+  workerMetadata = await loadWorkerMetadata();
+
+  await log("Browser worker booting", {
+    workerMode: WORKER_MODE,
+    configuredSingleJobId: ENV_JOB_ID || null,
+    configuredTaxReturnId: ENV_TAX_RETURN_ID || null,
+    workerTaskArn: workerMetadata.workerTaskArn,
+    workerLogStream: workerMetadata.workerLogStream,
+  });
+
+  if (!BROWSER_USE_API_KEY) {
+    await log("ERROR: BROWSER_USE_API_KEY is required");
     process.exit(1);
   }
+
+  process.on("SIGTERM", () => {
+    shuttingDown = true;
+    void failActiveRuntimeForShutdown().finally(() => process.exit(0));
+  });
+
+  process.on("SIGINT", () => {
+    shuttingDown = true;
+    void failActiveRuntimeForShutdown().finally(() => process.exit(0));
+  });
+
+  if (WORKER_MODE === "single") {
+    const runtime = await prepareSingleJobRuntime();
+    await runBrowserJob(runtime);
+    process.exit(0);
+  }
+
+  await runWorkerLoop();
 }
 
 function sleep(ms: number): Promise<void> {

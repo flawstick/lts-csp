@@ -10,16 +10,30 @@
       "name": "lts-task",
       "image": "988904099875.dkr.ecr.eu-west-2.amazonaws.com/lts-task:latest",
       "essential": true,
-      "portMappings": [
-        {
-          "containerPort": 8080,
-          "protocol": "tcp"
-        }
-      ],
       "environment": [
         {
-          "name": "STREAM_PORT",
-          "value": "8080"
+          "name": "WORKER_MODE",
+          "value": "service"
+        },
+        {
+          "name": "BROWSER_STARTUP_TIMEOUT_MS",
+          "value": "45000"
+        },
+        {
+          "name": "BROWSER_JOB_POLL_INTERVAL_MS",
+          "value": "1500"
+        },
+        {
+          "name": "BROWSER_JOB_HEARTBEAT_INTERVAL_MS",
+          "value": "10000"
+        },
+        {
+          "name": "CLOUDWATCH_LOG_GROUP",
+          "value": "/ecs/lts-task"
+        },
+        {
+          "name": "WORKER_CONTAINER_NAME",
+          "value": "lts-task"
         }
       ],
       "logConfiguration": {

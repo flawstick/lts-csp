@@ -45,12 +45,12 @@ export const STATUS_LABEL: Record<ReturnStatusTone, string> = {
 };
 
 export const STATUS_CLASS: Record<ReturnStatusTone, string> = {
-  pending: "bg-amber-500/15 text-amber-700 ring-amber-500/30",
-  in_progress: "bg-blue-500/15 text-blue-700 ring-blue-500/30",
-  completed: "bg-emerald-500/15 text-emerald-700 ring-emerald-500/30",
-  failed: "bg-rose-500/15 text-rose-700 ring-rose-500/30",
-  review_required: "bg-violet-500/15 text-violet-700 ring-violet-500/30",
-  dismissed: "bg-zinc-500/15 text-zinc-500 ring-zinc-500/30",
+  pending: "bg-amber-50 text-amber-800 ring-amber-500/40 dark:bg-amber-500/15 dark:text-amber-700 dark:ring-amber-500/30",
+  in_progress: "bg-blue-50 text-blue-800 ring-blue-500/40 dark:bg-blue-500/15 dark:text-blue-700 dark:ring-blue-500/30",
+  completed: "bg-emerald-50 text-emerald-800 ring-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-700 dark:ring-emerald-500/30",
+  failed: "bg-rose-50 text-rose-800 ring-rose-500/40 dark:bg-rose-500/15 dark:text-rose-700 dark:ring-rose-500/30",
+  review_required: "bg-violet-50 text-violet-800 ring-violet-500/40 dark:bg-violet-500/15 dark:text-violet-700 dark:ring-violet-500/30",
+  dismissed: "bg-zinc-50 text-zinc-700 ring-zinc-500/40 dark:bg-zinc-500/15 dark:text-zinc-500 dark:ring-zinc-500/30",
 };
 
 const SUBSTANCE_FORM_KEYS = new Set<keyof SubstanceFormData>(

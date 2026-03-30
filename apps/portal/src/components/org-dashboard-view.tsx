@@ -74,15 +74,15 @@ type TimelinePoint = {
 
 const statusStyles: Record<DashboardRow["status"], string> = {
   pending:
-    "border-amber-500/40 bg-[linear-gradient(90deg,rgba(245,158,11,0.14)_0%,rgba(245,158,11,0.05)_36%,transparent_100%)] text-amber-300",
+    "border-amber-500/50 bg-[linear-gradient(90deg,rgba(245,158,11,0.14)_0%,rgba(245,158,11,0.05)_36%,transparent_100%)] text-amber-800 dark:border-amber-500/40 dark:text-amber-300",
   in_progress:
-    "border-cyan-500/40 bg-[linear-gradient(90deg,rgba(6,182,212,0.14)_0%,rgba(6,182,212,0.05)_36%,transparent_100%)] text-cyan-300",
+    "border-cyan-500/50 bg-[linear-gradient(90deg,rgba(6,182,212,0.14)_0%,rgba(6,182,212,0.05)_36%,transparent_100%)] text-cyan-800 dark:border-cyan-500/40 dark:text-cyan-300",
   completed:
-    "border-emerald-500/40 bg-[linear-gradient(90deg,rgba(16,185,129,0.14)_0%,rgba(16,185,129,0.05)_36%,transparent_100%)] text-emerald-300",
+    "border-emerald-500/50 bg-[linear-gradient(90deg,rgba(16,185,129,0.14)_0%,rgba(16,185,129,0.05)_36%,transparent_100%)] text-emerald-800 dark:border-emerald-500/40 dark:text-emerald-300",
   failed:
-    "border-rose-500/40 bg-[linear-gradient(90deg,rgba(244,63,94,0.14)_0%,rgba(244,63,94,0.05)_36%,transparent_100%)] text-rose-300",
+    "border-rose-500/50 bg-[linear-gradient(90deg,rgba(244,63,94,0.14)_0%,rgba(244,63,94,0.05)_36%,transparent_100%)] text-rose-800 dark:border-rose-500/40 dark:text-rose-300",
   review_required:
-    "border-violet-500/40 bg-[linear-gradient(90deg,rgba(139,92,246,0.14)_0%,rgba(139,92,246,0.05)_36%,transparent_100%)] text-violet-300",
+    "border-violet-500/50 bg-[linear-gradient(90deg,rgba(139,92,246,0.14)_0%,rgba(139,92,246,0.05)_36%,transparent_100%)] text-violet-800 dark:border-violet-500/40 dark:text-violet-300",
 };
 
 const statusLabel: Record<DashboardRow["status"], string> = {
@@ -869,8 +869,8 @@ export function OrgDashboardView({ orgId, orgName, accountName, rows }: Props) {
                         className={cn(
                           "inline-flex rounded-lg border px-2 py-1 text-xs font-medium",
                           row.isSubstanceComplete
-                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                            : "border-violet-500/40 bg-violet-500/10 text-violet-300",
+                            ? "border-emerald-500/50 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300"
+                            : "border-violet-500/50 bg-violet-50 text-violet-800 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-300",
                         )}
                       >
                         {row.isSubstanceComplete ? "Ready" : "Pending"}

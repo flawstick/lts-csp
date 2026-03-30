@@ -34,6 +34,7 @@ type AgentPanelProps = {
   isSubstanceFormIncomplete: boolean;
   pausedJob: { id: string } | null | undefined;
   runningJob: { id: string } | null | undefined;
+  activeJobStatus?: string | null;
   currentStep: StepEvent | null;
   steps: StepEvent[];
   chatMessages: ChatMessage[];
@@ -84,6 +85,7 @@ export function AgentPanel({
   isSubstanceFormIncomplete,
   pausedJob,
   runningJob,
+  activeJobStatus,
   currentStep,
   steps,
   chatMessages,
@@ -313,6 +315,10 @@ export function AgentPanel({
         <p className="text-muted-foreground/50 mt-1.5 text-center text-[10px]">
           {runningJob
             ? "Agent is running"
+            : activeJobStatus === "queued"
+              ? "Waiting for a warm worker"
+              : activeJobStatus === "starting"
+                ? "Connecting browser session"
             : pausedJob
               ? "Waiting for user action"
               : "Start task to enable chat"}

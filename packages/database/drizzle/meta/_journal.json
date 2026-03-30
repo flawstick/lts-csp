@@ -57,6 +57,13 @@
       "when": 1773911184911,
       "tag": "0007_hesitant_changeling",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1774840671238,
+      "tag": "0008_unknown_tempest",
+      "breakpoints": true
     }
   ]
 }

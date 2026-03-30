@@ -169,11 +169,13 @@ export interface LaunchBrowserTaskParams {
   taskId: string;
   overrideSaved?: boolean;
   submissionMode?: "prepare_only" | "submit_and_capture_pdf";
+  workerMode?: "service" | "single";
 }
 
 export async function launchBrowserTask(params: LaunchBrowserTaskParams) {
   const taskDef = env.ECS_BROWSER_TASK_DEFINITION || env.ECS_TASK_DEFINITION;
-  const containerName = env.ECS_BROWSER_TASK_CONTAINER_NAME || env.ECS_CONTAINER_NAME;
+  const containerName =
+    env.ECS_BROWSER_TASK_CONTAINER_NAME || env.ECS_CONTAINER_NAME;
 
   const input: RunTaskCommandInput = {
     cluster: env.ECS_CLUSTER,
@@ -198,6 +200,30 @@ export async function launchBrowserTask(params: LaunchBrowserTaskParams) {
             { name: "REDIS_URL", value: env.REDIS_URL },
             { name: "BROWSER_USE_API_KEY", value: env.BROWSER_USE_API_KEY || "" },
             { name: "BLOB_READ_WRITE_TOKEN", value: env.BLOB_READ_WRITE_TOKEN },
+            {
+              name: "CLOUDWATCH_LOG_GROUP",
+              value: env.ECS_LOG_GROUP,
+            },
+            {
+              name: "WORKER_CONTAINER_NAME",
+              value: containerName,
+            },
+            {
+              name: "WORKER_MODE",
+              value: params.workerMode ?? "single",
+            },
+            {
+              name: "BROWSER_STARTUP_TIMEOUT_MS",
+              value: String(env.BROWSER_STARTUP_TIMEOUT_MS),
+            },
+            {
+              name: "BROWSER_JOB_POLL_INTERVAL_MS",
+              value: String(env.BROWSER_WORKER_POLL_INTERVAL_MS),
+            },
+            {
+              name: "BROWSER_JOB_HEARTBEAT_INTERVAL_MS",
+              value: String(env.BROWSER_WORKER_HEARTBEAT_INTERVAL_MS),
+            },
             { name: "USE_UK_PROXY", value: "false" }, // Disabled for now due to 504 timeouts
             { name: "OVERRIDE_SAVED", value: params.overrideSaved ? "true" : "false" },
             {

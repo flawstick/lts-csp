@@ -28,6 +28,12 @@ export const env = createEnv({
     // Browser Task ECS (uses Browser Use Cloud)
     ECS_BROWSER_TASK_DEFINITION: z.string().optional(),
     ECS_BROWSER_TASK_CONTAINER_NAME: z.string().optional(),
+    BROWSER_TASK_EXECUTION_MODE: z
+      .enum(["ecs_service", "ecs_runtask"])
+      .default("ecs_service"),
+    BROWSER_STARTUP_TIMEOUT_MS: z.coerce.number().default(45_000),
+    BROWSER_WORKER_POLL_INTERVAL_MS: z.coerce.number().default(1_500),
+    BROWSER_WORKER_HEARTBEAT_INTERVAL_MS: z.coerce.number().default(10_000),
     // Resend
     RESEND_API_KEY: z.string(),
     // Vercel Blob
@@ -74,6 +80,12 @@ export const env = createEnv({
     // Browser Task ECS
     ECS_BROWSER_TASK_DEFINITION: process.env.ECS_BROWSER_TASK_DEFINITION,
     ECS_BROWSER_TASK_CONTAINER_NAME: process.env.ECS_BROWSER_TASK_CONTAINER_NAME,
+    BROWSER_TASK_EXECUTION_MODE: process.env.BROWSER_TASK_EXECUTION_MODE,
+    BROWSER_STARTUP_TIMEOUT_MS: process.env.BROWSER_STARTUP_TIMEOUT_MS,
+    BROWSER_WORKER_POLL_INTERVAL_MS:
+      process.env.BROWSER_WORKER_POLL_INTERVAL_MS,
+    BROWSER_WORKER_HEARTBEAT_INTERVAL_MS:
+      process.env.BROWSER_WORKER_HEARTBEAT_INTERVAL_MS,
     // Resend
     RESEND_API_KEY: process.env.RESEND_API_KEY,
     // Vercel Blob

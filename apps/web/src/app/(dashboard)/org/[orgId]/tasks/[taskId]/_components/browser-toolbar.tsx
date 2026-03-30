@@ -47,6 +47,7 @@ type BrowserToolbarProps = {
   selectedJob: Job | null | undefined
   isBrowserFullscreen: boolean
   setIsBrowserFullscreen: (v: boolean) => void
+  activeJob: Job | null | undefined
   runningJob: Job | null | undefined
   pausedJob: Job | null | undefined
   onSelectJob: (jobId: string) => void
@@ -67,8 +68,11 @@ function JobStatusIcon({ status }: { status: string }) {
     case "completed":
       return <CheckCircle2 className="size-3.5 text-emerald-500" />
     case "running":
-    case "queued":
       return <Loader2 className="size-3.5 text-blue-500 animate-spin" />
+    case "starting":
+      return <Loader2 className="size-3.5 text-sky-500 animate-spin" />
+    case "queued":
+      return <Clock className="size-3.5 text-yellow-500" />
     case "paused":
       return <Pause className="size-3.5 text-amber-500" />
     case "failed":
@@ -89,6 +93,7 @@ export function BrowserToolbar({
   selectedJob,
   isBrowserFullscreen,
   setIsBrowserFullscreen,
+  activeJob,
   runningJob,
   pausedJob,
   onSelectJob,
@@ -164,7 +169,10 @@ export function BrowserToolbar({
                       {new Date(job.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
-                  {job.status !== "running" ? (
+                  {job.status !== "queued" &&
+                  job.status !== "starting" &&
+                  job.status !== "running" &&
+                  job.status !== "paused" ? (
                     <Button
                       variant="ghost"
                       size="icon"
@@ -213,6 +221,23 @@ export function BrowserToolbar({
               )}
               Pause
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground hover:text-destructive"
+              onClick={onCancel}
+              disabled={isCancelPending}
+              title="Cancel"
+            >
+              <Square className="size-3" />
+            </Button>
+          </>
+        ) : activeJob &&
+          (activeJob.status === "queued" || activeJob.status === "starting") ? (
+          <>
+            <Badge variant="secondary" className="h-6 px-2 text-[11px] font-medium">
+              {activeJob.status === "queued" ? "Queued" : "Starting"}
+            </Badge>
             <Button
               variant="ghost"
               size="icon"

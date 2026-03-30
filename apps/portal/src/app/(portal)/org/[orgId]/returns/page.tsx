@@ -61,12 +61,12 @@ const STATUS_LABEL: Record<ReturnStatusTone, string> = {
 };
 
 const STATUS_CLASS: Record<ReturnStatusTone, string> = {
-  pending: "border-amber-500/35 bg-amber-500/10 text-amber-700",
-  in_progress: "border-blue-500/35 bg-blue-500/10 text-blue-700",
-  completed: "border-emerald-500/35 bg-emerald-500/10 text-emerald-700",
-  failed: "border-rose-500/35 bg-rose-500/10 text-rose-700",
-  review_required: "border-violet-500/35 bg-violet-500/10 text-violet-700",
-  dismissed: "border-zinc-500/35 bg-zinc-500/10 text-zinc-500",
+  pending: "border-amber-500/50 bg-amber-500/15 text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-700",
+  in_progress: "border-blue-500/50 bg-blue-500/15 text-blue-800 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-700",
+  completed: "border-emerald-500/50 bg-emerald-500/15 text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-700",
+  failed: "border-rose-500/50 bg-rose-500/15 text-rose-800 dark:border-rose-500/35 dark:bg-rose-500/10 dark:text-rose-700",
+  review_required: "border-violet-500/50 bg-violet-500/15 text-violet-800 dark:border-violet-500/35 dark:bg-violet-500/10 dark:text-violet-700",
+  dismissed: "border-zinc-500/50 bg-zinc-500/15 text-zinc-700 dark:border-zinc-500/35 dark:bg-zinc-500/10 dark:text-zinc-500",
 };
 
 const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [

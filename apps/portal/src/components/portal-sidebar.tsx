@@ -16,6 +16,7 @@ import {
   SidebarHeader,
   SidebarMenu,
   SidebarRail,
+  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { SidebarFooterSection } from "@/components/_components/sidebar/sidebar-footer";
 import { SidebarJurisdictions } from "@/components/_components/sidebar/sidebar-jurisdictions";
@@ -222,8 +223,8 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
       className="border-sidebar-border/70 bg-sidebar border-r"
       {...props}
     >
-      <SidebarHeader className="px-2.5 py-3 transition-[padding] duration-200 ease-linear group-data-[collapsible=icon]:px-0">
-        <SidebarMenu>
+      <SidebarHeader className="relative h-14 shrink-0 border-b p-0 group-data-[collapsible=icon]:border-b-0 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2">
+        <SidebarMenu className="h-full">
           <SidebarOrgSwitcher
             isLoading={membershipsQuery.isLoading}
             memberships={memberships}
@@ -231,6 +232,7 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
             onSwitchOrg={switchOrg}
           />
         </SidebarMenu>
+        <SidebarTrigger className="absolute right-3 top-1/2 z-10 -translate-y-1/2 shrink-0 rounded-lg group-data-[collapsible=icon]:hidden" />
       </SidebarHeader>
 
       <SidebarContent className="px-2.5 transition-[padding] duration-200 ease-linear group-data-[collapsible=icon]:px-0">

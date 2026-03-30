@@ -1,8 +1,10 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
+import { env } from "@/env";
 import {
   createEmptyJerseyCompanyReturnFormData,
+  db,
   getJerseyCompanyReturnMissingFields,
   isJerseyCompanyReturnComplete,
   jerseyCompanyReturnForms,
@@ -42,6 +44,138 @@ type TaxReturnFileRecord = {
   role?: z.infer<typeof taxReturnFileRoleEnum>;
   metadata?: Record<string, unknown>;
 };
+
+const BROWSER_HEARTBEAT_STALE_MS = 60_000;
+
+function getResultDataRecord(
+  resultData: unknown,
+): Record<string, unknown> | null {
+  if (!resultData || typeof resultData !== "object" || Array.isArray(resultData)) {
+    return null;
+  }
+
+  return resultData as Record<string, unknown>;
+}
+
+function getResultDataNumber(
+  resultData: unknown,
+  key: string,
+): number | undefined {
+  const record = getResultDataRecord(resultData);
+  const value = record?.[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function isActiveBrowserJobStatus(status: string) {
+  return (
+    status === "queued" ||
+    status === "starting" ||
+    status === "running" ||
+    status === "paused"
+  );
+}
+
+function getBrowserJobStaleReason(job: {
+  status: string;
+  createdAt: Date | string;
+  startedAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+  resultData?: unknown;
+}): string | null {
+  const now = Date.now();
+
+  if (job.status === "starting") {
+    const startupStartedAt =
+      getResultDataNumber(job.resultData, "startupStartedAt") ??
+      (job.startedAt ? new Date(job.startedAt).getTime() : undefined) ??
+      (job.updatedAt ? new Date(job.updatedAt).getTime() : undefined) ??
+      new Date(job.createdAt).getTime();
+
+    if (now - startupStartedAt > env.BROWSER_STARTUP_TIMEOUT_MS) {
+      return "Browser Use session failed to initialize";
+    }
+  }
+
+  if (job.status === "running" || job.status === "paused") {
+    const lastHeartbeatAt =
+      getResultDataNumber(job.resultData, "lastHeartbeatAt") ??
+      (job.updatedAt ? new Date(job.updatedAt).getTime() : undefined) ??
+      (job.startedAt ? new Date(job.startedAt).getTime() : undefined);
+
+    if (lastHeartbeatAt && now - lastHeartbeatAt > BROWSER_HEARTBEAT_STALE_MS) {
+      return "Browser worker heartbeat lost";
+    }
+  }
+
+  return null;
+}
+
+async function maybeMarkBrowserJobStale<
+  T extends {
+    id: string;
+    status: string;
+    createdAt: Date | string;
+    startedAt?: Date | string | null;
+    updatedAt?: Date | string | null;
+    errorMessage?: string | null;
+    completedAt?: Date | string | null;
+    resultData?: unknown;
+  },
+>(
+  dbClient: typeof db,
+  job: T,
+  ids?: {
+    taskId?: string | null;
+    taxReturnId?: string | null;
+  },
+): Promise<T> {
+  const reason = getBrowserJobStaleReason(job);
+  if (!reason) {
+    return job;
+  }
+
+  const nextResultData = {
+    ...(getResultDataRecord(job.resultData) ?? {}),
+    staleFailureAt: Date.now(),
+    staleFailureReason: reason,
+  };
+
+  await dbClient
+    .update(jobs)
+    .set({
+      status: "failed",
+      completedAt: new Date(),
+      errorMessage: reason,
+      resultData: nextResultData,
+    })
+    .where(eq(jobs.id, job.id));
+
+  if (ids?.taskId) {
+    await dbClient
+      .update(tasks)
+      .set({
+        status: "failed",
+      })
+      .where(eq(tasks.id, ids.taskId));
+  }
+
+  if (ids?.taxReturnId) {
+    await dbClient
+      .update(taxReturns)
+      .set({
+        status: "failed",
+      })
+      .where(eq(taxReturns.id, ids.taxReturnId));
+  }
+
+  return {
+    ...job,
+    status: "failed",
+    completedAt: new Date(),
+    errorMessage: reason,
+    resultData: nextResultData,
+  };
+}
 
 function decodePortalCredentials(
   encrypted: string | null | undefined,
@@ -181,6 +315,70 @@ async function waitForBrowserUseSessionToPause(
   }
 
   return lastStatus;
+}
+
+function getBrowserJobLogWindowStartMs(job: {
+  createdAt: Date | string;
+  resultData?: unknown;
+}) {
+  const configuredStart =
+    getResultDataNumber(job.resultData, "logWindowStartAt") ??
+    getResultDataNumber(job.resultData, "queueClaimedAt") ??
+    getResultDataNumber(job.resultData, "startupStartedAt");
+
+  const fallbackStart = new Date(job.createdAt).getTime();
+  const resolvedStart =
+    typeof configuredStart === "number" && Number.isFinite(configuredStart)
+      ? configuredStart
+      : fallbackStart;
+
+  return Math.max(0, resolvedStart - 5_000);
+}
+
+function parseBrowserWorkerLogMessage(rawMessage: string): {
+  jobId: string | null;
+  message: string;
+  payload?: Record<string, unknown>;
+} {
+  const trimmed = rawMessage.trim();
+
+  if (!trimmed) {
+    return {
+      jobId: null,
+      message: "",
+    };
+  }
+
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      const jobId =
+        typeof parsed.jobId === "string" && parsed.jobId.trim()
+          ? parsed.jobId.trim()
+          : null;
+      const message =
+        typeof parsed.message === "string" && parsed.message.trim()
+          ? parsed.message.trim()
+          : trimmed;
+
+      return {
+        jobId,
+        message,
+        payload: parsed,
+      };
+    } catch {
+      return {
+        jobId: null,
+        message: trimmed,
+      };
+    }
+  }
+
+  const jobIdMatch = trimmed.match(/"jobId":"([^"]+)"/);
+  return {
+    jobId: jobIdMatch?.[1] ?? null,
+    message: trimmed,
+  };
 }
 
 const persistedOptionalString = z
@@ -771,6 +969,84 @@ export const taxReturnRouter = createTRPCRouter({
       }
     }),
 
+  getJobLogs: publicProcedure
+    .input(z.object({ jobId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      let job = await ctx.db.query.jobs.findFirst({
+        where: eq(jobs.id, input.jobId),
+      });
+
+      if (!job) {
+        throw new Error("Job not found");
+      }
+
+      job = await maybeMarkBrowserJobStale(ctx.db, job, {
+        taskId: job.taskId,
+      });
+
+      if (!job.cloudwatchLogGroup || !job.cloudwatchLogStream) {
+        return {
+          logs: [],
+          job,
+          pending: isActiveBrowserJobStatus(job.status),
+        };
+      }
+
+      const startTime = getBrowserJobLogWindowStartMs(job);
+
+      try {
+        const client = new CloudWatchLogsClient({ region: "eu-west-2" });
+        const command = new GetLogEventsCommand({
+          logGroupName: job.cloudwatchLogGroup,
+          logStreamName: job.cloudwatchLogStream,
+          startFromHead: true,
+          startTime,
+          limit: 500,
+        });
+
+        const response = await client.send(command);
+        const logs = (response.events || [])
+          .map((event) => {
+            const rawMessage = event.message || "";
+            const parsed = parseBrowserWorkerLogMessage(rawMessage);
+            return {
+              timestamp: event.timestamp,
+              rawMessage,
+              parsed,
+            };
+          })
+          .filter((event) => event.parsed.jobId === job.id)
+          .map((event) => ({
+            timestamp: event.timestamp,
+            message: event.parsed.message,
+            rawMessage: event.rawMessage,
+            payload: event.parsed.payload,
+          }));
+
+        return {
+          logs,
+          job,
+          pending: logs.length === 0 && isActiveBrowserJobStatus(job.status),
+        };
+      } catch (error) {
+        const isResourceNotFound =
+          (error as { name?: string })?.name === "ResourceNotFoundException";
+
+        if (!isResourceNotFound) {
+          console.error("Failed to fetch browser job logs:", error);
+        }
+
+        return {
+          logs: [],
+          job,
+          pending: isResourceNotFound && isActiveBrowserJobStatus(job.status),
+          error: isResourceNotFound
+            ? "Waiting for worker logs..."
+            : "Failed to fetch logs",
+        };
+      }
+    }),
+
   startSyncJob: publicProcedure
     .input(
       z.object({
@@ -1330,7 +1606,19 @@ export const taxReturnRouter = createTRPCRouter({
         throw new Error("Task not found");
       }
 
-      return task;
+      const normalizedJobs = await Promise.all(
+        task.jobs.map((job) =>
+          maybeMarkBrowserJobStale(ctx.db, job, {
+            taskId: task.id,
+            taxReturnId: task.taxReturn?.id ?? null,
+          }),
+        ),
+      );
+
+      return {
+        ...task,
+        jobs: normalizedJobs,
+      };
     }),
 
   // Get a single job
@@ -1358,10 +1646,13 @@ export const taxReturnRouter = createTRPCRouter({
         throw new Error("Job not found");
       }
 
-      return job;
+      return maybeMarkBrowserJobStale(ctx.db, job, {
+        taskId: job.task?.id ?? null,
+        taxReturnId: job.task?.taxReturn?.id ?? null,
+      });
     }),
 
-  // Start a new job for a task (launches ECS browser task)
+  // Start a new job for a task (enqueues to Postgres, optionally launches fallback ECS worker)
   startJob: publicProcedure
     .input(
       z.object({
@@ -1406,14 +1697,28 @@ export const taxReturnRouter = createTRPCRouter({
         );
       }
 
-      // Check for running jobs
-      const runningJob = task.jobs.find((j) => j.status === "running");
-      if (runningJob) {
+      const normalizedJobs = await Promise.all(
+        task.jobs.map((job) =>
+          maybeMarkBrowserJobStale(ctx.db, job, {
+            taskId: task.id,
+            taxReturnId: task.taxReturn?.id ?? null,
+          }),
+        ),
+      );
+
+      const activeJob = normalizedJobs.find((job) =>
+        isActiveBrowserJobStatus(job.status),
+      );
+      if (activeJob) {
         throw new Error("A job is already running for this task");
       }
 
       // Get the next job number
-      const jobNumber = task.jobs.length + 1;
+      const jobNumber =
+        normalizedJobs.reduce(
+          (maxJobNumber, job) => Math.max(maxJobNumber, job.jobNumber),
+          0,
+        ) + 1;
 
       // Create job record
       const [newJob] = await ctx.db
@@ -1421,11 +1726,13 @@ export const taxReturnRouter = createTRPCRouter({
         .values({
           taskId: input.taskId,
           jobNumber,
-          status: "pending",
+          status: "queued",
           aiModel: "bu-max",
-          cloudwatchLogGroup: "/ecs/lts-browser-task",
+          cloudwatchLogGroup: env.ECS_LOG_GROUP,
           resultData: {
             submissionMode: input.submissionMode,
+            overrideSaved: input.overrideSaved,
+            startupTimeoutMs: env.BROWSER_STARTUP_TIMEOUT_MS,
           },
         })
         .returning();
@@ -1440,47 +1747,51 @@ export const taxReturnRouter = createTRPCRouter({
         .set({ status: "in_progress" })
         .where(eq(tasks.id, input.taskId));
 
-      try {
-        // Launch ECS task
-        const result = await launchBrowserTask({
-          jobId: newJob.id,
-          taxReturnId: task.taxReturn.id,
-          taskId: input.taskId,
-          overrideSaved: input.overrideSaved,
-          submissionMode: input.submissionMode,
-        });
+      if (env.BROWSER_TASK_EXECUTION_MODE === "ecs_runtask") {
+        try {
+          const result = await launchBrowserTask({
+            jobId: newJob.id,
+            taxReturnId: task.taxReturn.id,
+            taskId: input.taskId,
+            overrideSaved: input.overrideSaved,
+            submissionMode: input.submissionMode,
+            workerMode: "single",
+          });
 
-        // Update job with ECS info
-        await ctx.db
-          .update(jobs)
-          .set({
-            ecsTaskArn: result.taskArn,
-            cloudwatchLogStream: result.cloudwatchLogStream,
-            status: "running",
-            startedAt: new Date(),
-            resultData: {
-              submissionMode: input.submissionMode,
-            },
-          })
-          .where(eq(jobs.id, newJob.id));
+          await ctx.db
+            .update(jobs)
+            .set({
+              ecsTaskArn: result.taskArn,
+              cloudwatchLogGroup: result.cloudwatchLogGroup,
+              cloudwatchLogStream: result.cloudwatchLogStream,
+            })
+            .where(eq(jobs.id, newJob.id));
 
-        return {
-          jobId: newJob.id,
-          taskArn: result.taskArn,
-        };
-      } catch (err) {
-        // Mark job as failed
-        await ctx.db
-          .update(jobs)
-          .set({
-            status: "failed",
-            errorMessage:
-              err instanceof Error ? err.message : "Failed to launch ECS task",
-          })
-          .where(eq(jobs.id, newJob.id));
+          return {
+            jobId: newJob.id,
+            taskArn: result.taskArn,
+            status: "queued" as const,
+          };
+        } catch (err) {
+          await ctx.db
+            .update(jobs)
+            .set({
+              status: "failed",
+              errorMessage:
+                err instanceof Error
+                  ? err.message
+                  : "Failed to launch ECS task",
+            })
+            .where(eq(jobs.id, newJob.id));
 
-        throw err;
+          throw err;
+        }
       }
+
+      return {
+        jobId: newJob.id,
+        status: "queued" as const,
+      };
     }),
 
   // Pause a running job (keeps browser alive for manual intervention)
@@ -1532,7 +1843,12 @@ export const taxReturnRouter = createTRPCRouter({
         throw new Error("Job not found");
       }
 
-      if (job.status !== "running" && job.status !== "paused") {
+      if (
+        job.status !== "queued" &&
+        job.status !== "starting" &&
+        job.status !== "running" &&
+        job.status !== "paused"
+      ) {
         throw new Error("Job is not active");
       }
 
@@ -1544,6 +1860,13 @@ export const taxReturnRouter = createTRPCRouter({
           completedAt: new Date(),
         })
         .where(eq(jobs.id, input.jobId));
+
+      await ctx.db
+        .update(tasks)
+        .set({
+          status: "cancelled",
+        })
+        .where(eq(tasks.id, job.taskId));
 
       const sessionId = getBrowserUseSessionId(job.resultData);
       if (sessionId) {
@@ -1601,8 +1924,8 @@ export const taxReturnRouter = createTRPCRouter({
       }
 
       // Don't allow deleting running jobs
-      if (job.status === "running") {
-        throw new Error("Cannot delete a running job. Stop it first.");
+      if (isActiveBrowserJobStatus(job.status)) {
+        throw new Error("Cannot delete an active job. Stop it first.");
       }
 
       await ctx.db.delete(jobs).where(eq(jobs.id, input.jobId));
