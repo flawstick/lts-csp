@@ -5,8 +5,8 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "node --import tsx src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
     "dev:server": "bun --watch src/server.ts",
     "start:server": "bun src/server.ts",
     "docker:build": "docker build -t repo-tax-sync -f Dockerfile ../.."
@@ -20,7 +20,6 @@
   },
   "devDependencies": {
     "@types/node": "^20",
-    "tsx": "^4.7.0",
     "typescript": "^5.8.2"
   }
 }

@@ -25,6 +25,7 @@ import {
   GetLogEventsCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
 import * as cheerio from "cheerio";
+import { decryptPortalCredentials } from "@repo/database/portal-credentials";
 import { launchBrowserTask } from "@/lib/ecs";
 import { triggerTaxSync } from "@/lib/tax-sync-launcher";
 import {
@@ -199,31 +200,6 @@ async function maybeMarkBrowserJobStale<
     errorMessage: reason,
     resultData: nextResultData,
   };
-}
-
-function decodePortalCredentials(
-  encrypted: string | null | undefined,
-): { username?: string; password?: string } | null {
-  if (!encrypted) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(Buffer.from(encrypted, "base64").toString());
-    if (!parsed || typeof parsed !== "object") {
-      return null;
-    }
-
-    const row = parsed as Record<string, unknown>;
-    return {
-      username:
-        typeof row.username === "string" ? row.username.trim() : undefined,
-      password:
-        typeof row.password === "string" ? row.password.trim() : undefined,
-    };
-  } catch {
-    return null;
-  }
 }
 
 function resolveJurisdictionFallbackCredentials(
@@ -1098,7 +1074,7 @@ export const taxReturnRouter = createTRPCRouter({
           ),
         });
       const credentials =
-        decodePortalCredentials(
+        decryptPortalCredentials(
           jurisdictionSetting?.portalCredentialsEncrypted,
         ) ?? resolveJurisdictionFallbackCredentials(jurisdiction.code);
 

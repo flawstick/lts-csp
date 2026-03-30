@@ -18,6 +18,10 @@
       "types": "./src/queries/index.ts",
       "default": "./src/queries/index.ts"
     },
+    "./portal-credentials": {
+      "types": "./src/portal-credentials.ts",
+      "default": "./src/portal-credentials.ts"
+    },
     "./jersey-company-return": {
       "types": "./src/jersey-company-return.ts",
       "default": "./src/jersey-company-return.ts"

@@ -1,4 +1,5 @@
 import { db, schema } from "@repo/database";
+import { decryptPortalCredentials } from "@repo/database/portal-credentials";
 import { and, desc, eq, or } from "drizzle-orm";
 import { createLogger } from "./logger";
 import { runTaxSyncJob } from "./run-sync";
@@ -79,31 +80,6 @@ function parseBooleanEnv(value: string | undefined, fallback: boolean) {
 function parsePositiveIntEnv(value: string | undefined, fallback: number) {
   const parsed = Number.parseInt(value || "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function decodePortalCredentials(
-  encrypted: string | null | undefined,
-): { username?: string; password?: string } | null {
-  if (!encrypted) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(Buffer.from(encrypted, "base64").toString("utf8"));
-    if (!parsed || typeof parsed !== "object") {
-      return null;
-    }
-
-    const row = parsed as Record<string, unknown>;
-    return {
-      username:
-        typeof row.username === "string" ? row.username.trim() : undefined,
-      password:
-        typeof row.password === "string" ? row.password.trim() : undefined,
-    };
-  } catch {
-    return null;
-  }
 }
 
 function hasFallbackCredentialsForJurisdiction(jurisdictionCode: string) {
@@ -222,7 +198,7 @@ async function resolveSchedulerTargets(): Promise<SchedulerTarget[]> {
       }
 
       const setting = settingMap.get(`${organisation.id}:${jurisdictionCode}`);
-      const credentials = decodePortalCredentials(
+      const credentials = decryptPortalCredentials(
         setting?.portalCredentialsEncrypted,
       );
 

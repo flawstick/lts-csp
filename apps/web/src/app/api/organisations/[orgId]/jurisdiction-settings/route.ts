@@ -2,22 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@repo/database";
 import { accounts, jurisdictionSettings } from "@repo/database";
+import {
+  decryptPortalCredentials,
+  encryptPortalCredentials,
+} from "@repo/database/portal-credentials";
 import { eq, and } from "drizzle-orm";
-
-// Simple encryption/decryption (you should use a proper encryption library in production)
-function encrypt(data: any): string {
-  // TODO: Implement proper encryption using crypto library
-  return Buffer.from(JSON.stringify(data)).toString("base64");
-}
-
-function decrypt(encrypted: string): any {
-  // TODO: Implement proper decryption using crypto library
-  try {
-    return JSON.parse(Buffer.from(encrypted, "base64").toString());
-  } catch {
-    return null;
-  }
-}
 
 // Check if user is global admin
 async function checkGlobalAdmin(userId: string): Promise<boolean> {
@@ -66,7 +55,7 @@ export async function GET(
       jurisdictionId: setting.jurisdictionId,
       jurisdiction: setting.jurisdiction,
       credentials: setting.portalCredentialsEncrypted
-        ? decrypt(setting.portalCredentialsEncrypted)
+        ? decryptPortalCredentials(setting.portalCredentialsEncrypted)
         : null,
       settings: setting.settings,
     }));
@@ -120,7 +109,7 @@ export async function POST(
       ),
     });
 
-    const encryptedCredentials = credentials ? encrypt(credentials) : null;
+    const encryptedCredentials = encryptPortalCredentials(credentials);
 
     if (existing) {
       // Update existing

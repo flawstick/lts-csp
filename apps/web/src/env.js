@@ -25,6 +25,7 @@ export const env = createEnv({
     // Tax Sync ECS
     ECS_TAX_SYNC_TASK_DEFINITION: z.string().optional(),
     ECS_TAX_SYNC_CONTAINER_NAME: z.string().optional(),
+    PORTAL_CREDENTIALS_ENCRYPTION_KEY: z.string().optional(),
     TAX_SYNC_EXECUTION_MODE: z.enum(["ecs", "railway"]).default("ecs"),
     TAX_SYNC_HANDLER_URL: z.string().url().optional(),
     TAX_SYNC_HANDLER_TOKEN: z.string().optional(),
@@ -81,6 +82,8 @@ export const env = createEnv({
     // Tax Sync ECS
     ECS_TAX_SYNC_TASK_DEFINITION: process.env.ECS_TAX_SYNC_TASK_DEFINITION,
     ECS_TAX_SYNC_CONTAINER_NAME: process.env.ECS_TAX_SYNC_CONTAINER_NAME,
+    PORTAL_CREDENTIALS_ENCRYPTION_KEY:
+      process.env.PORTAL_CREDENTIALS_ENCRYPTION_KEY,
     TAX_SYNC_EXECUTION_MODE: process.env.TAX_SYNC_EXECUTION_MODE,
     TAX_SYNC_HANDLER_URL: process.env.TAX_SYNC_HANDLER_URL,
     TAX_SYNC_HANDLER_TOKEN: process.env.TAX_SYNC_HANDLER_TOKEN,
