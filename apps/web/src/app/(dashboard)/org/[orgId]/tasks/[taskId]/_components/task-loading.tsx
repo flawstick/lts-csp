@@ -1,5 +1,5 @@
 import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { PageHeader } from "@/components/page-header"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   ResizablePanelGroup,
@@ -11,18 +11,19 @@ export function TaskLoading() {
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
       {/* Header skeleton */}
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur">
-        <SidebarTrigger className="-ml-1" />
-        <Separator orientation="vertical" className="mr-1 h-4" />
+      <PageHeader
+        actions={
+          <>
+            <Skeleton className="h-3 w-16 rounded" />
+            <Separator orientation="vertical" className="h-3.5" />
+            <Skeleton className="h-5 w-16 rounded-full" />
+          </>
+        }
+      >
         <Skeleton className="h-3.5 w-12 rounded" />
         <Skeleton className="mx-1 size-1 rounded-full" />
         <Skeleton className="h-3.5 w-44 rounded" />
-        <div className="ml-auto flex items-center gap-2">
-          <Skeleton className="h-3 w-16 rounded" />
-          <Separator orientation="vertical" className="h-3.5" />
-          <Skeleton className="h-5 w-16 rounded-full" />
-        </div>
-      </header>
+      </PageHeader>
 
       {/* Content skeleton */}
       <div className="flex-1 overflow-hidden">

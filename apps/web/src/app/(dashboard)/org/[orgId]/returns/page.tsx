@@ -1,7 +1,24 @@
 "use client"
 
 import * as React from "react"
-import { useSearchParams, useParams } from "next/navigation"
+import { useSearchParams, useParams, useRouter } from "next/navigation"
+import {
+  IconChevronLeft,
+  IconChevronRight,
+  IconChevronsLeft,
+  IconChevronsRight,
+  IconLayoutColumns,
+  IconCircleDot,
+  IconGlobe,
+  IconCalendar,
+} from "@tabler/icons-react"
+import {
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+  type ColumnDef,
+  type VisibilityState,
+} from "@tanstack/react-table"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -28,6 +45,7 @@ import {
 } from "@/components/ui/dialog"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -36,6 +54,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -45,7 +64,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Loader2, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, History, Play, Terminal, CheckCircle2, XCircle, Search, X, MoreHorizontal, Trash, FileText } from "@/lib/icons"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Loader2, ExternalLink, RefreshCw, History, Play, Terminal, CheckCircle2, XCircle, Search, X, MoreHorizontal, Trash, FileText } from "@/lib/icons"
 import Link from "next/link"
 import { api } from "@/trpc/react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -54,15 +74,220 @@ type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" 
 type JurisdictionFilter = "all" | "GG" | "JE"
 type TaxYearFilter = "all" | `${number}`
 
+type TaxReturnRow = {
+  id: string
+  entityName: string
+  taxYear: number
+  status: string
+  returnType: string | null
+  externalId: string | null
+  link: string | null
+  isSubstanceComplete: boolean | null
+  missingSubstanceFieldCount: number | null
+  jurisdiction: { code: string } | null
+}
+
+const statusBadgeStyles: Record<string, string> = {
+  completed: "border-emerald-500/50 bg-emerald-500/15 text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400",
+  in_progress: "border-blue-500/50 bg-blue-500/15 text-blue-800 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-400",
+  review_required: "border-violet-500/50 bg-violet-500/15 text-violet-800 dark:border-violet-500/35 dark:bg-violet-500/10 dark:text-violet-400",
+  failed: "border-rose-500/50 bg-rose-500/15 text-rose-800 dark:border-rose-500/35 dark:bg-rose-500/10 dark:text-rose-400",
+  dismissed: "border-zinc-500/50 bg-zinc-500/15 text-zinc-700 dark:border-zinc-500/35 dark:bg-zinc-500/10 dark:text-zinc-500",
+  pending: "border-amber-500/50 bg-amber-500/15 text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400",
+}
+
+const statusLabels: Record<string, string> = {
+  completed: "Completed",
+  in_progress: "In Progress",
+  review_required: "Review Required",
+  failed: "Failed",
+  dismissed: "Dismissed",
+}
+
+function createColumns(
+  orgId: string,
+  dismissMutation: { mutate: (args: { taxReturnId: string }) => void },
+  undismissMutation: { mutate: (args: { taxReturnId: string }) => void },
+  handleDeleteSingle: (id: string) => void,
+): ColumnDef<TaxReturnRow>[] {
+  return [
+    {
+      id: "select",
+      header: ({ table }) => (
+        <div className="flex items-center justify-center">
+          <Checkbox
+            checked={
+              table.getIsAllPageRowsSelected() ||
+              (table.getIsSomePageRowsSelected() && "indeterminate")
+            }
+            onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+            aria-label="Select all"
+          />
+        </div>
+      ),
+      cell: ({ row }) => (
+        <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            checked={row.getIsSelected()}
+            onCheckedChange={(value) => row.toggleSelected(!!value)}
+            aria-label="Select row"
+          />
+        </div>
+      ),
+      enableSorting: false,
+      enableHiding: false,
+    },
+    {
+      accessorKey: "entityName",
+      header: "Entity",
+      cell: ({ row }) => (
+        <Link
+          href={`/org/${orgId}/returns/${row.original.id}`}
+          className="font-medium hover:underline hover:text-primary transition-colors"
+        >
+          {row.original.entityName}
+        </Link>
+      ),
+      enableHiding: false,
+    },
+    {
+      accessorKey: "jurisdiction",
+      header: "Jurisdiction",
+      cell: ({ row }) => (
+        <Badge variant="outline" className="text-muted-foreground px-1.5">
+          {row.original.jurisdiction?.code || "\u2014"}
+        </Badge>
+      ),
+    },
+    {
+      accessorKey: "taxYear",
+      header: "Tax Year",
+      cell: ({ row }) => row.original.taxYear,
+    },
+    {
+      accessorKey: "externalId",
+      header: "External ID",
+      cell: ({ row }) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {row.original.externalId || "\u2014"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ row }) => {
+        const status = row.original.status
+        const isReadyForAutomation = Boolean(row.original.isSubstanceComplete)
+        const cls = statusBadgeStyles[status] ?? statusBadgeStyles.pending
+        const label = statusLabels[status] ?? (isReadyForAutomation ? "Awaiting Automation" : "Pending")
+        return (
+          <span className={`inline-flex rounded-lg border px-2 py-0.5 text-xs font-medium ${cls}`}>
+            {label}
+          </span>
+        )
+      },
+    },
+    {
+      id: "readiness",
+      header: "Readiness",
+      cell: ({ row }) => {
+        if (row.original.isSubstanceComplete) {
+          return (
+            <span className="inline-flex rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400">
+              Ready
+            </span>
+          )
+        }
+
+        if ((row.original.missingSubstanceFieldCount ?? 0) > 0) {
+          return (
+            <span className="inline-flex rounded-lg border border-violet-500/50 bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-800 dark:border-violet-500/35 dark:bg-violet-500/10 dark:text-violet-400">
+              {row.original.missingSubstanceFieldCount} Missing
+            </span>
+          )
+        }
+
+        return (
+          <span className="inline-flex rounded-lg border border-zinc-500/50 bg-zinc-500/15 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:border-zinc-500/35 dark:bg-zinc-500/10 dark:text-zinc-500">
+            Needs Form
+          </span>
+        )
+      },
+    },
+    {
+      id: "actions",
+      header: () => <span className="sr-only">Actions</span>,
+      cell: ({ row }) => {
+        const item = row.original
+        return (
+          <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+            {item.status !== "completed" && (
+              <Button size="sm" asChild>
+                <Link href={`/org/${orgId}/returns/${item.id}`}>
+                  Process
+                </Link>
+              </Button>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="h-8 w-8 p-0">
+                  <span className="sr-only">Open menu</span>
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                <DropdownMenuItem asChild>
+                  <Link href={`/org/${orgId}/returns/${item.id}`}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    View Details
+                  </Link>
+                </DropdownMenuItem>
+                {item.link && (
+                  <DropdownMenuItem asChild>
+                    <a href={item.link} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      View in Portal
+                    </a>
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                {item.status !== "dismissed" && item.status !== "completed" ? (
+                  <DropdownMenuItem onClick={() => dismissMutation.mutate({ taxReturnId: item.id })}>
+                    <X className="mr-2 h-4 w-4" />
+                    Dismiss
+                  </DropdownMenuItem>
+                ) : item.status === "dismissed" ? (
+                  <DropdownMenuItem onClick={() => undismissMutation.mutate({ taxReturnId: item.id })}>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Restore
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuItem
+                  onClick={() => handleDeleteSingle(item.id)}
+                >
+                  <Trash className="mr-2 h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )
+      },
+    },
+  ]
+}
+
 export default function ReturnsPage() {
   const params = useParams()
+  const router = useRouter()
   const orgId = params?.orgId as string
   const searchParams = useSearchParams()
   const initialStatus = searchParams.get("status") as StatusFilter
   const currentCalendarYear = React.useMemo(() => new Date().getUTCFullYear(), [])
   const defaultTaxYear = currentCalendarYear - 1
 
-  const [page, setPage] = React.useState(1)
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(initialStatus ?? undefined)
   const [jurisdictionFilter, setJurisdictionFilter] = React.useState<JurisdictionFilter>("all")
   const [taxYearFilter, setTaxYearFilter] = React.useState<TaxYearFilter>(
@@ -74,33 +299,36 @@ export default function ReturnsPage() {
   const [activeJobId, setActiveJobId] = React.useState<string | null>(null)
   const [syncJurisdiction, setSyncJurisdiction] = React.useState<"GG" | "JE">("GG")
 
-  // Selection State
-  const [selected, setSelected] = React.useState<Set<string>>(new Set())
-
-  const pageSize = 20
+  // TanStack Table state
+  const [rowSelection, setRowSelection] = React.useState({})
+  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
+  const [pagination, setPagination] = React.useState({
+    pageIndex: 0,
+    pageSize: 20,
+  })
 
   // Debounce search input
   React.useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchQuery)
-      setPage(1) // Reset to first page on search
+      setPagination((prev) => ({ ...prev, pageIndex: 0 }))
     }, 300)
     return () => clearTimeout(timer)
   }, [searchQuery])
 
   // Reset page when filter changes
   React.useEffect(() => {
-    setPage(1)
-    setSelected(new Set()) // Clear selection on filter change
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }))
+    setRowSelection({})
   }, [jurisdictionFilter, statusFilter, taxYearFilter])
 
   const utils = api.useUtils()
 
   const { data, isLoading, refetch } = api.taxReturn.list.useQuery(
     {
-      orgId, // Filter by org from URL
-      page,
-      pageSize,
+      orgId,
+      page: pagination.pageIndex + 1,
+      pageSize: pagination.pageSize,
       jurisdictionCode:
         jurisdictionFilter === "all" ? undefined : jurisdictionFilter,
       taxYear: taxYearFilter === "all" ? undefined : Number(taxYearFilter),
@@ -109,7 +337,7 @@ export default function ReturnsPage() {
     },
     {
       refetchOnWindowFocus: false,
-      enabled: !!orgId, // Only run query if we have an orgId
+      enabled: !!orgId,
     }
   )
 
@@ -123,7 +351,7 @@ export default function ReturnsPage() {
 
   const deleteMutation = api.taxReturn.delete.useMutation({
     onSuccess: () => {
-      setSelected(new Set())
+      setRowSelection({})
       refetch()
     },
   })
@@ -144,7 +372,7 @@ export default function ReturnsPage() {
     { jobId: activeJobId! },
     {
       enabled: !!activeJobId,
-      refetchInterval: logsDialogOpen ? 2000 : 5000, // Poll slower when dialog closed
+      refetchInterval: logsDialogOpen ? 2000 : 5000,
     }
   )
 
@@ -154,7 +382,6 @@ export default function ReturnsPage() {
       setLogsDialogOpen(true)
     },
     onError: () => {
-      // Reset state on error
       setActiveJobId(null)
     },
   })
@@ -174,8 +401,9 @@ export default function ReturnsPage() {
   }
 
   const handleDeleteSelected = () => {
-    if (confirm(`Are you sure you want to delete ${selected.size} returns?`)) {
-      deleteMutation.mutate(Array.from(selected))
+    const selectedIds = Object.keys(rowSelection)
+    if (confirm(`Are you sure you want to delete ${selectedIds.length} returns?`)) {
+      deleteMutation.mutate(selectedIds)
     }
   }
 
@@ -183,25 +411,6 @@ export default function ReturnsPage() {
      if (confirm("Are you sure you want to delete this return?")) {
       deleteMutation.mutate([id])
     }
-  }
-
-  const toggleSelectAll = (checked: boolean) => {
-    if (checked && data) {
-      const allIds = data.returns.map(r => r.id)
-      setSelected(new Set(allIds))
-    } else {
-      setSelected(new Set())
-    }
-  }
-
-  const toggleSelectRow = (id: string, checked: boolean) => {
-    const newSelected = new Set(selected)
-    if (checked) {
-      newSelected.add(id)
-    } else {
-      newSelected.delete(id)
-    }
-    setSelected(newSelected)
   }
 
   const formatLogTime = (timestamp: number | undefined) => {
@@ -214,53 +423,31 @@ export default function ReturnsPage() {
     })
   }
 
-  const getStatusBadge = (
-    status: string,
-    isReadyForAutomation: boolean | null | undefined,
-  ) => {
-    switch (status) {
-      case "completed":
-        return <Badge className="bg-green-500/10 text-green-600 border-green-500/20 shadow-none hover:bg-green-500/20">Completed</Badge>
-      case "in_progress":
-        return <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20 shadow-none hover:bg-blue-500/20">In Progress</Badge>
-      case "review_required":
-        return <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20 shadow-none hover:bg-orange-500/20">Review Required</Badge>
-      case "failed":
-        return <Badge className="bg-red-500/10 text-red-600 border-red-500/20 shadow-none hover:bg-red-500/20">Failed</Badge>
-      case "dismissed":
-        return <Badge className="bg-zinc-500/10 text-zinc-500 border-zinc-500/20 shadow-none hover:bg-zinc-500/20">Dismissed</Badge>
-      default:
-        if (isReadyForAutomation) {
-          return <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20 shadow-none hover:bg-yellow-500/20">Awaiting Automation</Badge>
-        }
+  const columns = React.useMemo(
+    () => createColumns(orgId, dismissMutation, undismissMutation, handleDeleteSingle),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [orgId],
+  )
 
-        return <Badge className="bg-slate-500/10 text-slate-700 border-slate-500/20 shadow-none hover:bg-slate-500/20">Pending</Badge>
-    }
-  }
+  const table = useReactTable({
+    data: (data?.returns ?? []) as TaxReturnRow[],
+    columns,
+    state: {
+      columnVisibility,
+      rowSelection,
+      pagination,
+    },
+    getRowId: (row) => row.id,
+    enableRowSelection: true,
+    manualPagination: true,
+    pageCount: data?.totalPages ?? 1,
+    onRowSelectionChange: setRowSelection,
+    onColumnVisibilityChange: setColumnVisibility,
+    onPaginationChange: setPagination,
+    getCoreRowModel: getCoreRowModel(),
+  })
 
-  const getReadinessBadge = (item: NonNullable<typeof data>["returns"][number]) => {
-    if (item.isSubstanceComplete) {
-      return (
-        <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 shadow-none hover:bg-emerald-500/20">
-          Ready
-        </Badge>
-      )
-    }
-
-    if ((item.missingSubstanceFieldCount ?? 0) > 0) {
-      return (
-        <Badge className="bg-violet-500/10 text-violet-700 border-violet-500/20 shadow-none hover:bg-violet-500/20">
-          {item.missingSubstanceFieldCount} Missing
-        </Badge>
-      )
-    }
-
-    return (
-      <Badge className="bg-slate-500/10 text-slate-700 border-slate-500/20 shadow-none hover:bg-slate-500/20">
-        Needs Form
-      </Badge>
-    )
-  }
+  const selectedCount = Object.keys(rowSelection).length
 
   const isJobComplete = logsData?.job?.status === "completed"
   const isJobFailed = logsData?.job?.status === "failed"
@@ -277,9 +464,6 @@ export default function ReturnsPage() {
       }
     }
   }, [jobStatus]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const isAllSelected = data?.returns.length ? data.returns.every(r => selected.has(r.id)) : false
-  const isIndeterminate = selected.size > 0 && !isAllSelected
 
   return (
     <>
@@ -352,14 +536,15 @@ export default function ReturnsPage() {
           </div>
 
           <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-3 bg-background p-1 rounded-lg border shadow-sm">
-                <div className="relative flex-1 max-w-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="relative min-w-[220px] max-w-sm">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     placeholder="Search by name or ID..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-9 pr-9 border-none shadow-none focus-visible:ring-0 bg-muted"
+                    className="pl-9 pr-9 h-8"
                   />
                   {searchQuery && (
                     <button
@@ -370,92 +555,172 @@ export default function ReturnsPage() {
                     </button>
                   )}
                 </div>
-                <div className="h-6 w-px bg-border" />
-                <Select
-                  value={jurisdictionFilter}
-                  onValueChange={(value) =>
-                    setJurisdictionFilter(value as JurisdictionFilter)
-                  }
-                >
-                  <SelectTrigger className="w-[160px] border-none shadow-none focus:ring-0 bg-muted">
-                    <SelectValue placeholder="All jurisdictions" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All jurisdictions</SelectItem>
-                    <SelectItem value="GG">Guernsey</SelectItem>
-                    <SelectItem value="JE">Jersey</SelectItem>
-                  </SelectContent>
-                </Select>
-                <div className="h-6 w-px bg-border" />
-                <Select
-                  value={statusFilter ?? "all"}
-                  onValueChange={(value) => setStatusFilter(value === "all" ? undefined : value as StatusFilter)}
-                >
-                  <SelectTrigger className="w-[180px] border-none shadow-none focus:ring-0 bg-muted">
-                    <SelectValue placeholder="All statuses" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All statuses</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="in_progress">In Progress</SelectItem>
-                    <SelectItem value="review_required">Review Required</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="failed">Failed</SelectItem>
-                    <SelectItem value="dismissed">Dismissed</SelectItem>
-                  </SelectContent>
-                </Select>
-                <div className="h-6 w-px bg-border" />
-                <Select
-                  value={taxYearFilter}
-                  onValueChange={(value) => setTaxYearFilter(value as TaxYearFilter)}
-                >
-                  <SelectTrigger className="w-[140px] border-none shadow-none focus:ring-0 bg-muted">
-                    <SelectValue placeholder="Tax year" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All tax years</SelectItem>
-                    {taxYearOptions.map((year) => (
-                      <SelectItem key={year} value={`${year}`}>
-                        {year}
-                      </SelectItem>
+                <Tooltip>
+                  <DropdownMenu>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="relative size-8">
+                          <IconCircleDot className="h-4 w-4" />
+                          {statusFilter && (
+                            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Status</TooltipContent>
+                    <DropdownMenuContent align="start" className="w-48">
+                      <DropdownMenuLabel>Status</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {([
+                      ["all", "All statuses"],
+                      ["pending", "Pending"],
+                      ["in_progress", "In Progress"],
+                      ["review_required", "Review Required"],
+                      ["completed", "Completed"],
+                      ["failed", "Failed"],
+                      ["dismissed", "Dismissed"],
+                    ] as const).map(([value, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={value}
+                        checked={value === "all" ? !statusFilter : statusFilter === value}
+                        onCheckedChange={() => setStatusFilter(value === "all" ? undefined : value as StatusFilter)}
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
                     ))}
-                  </SelectContent>
-                </Select>
-                {selected.size > 0 && (
-                  <>
-                     <div className="h-6 w-px bg-border" />
-                     <Button 
-                        variant="destructive" 
-                        size="sm" 
-                        className="mr-1"
-                        onClick={handleDeleteSelected}
-                     >
-                       <Trash className="mr-2 h-4 w-4" />
-                       Delete ({selected.size})
-                     </Button>
-                  </>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </Tooltip>
+                <Tooltip>
+                  <DropdownMenu>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="relative size-8">
+                          <IconGlobe className="h-4 w-4" />
+                          {jurisdictionFilter !== "all" && (
+                            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Jurisdiction</TooltipContent>
+                    <DropdownMenuContent align="start" className="w-44">
+                      <DropdownMenuLabel>Jurisdiction</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {([
+                        ["all", "All jurisdictions"],
+                        ["GG", "Guernsey"],
+                        ["JE", "Jersey"],
+                      ] as const).map(([value, label]) => (
+                        <DropdownMenuCheckboxItem
+                          key={value}
+                          checked={jurisdictionFilter === value}
+                          onCheckedChange={() => setJurisdictionFilter(value as JurisdictionFilter)}
+                        >
+                          {label}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </Tooltip>
+                <Tooltip>
+                  <DropdownMenu>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="relative size-8">
+                          <IconCalendar className="h-4 w-4" />
+                          {taxYearFilter !== "all" && (
+                            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Tax Year</TooltipContent>
+                    <DropdownMenuContent align="start" className="w-40">
+                      <DropdownMenuLabel>Tax Year</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuCheckboxItem
+                        checked={taxYearFilter === "all"}
+                        onCheckedChange={() => setTaxYearFilter("all")}
+                      >
+                        All tax years
+                      </DropdownMenuCheckboxItem>
+                      {taxYearOptions.map((year) => (
+                        <DropdownMenuCheckboxItem
+                          key={year}
+                          checked={taxYearFilter === `${year}`}
+                          onCheckedChange={() => setTaxYearFilter(`${year}` as TaxYearFilter)}
+                        >
+                          {year}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </Tooltip>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedCount > 0 && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleDeleteSelected}
+                  >
+                    <Trash className="mr-2 h-4 w-4" />
+                    Delete ({selectedCount})
+                  </Button>
                 )}
+                <Tooltip>
+                  <DropdownMenu>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="size-8">
+                          <IconLayoutColumns className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Columns</TooltipContent>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {table
+                        .getAllColumns()
+                        .filter(
+                          (column) =>
+                            typeof column.accessorFn !== "undefined" && column.getCanHide()
+                        )
+                        .map((column) => (
+                          <DropdownMenuCheckboxItem
+                            key={column.id}
+                            className="capitalize"
+                            checked={column.getIsVisible()}
+                            onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                          >
+                            {column.id}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </Tooltip>
+              </div>
             </div>
 
-            <div className="rounded-md border bg-background shadow-sm">
+            <div className="overflow-hidden rounded-lg border">
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[40px]">
-                      <Checkbox
-                        checked={isAllSelected}
-                        onCheckedChange={toggleSelectAll}
-                        aria-label="Select all"
-                      />
-                    </TableHead>
-                    <TableHead>Entity</TableHead>
-                    <TableHead>Jurisdiction</TableHead>
-                    <TableHead>Tax Year</TableHead>
-                    <TableHead>External ID</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Readiness</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
+                <TableHeader className="bg-muted sticky top-0 z-10">
+                  {table.getHeaderGroups().map((headerGroup) => (
+                    <TableRow key={headerGroup.id}>
+                      {headerGroup.headers.map((header) => (
+                        <TableHead key={header.id} colSpan={header.colSpan}>
+                          {header.isPlaceholder
+                            ? null
+                            : flexRender(
+                                header.column.columnDef.header,
+                                header.getContext()
+                              )}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  ))}
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
@@ -471,131 +736,110 @@ export default function ReturnsPage() {
                         <TableCell className="text-right"><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
                       </TableRow>
                     ))
-                  ) : data?.returns.length === 0 ? (
+                  ) : table.getRowModel().rows?.length ? (
+                    table.getRowModel().rows.map((row) => (
+                      <TableRow
+                        key={row.id}
+                        data-state={row.getIsSelected() && "selected"}
+                        className="cursor-pointer"
+                        onClick={() => router.push(`/org/${orgId}/returns/${row.original.id}`)}
+                      >
+                        {row.getVisibleCells().map((cell) => (
+                          <TableCell key={cell.id}>
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  ) : (
                     <TableRow>
-                      <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                      <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
                         {searchQuery || statusFilter || jurisdictionFilter !== "all" || taxYearFilter !== "all"
                           ? "No returns match your filters."
                           : "No returns found. Run a sync job to import returns."}
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    data?.returns.map((item) => (
-                      <TableRow key={item.id} data-state={selected.has(item.id) && "selected"}>
-                         <TableCell>
-                          <Checkbox
-                            checked={selected.has(item.id)}
-                            onCheckedChange={(checked) => toggleSelectRow(item.id, !!checked)}
-                            aria-label="Select row"
-                          />
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          <Link
-                            href={`/org/${params.orgId}/returns/${item.id}`}
-                            className="hover:underline hover:text-primary transition-colors"
-                          >
-                            {item.entityName}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{item.jurisdiction?.code || "—"}</Badge>
-                        </TableCell>
-                        <TableCell>{item.taxYear}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {item.externalId || "—"}
-                        </TableCell>
-                        <TableCell>
-                          {getStatusBadge(item.status, item.isSubstanceComplete)}
-                        </TableCell>
-                        <TableCell>{getReadinessBadge(item)}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            {item.status !== "completed" && (
-                              <Button size="sm" asChild>
-                                <Link href={`/org/${params.orgId}/returns/${item.id}`}>
-                                  Process
-                                </Link>
-                              </Button>
-                            )}
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                  <span className="sr-only">Open menu</span>
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                <DropdownMenuItem asChild>
-                                  <Link href={`/org/${params.orgId}/returns/${item.id}`}>
-                                    <FileText className="mr-2 h-4 w-4" />
-                                    View Details
-                                  </Link>
-                                </DropdownMenuItem>
-                                {item.link && (
-                                  <DropdownMenuItem asChild>
-                                    <a href={item.link} target="_blank" rel="noopener noreferrer">
-                                      <ExternalLink className="mr-2 h-4 w-4" />
-                                      View in Portal
-                                    </a>
-                                  </DropdownMenuItem>
-                                )}
-                                <DropdownMenuSeparator />
-                                {item.status !== "dismissed" && item.status !== "completed" ? (
-                                  <DropdownMenuItem onClick={() => dismissMutation.mutate({ taxReturnId: item.id })}>
-                                    <X className="mr-2 h-4 w-4" />
-                                    Dismiss
-                                  </DropdownMenuItem>
-                                ) : item.status === "dismissed" ? (
-                                  <DropdownMenuItem onClick={() => undismissMutation.mutate({ taxReturnId: item.id })}>
-                                    <RefreshCw className="mr-2 h-4 w-4" />
-                                    Restore
-                                  </DropdownMenuItem>
-                                ) : null}
-                                <DropdownMenuItem
-                                  onClick={() => handleDeleteSingle(item.id)}
-                                >
-                                  <Trash className="mr-2 h-4 w-4" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
                   )}
                 </TableBody>
               </Table>
             </div>
 
-            {data && data.totalPages > 1 && (
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">
-                  Page {data.page} of {data.totalPages}
-                </p>
-                <div className="flex items-center gap-2">
+            {/* Pagination */}
+            <div className="flex items-center justify-between px-4">
+              <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
+                {selectedCount} of{" "}
+                {data?.total ?? 0} row(s) selected.
+              </div>
+              <div className="flex w-full items-center gap-8 lg:w-fit">
+                <div className="hidden items-center gap-2 lg:flex">
+                  <Label htmlFor="rows-per-page" className="text-sm font-medium">
+                    Rows per page
+                  </Label>
+                  <Select
+                    value={`${table.getState().pagination.pageSize}`}
+                    onValueChange={(value) => {
+                      table.setPageSize(Number(value))
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="w-20" id="rows-per-page">
+                      <SelectValue placeholder={table.getState().pagination.pageSize} />
+                    </SelectTrigger>
+                    <SelectContent side="top">
+                      {[10, 20, 30, 40, 50].map((size) => (
+                        <SelectItem key={size} value={`${size}`}>
+                          {size}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex w-fit items-center justify-center text-sm font-medium">
+                  Page {data?.page ?? 1} of{" "}
+                  {(data?.totalPages ?? 1) || 1}
+                </div>
+                <div className="ml-auto flex items-center gap-2 lg:ml-0">
                   <Button
                     variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page <= 1}
+                    className="hidden h-8 w-8 p-0 lg:flex"
+                    onClick={() => table.setPageIndex(0)}
+                    disabled={!table.getCanPreviousPage()}
                   >
-                    <ChevronLeft className="h-4 w-4" />
-                    Previous
+                    <span className="sr-only">Go to first page</span>
+                    <IconChevronsLeft />
                   </Button>
                   <Button
                     variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))}
-                    disabled={page >= data.totalPages}
+                    className="size-8"
+                    size="icon"
+                    onClick={() => table.previousPage()}
+                    disabled={!table.getCanPreviousPage()}
                   >
-                    Next
-                    <ChevronRight className="h-4 w-4" />
+                    <span className="sr-only">Go to previous page</span>
+                    <IconChevronLeft />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="size-8"
+                    size="icon"
+                    onClick={() => table.nextPage()}
+                    disabled={!table.getCanNextPage()}
+                  >
+                    <span className="sr-only">Go to next page</span>
+                    <IconChevronRight />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="hidden size-8 lg:flex"
+                    size="icon"
+                    onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+                    disabled={!table.getCanNextPage()}
+                  >
+                    <span className="sr-only">Go to last page</span>
+                    <IconChevronsRight />
                   </Button>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
         </main>
@@ -622,7 +866,7 @@ export default function ReturnsPage() {
                   </span>
                   <span className="text-xs font-normal text-muted-foreground">
                     {logsData?.logs?.length || 0} log entries
-                    {logsData?.job?.returnsFound && ` • ${logsData.job.returnsFound} returns found`}
+                    {logsData?.job?.returnsFound && ` \u2022 ${logsData.job.returnsFound} returns found`}
                   </span>
                 </div>
                 {isJobRunning && (

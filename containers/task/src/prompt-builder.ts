@@ -71,6 +71,28 @@ const INFERABLE_FIELDS = new Set([
   "hasIntellectualPropertyHolding",
 ]);
 
+function getCaseViewUrl(returnLink?: string): string | null {
+  if (!returnLink) {
+    return null;
+  }
+
+  try {
+    const url = new URL(returnLink);
+    const match = url.pathname.match(/(\/revenue\/case\/[^/]+)(?:\/.*)?$/);
+
+    if (!match) {
+      return null;
+    }
+
+    url.pathname = `${match[1]}/view`;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Builds the main AI prompt for filling out the Guernsey Economic Substance Register
  */
@@ -89,6 +111,7 @@ export function buildSubstanceFormPrompt(
   } = options;
 
   const sections: string[] = [];
+  const caseViewUrl = getCaseViewUrl(returnLink);
   const missingFields = Array.isArray(substanceForm.missingFields)
     ? substanceForm.missingFields
     : [];
@@ -120,12 +143,19 @@ If prompted for CSP or secret credentials:
 
 ## CASE ASSIGNMENT — DO THIS BEFORE PROCESSING THE RETURN
 - Before filling or reviewing any return fields, make sure the case is assigned to **Amir Isaac**.
-- Once you are inside the case, click **"Assign to user"**.
+- The **"Assign to user"** button is on the case **view** page, not the processing form itself.
+- If you are not already on the case view page, navigate to the case URL ending in **/view** before trying to assign.${ 
+  caseViewUrl
+    ? ` Use this case view URL: ${caseViewUrl}`
+    : ""
+}
+- Once you are on the case **view** page, click **"Assign to user"**.
 - A list of users will appear.
 - Click **"Assign"** on the **first "Amir Isaac"** that appears in the list.
 - If that assignment does not work, does not stick, or the case still does not appear assigned correctly, repeat the action and click **"Assign"** on the **other "Amir Isaac"** entry.
-- Only after the case is successfully assigned to **Amir Isaac** should you continue with the filing workflow.
-- If the case is already assigned to **Amir Isaac**, continue without changing it.
+- If the case is already assigned to someone already, including **Amir Isaac**, still reassign it: click **"Assign to another user"** and then pick the **first "Amir Isaac"** again.
+- Only after the case has been freshly assigned to **Amir Isaac** in this run should you continue with the filing workflow.
+- After assignment, return to the filing/processing page and continue the return.
 
 ## IMPORTANT INSTRUCTIONS
 

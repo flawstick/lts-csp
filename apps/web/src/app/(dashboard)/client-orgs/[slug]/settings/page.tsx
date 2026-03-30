@@ -10,8 +10,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { PageHeader } from "@/components/page-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -163,13 +162,9 @@ export default function ClientOrgSettingsPage() {
   if (isLoading) {
     return (
       <>
-        <header className="flex h-16 shrink-0 items-center gap-2">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+        <PageHeader>
             <Skeleton className="h-4 w-48" />
-          </div>
-        </header>
+        </PageHeader>
         <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
           <Skeleton className="h-64 w-full" />
         </div>
@@ -180,10 +175,7 @@ export default function ClientOrgSettingsPage() {
   if (error || !org) {
     return (
       <>
-        <header className="flex h-16 shrink-0 items-center gap-2">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+        <PageHeader>
             <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem className="hidden md:block">
@@ -195,8 +187,7 @@ export default function ClientOrgSettingsPage() {
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
-          </div>
-        </header>
+        </PageHeader>
         <div className="flex flex-1 flex-col items-center justify-center gap-4 p-4">
           <AlertCircle className="text-muted-foreground h-12 w-12" />
           <div className="text-center">
@@ -210,10 +201,7 @@ export default function ClientOrgSettingsPage() {
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center gap-2">
-        <div className="flex items-center gap-2 px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+      <PageHeader>
           <Breadcrumb>
             <BreadcrumbList>
               <BreadcrumbItem className="hidden md:block">
@@ -229,8 +217,7 @@ export default function ClientOrgSettingsPage() {
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
-        </div>
-      </header>
+      </PageHeader>
 
       <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
         <div className="flex items-center gap-3">

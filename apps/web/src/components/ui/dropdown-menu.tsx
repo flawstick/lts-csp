@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu"
-import { CheckIcon, ChevronRightIcon, CircleIcon } from "@/lib/icons"
+import { ChevronRightIcon, CircleIcon } from "@/lib/icons"
 
 import { cn } from "@/lib/utils"
 
@@ -100,7 +100,9 @@ function DropdownMenuCheckboxItem({
     >
       <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
         <DropdownMenuPrimitive.ItemIndicator>
-          <CheckIcon className="size-4" />
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="size-3.5">
+            <path d="M2 6.5L4.5 9L10 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
       {children}

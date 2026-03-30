@@ -25,6 +25,10 @@ export const env = createEnv({
     // Tax Sync ECS
     ECS_TAX_SYNC_TASK_DEFINITION: z.string().optional(),
     ECS_TAX_SYNC_CONTAINER_NAME: z.string().optional(),
+    TAX_SYNC_EXECUTION_MODE: z.enum(["ecs", "railway"]).default("ecs"),
+    TAX_SYNC_HANDLER_URL: z.string().url().optional(),
+    TAX_SYNC_HANDLER_TOKEN: z.string().optional(),
+    TAX_SYNC_HANDLER_TIMEOUT_MS: z.coerce.number().default(15_000),
     // Browser Task ECS (uses Browser Use Cloud)
     ECS_BROWSER_TASK_DEFINITION: z.string().optional(),
     ECS_BROWSER_TASK_CONTAINER_NAME: z.string().optional(),
@@ -77,6 +81,10 @@ export const env = createEnv({
     // Tax Sync ECS
     ECS_TAX_SYNC_TASK_DEFINITION: process.env.ECS_TAX_SYNC_TASK_DEFINITION,
     ECS_TAX_SYNC_CONTAINER_NAME: process.env.ECS_TAX_SYNC_CONTAINER_NAME,
+    TAX_SYNC_EXECUTION_MODE: process.env.TAX_SYNC_EXECUTION_MODE,
+    TAX_SYNC_HANDLER_URL: process.env.TAX_SYNC_HANDLER_URL,
+    TAX_SYNC_HANDLER_TOKEN: process.env.TAX_SYNC_HANDLER_TOKEN,
+    TAX_SYNC_HANDLER_TIMEOUT_MS: process.env.TAX_SYNC_HANDLER_TIMEOUT_MS,
     // Browser Task ECS
     ECS_BROWSER_TASK_DEFINITION: process.env.ECS_BROWSER_TASK_DEFINITION,
     ECS_BROWSER_TASK_CONTAINER_NAME: process.env.ECS_BROWSER_TASK_CONTAINER_NAME,

@@ -2,17 +2,16 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
   IconChevronsLeft,
   IconChevronsRight,
-  IconCircleCheckFilled,
   IconDotsVertical,
   IconExternalLink,
   IconLayoutColumns,
-  IconLoader,
 } from "@tabler/icons-react"
 import {
   flexRender,
@@ -84,7 +83,7 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
       </div>
     ),
     cell: ({ row }) => (
-      <div className="flex items-center justify-center">
+      <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
         <Checkbox
           checked={row.getIsSelected()}
           onCheckedChange={(value) => row.toggleSelected(!!value)}
@@ -137,56 +136,29 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
     cell: ({ row }) => {
       const status = row.original.status
       const isReadyForAutomation = Boolean(row.original.isSubstanceComplete)
-      switch (status) {
-        case "completed":
-          return (
-            <Badge variant="outline" className="text-muted-foreground px-1.5">
-              <IconCircleCheckFilled className="fill-green-500 dark:fill-green-400" />
-              Completed
-            </Badge>
-          )
-        case "in_progress":
-          return (
-            <Badge variant="outline" className="text-muted-foreground px-1.5">
-              <IconLoader className="animate-spin" />
-              In Progress
-            </Badge>
-          )
-        case "review_required":
-          return (
-            <Badge variant="outline" className="text-orange-600 px-1.5">
-              <IconLoader />
-              Review
-            </Badge>
-          )
-        case "failed":
-          return (
-            <Badge variant="outline" className="text-red-600 px-1.5">
-              Failed
-            </Badge>
-          )
-        case "dismissed":
-          return (
-            <Badge variant="outline" className="text-zinc-500 px-1.5">
-              Dismissed
-            </Badge>
-          )
-        default:
-          if (isReadyForAutomation) {
-            return (
-              <Badge variant="outline" className="text-muted-foreground px-1.5">
-                <IconLoader />
-                Awaiting Automation
-              </Badge>
-            )
-          }
-
-          return (
-            <Badge variant="outline" className="text-muted-foreground px-1.5">
-              Pending
-            </Badge>
-          )
+      const styles: Record<string, string> = {
+        completed: "border-emerald-500/50 bg-emerald-500/15 text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400",
+        in_progress: "border-blue-500/50 bg-blue-500/15 text-blue-800 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-400",
+        review_required: "border-violet-500/50 bg-violet-500/15 text-violet-800 dark:border-violet-500/35 dark:bg-violet-500/10 dark:text-violet-400",
+        failed: "border-rose-500/50 bg-rose-500/15 text-rose-800 dark:border-rose-500/35 dark:bg-rose-500/10 dark:text-rose-400",
+        dismissed: "border-zinc-500/50 bg-zinc-500/15 text-zinc-700 dark:border-zinc-500/35 dark:bg-zinc-500/10 dark:text-zinc-500",
+        pending: "border-amber-500/50 bg-amber-500/15 text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400",
       }
+      const labels: Record<string, string> = {
+        completed: "Completed",
+        in_progress: "In Progress",
+        review_required: "Review Required",
+        failed: "Failed",
+        dismissed: "Dismissed",
+        pending: isReadyForAutomation ? "Awaiting Automation" : "Pending",
+      }
+      const cls = styles[status] ?? styles.pending
+      const label = labels[status] ?? labels.pending
+      return (
+        <span className={`inline-flex rounded-lg border px-2 py-0.5 text-xs font-medium ${cls}`}>
+          {label}
+        </span>
+      )
     },
   },
   {
@@ -195,24 +167,24 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
     cell: ({ row }) => {
       if (row.original.isSubstanceComplete) {
         return (
-          <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 px-1.5 text-emerald-700">
+          <span className="inline-flex rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400">
             Ready
-          </Badge>
+          </span>
         )
       }
 
       if ((row.original.missingSubstanceFieldCount ?? 0) > 0) {
         return (
-          <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 px-1.5 text-violet-700">
+          <span className="inline-flex rounded-lg border border-violet-500/50 bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-800 dark:border-violet-500/35 dark:bg-violet-500/10 dark:text-violet-400">
             {row.original.missingSubstanceFieldCount} Missing
-          </Badge>
+          </span>
         )
       }
 
       return (
-        <Badge variant="outline" className="border-slate-500/30 bg-slate-500/10 px-1.5 text-slate-700">
+        <span className="inline-flex rounded-lg border border-zinc-500/50 bg-zinc-500/15 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:border-zinc-500/35 dark:bg-zinc-500/10 dark:text-zinc-500">
           Needs Form
-        </Badge>
+        </span>
       )
     },
   },
@@ -225,6 +197,7 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
             variant="ghost"
             className="data-[state=open]:bg-muted text-muted-foreground flex size-8"
             size="icon"
+            onClick={(e) => e.stopPropagation()}
           >
             <IconDotsVertical />
             <span className="sr-only">Open menu</span>
@@ -266,6 +239,7 @@ interface ReturnsDataTableProps {
 }
 
 export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
+  const router = useRouter()
   const currentCalendarYear = React.useMemo(() => new Date().getUTCFullYear(), [])
   const defaultTaxYear = `${currentCalendarYear - 1}` as TaxYearFilter
   const [searchQuery, setSearchQuery] = React.useState("")
@@ -348,8 +322,8 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
     taxYearFilter !== "all"
 
   return (
-    <div className="w-full flex flex-col gap-6">
-      <div className="flex items-center justify-between gap-3 px-4 lg:px-6">
+    <div className="w-full flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative w-full min-w-[220px] max-w-sm">
             <Input
@@ -446,7 +420,7 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
           </Button>
         </div>
       </div>
-      <div className="relative flex flex-col gap-4 overflow-auto px-4 lg:px-6">
+      <div className="relative flex flex-col gap-4 overflow-auto">
         <div className="overflow-hidden rounded-lg border">
           <Table>
             <TableHeader className="bg-muted sticky top-0 z-10">
@@ -486,6 +460,8 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
                   <TableRow
                     key={row.id}
                     data-state={row.getIsSelected() && "selected"}
+                    className="cursor-pointer"
+                    onClick={() => router.push(`/org/${orgId}/returns/${row.original.id}`)}
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>

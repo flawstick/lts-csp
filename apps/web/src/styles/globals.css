@@ -59,6 +59,15 @@
   }
 }
 
+@keyframes checkbox-stroke {
+  0% {
+    stroke-dashoffset: 12;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);

@@ -241,6 +241,9 @@ importers:
       '@ai-sdk/google':
         specifier: ^3.0.8
         version: 3.0.8(zod@4.3.5)
+      '@ai-sdk/react':
+        specifier: ^3.0.118
+        version: 3.0.118(react@19.2.3)(zod@4.3.6)
       '@aws-sdk/client-cloudwatch-logs':
         specifier: ^3.700.0
         version: 3.967.0
@@ -412,6 +415,9 @@ importers:
       sonner:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      streamdown:
+        specifier: ^2.5.0
+        version: 2.5.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       superjson:
         specifier: ^2.2.1
         version: 2.2.6
@@ -429,7 +435,7 @@ importers:
         version: 0.18.5
       zod:
         specifier: ^4.3.5
-        version: 4.3.5
+        version: 4.3.6
       zustand:
         specifier: ^5.0.8
         version: 5.0.10(@types/react@19.2.8)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
@@ -494,6 +500,9 @@ importers:
       '@repo/redis':
         specifier: workspace:*
         version: link:../../packages/redis
+      '@vercel/blob':
+        specifier: ^2.3.0
+        version: 2.3.1
       browser-use-sdk:
         specifier: ^3.3.1
         version: 3.3.1
@@ -6998,6 +7007,13 @@ snapshots:
       '@vercel/oidc': 3.1.0
       zod: 3.25.76
 
+  '@ai-sdk/gateway@3.0.66(zod@4.3.6)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.8
+      '@ai-sdk/provider-utils': 4.0.19(zod@4.3.6)
+      '@vercel/oidc': 3.1.0
+      zod: 4.3.6
+
   '@ai-sdk/google@3.0.8(zod@4.3.5)':
     dependencies:
       '@ai-sdk/provider': 3.0.3
@@ -7017,6 +7033,13 @@ snapshots:
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.0.6
       zod: 3.25.76
+
+  '@ai-sdk/provider-utils@4.0.19(zod@4.3.6)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.8
+      '@standard-schema/spec': 1.1.0
+      eventsource-parser: 3.0.6
+      zod: 4.3.6
 
   '@ai-sdk/provider-utils@4.0.6(zod@4.3.5)':
     dependencies:
@@ -7041,6 +7064,16 @@ snapshots:
     dependencies:
       '@ai-sdk/provider-utils': 4.0.19(zod@3.25.76)
       ai: 6.0.116(zod@3.25.76)
+      react: 19.2.3
+      swr: 2.4.1(react@19.2.3)
+      throttleit: 2.1.0
+    transitivePeerDependencies:
+      - zod
+
+  '@ai-sdk/react@3.0.118(react@19.2.3)(zod@4.3.6)':
+    dependencies:
+      '@ai-sdk/provider-utils': 4.0.19(zod@4.3.6)
+      ai: 6.0.116(zod@4.3.6)
       react: 19.2.3
       swr: 2.4.1(react@19.2.3)
       throttleit: 2.1.0
@@ -10085,6 +10118,14 @@ snapshots:
       '@ai-sdk/provider-utils': 4.0.19(zod@3.25.76)
       '@opentelemetry/api': 1.9.0
       zod: 3.25.76
+
+  ai@6.0.116(zod@4.3.6):
+    dependencies:
+      '@ai-sdk/gateway': 3.0.66(zod@4.3.6)
+      '@ai-sdk/provider': 3.0.8
+      '@ai-sdk/provider-utils': 4.0.19(zod@4.3.6)
+      '@opentelemetry/api': 1.9.0
+      zod: 4.3.6
 
   ajv-formats@3.0.1(ajv@8.18.0):
     optionalDependencies:

@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -46,6 +47,7 @@ import {
 } from "@/components/ui/select"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -56,63 +58,220 @@ import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Loader2, Play, ExternalLink, Monitor, AlertCircle, CheckCircle2, XCircle, Terminal, Search, X, MoreHorizontal, Trash, ChevronLeft, ChevronRight, Ban, RotateCcw } from "@/lib/icons"
+import { Loader2, Play, ExternalLink, Monitor, AlertCircle, Terminal, Search, X, Trash, Ban, RotateCcw } from "@/lib/icons"
+import {
+  IconChevronLeft,
+  IconChevronRight,
+  IconChevronsLeft,
+  IconChevronsRight,
+  IconDotsVertical,
+  IconLayoutColumns,
+  IconCircleDot,
+  IconGlobe,
+} from "@tabler/icons-react"
+import {
+  flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type ColumnDef,
+  type SortingState,
+  type VisibilityState,
+} from "@tanstack/react-table"
 import Link from "next/link"
 import { api } from "@/trpc/react"
-import { useState, useEffect } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 
 type StatusFilter = "pending" | "in_progress" | "completed" | "failed" | "cancelled" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
 
+type TaskRow = {
+  id: string
+  name: string
+  taskType: string
+  status: string
+  createdAt: string
+  jurisdiction: { code: string; name: string } | null
+  taxReturn: { id: string; entityName: string; taxYear: number } | null
+  substanceForm: { isComplete: boolean; missingFields: unknown } | null
+}
+
+function getStatusBadge(status: string) {
+  const styles: Record<string, string> = {
+    completed: "border-emerald-500/50 bg-emerald-500/15 text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400",
+    queued: "border-yellow-500/50 bg-yellow-500/15 text-yellow-800 dark:border-yellow-500/35 dark:bg-yellow-500/10 dark:text-yellow-400",
+    starting: "border-sky-500/50 bg-sky-500/15 text-sky-800 dark:border-sky-500/35 dark:bg-sky-500/10 dark:text-sky-400",
+    running: "border-blue-500/50 bg-blue-500/15 text-blue-800 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-400",
+    in_progress: "border-blue-500/50 bg-blue-500/15 text-blue-800 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-400",
+    paused: "border-amber-500/50 bg-amber-500/15 text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400",
+    failed: "border-rose-500/50 bg-rose-500/15 text-rose-800 dark:border-rose-500/35 dark:bg-rose-500/10 dark:text-rose-400",
+    cancelled: "border-zinc-500/50 bg-zinc-500/15 text-zinc-700 dark:border-zinc-500/35 dark:bg-zinc-500/10 dark:text-zinc-500",
+    pending: "border-amber-500/50 bg-amber-500/15 text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400",
+  }
+  const labels: Record<string, string> = {
+    completed: "Completed",
+    queued: "Queued",
+    starting: "Starting",
+    running: "Running",
+    in_progress: "Running",
+    paused: "Awaiting Input",
+    failed: "Failed",
+    cancelled: "Cancelled",
+    pending: "Pending",
+  }
+  const cls = styles[status] ?? styles.pending
+  const label = labels[status] ?? labels.pending
+  return (
+    <span className={`inline-flex rounded-lg border px-2 py-0.5 text-xs font-medium ${cls}`}>
+      {label}
+    </span>
+  )
+}
+
+function getTaskTypeLabel(type: string) {
+  return type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+}
+
+const createColumns = (orgId: string): ColumnDef<TaskRow>[] => [
+  {
+    id: "select",
+    header: ({ table }) => (
+      <div className="flex items-center justify-center">
+        <Checkbox
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && "indeterminate")
+          }
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label="Select all"
+        />
+      </div>
+    ),
+    cell: ({ row }) => (
+      <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label="Select row"
+        />
+      </div>
+    ),
+    enableSorting: false,
+    enableHiding: false,
+  },
+  {
+    accessorKey: "name",
+    header: "Name",
+    cell: ({ row }) => (
+      <span className="font-medium">{row.original.name}</span>
+    ),
+    enableHiding: false,
+  },
+  {
+    accessorKey: "taskType",
+    header: "Type",
+    cell: ({ row }) => (
+      <Badge variant="outline">{getTaskTypeLabel(row.original.taskType)}</Badge>
+    ),
+  },
+  {
+    accessorKey: "jurisdiction",
+    header: "Jurisdiction",
+    cell: ({ row }) => (
+      <Badge variant="outline">
+        {row.original.jurisdiction?.code || "\u2014"}
+      </Badge>
+    ),
+  },
+  {
+    accessorKey: "createdAt",
+    header: "Created",
+    cell: ({ row }) => new Date(row.original.createdAt).toLocaleDateString(),
+  },
+  {
+    id: "relatedReturn",
+    header: "Related Return",
+    cell: ({ row }) => {
+      const task = row.original
+      if (task.taxReturn) {
+        return (
+          <Link
+            href={`/org/${orgId}/returns/${task.taxReturn.id}`}
+            className="flex items-center gap-1 hover:underline text-primary"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {task.taxReturn.entityName}
+            <ExternalLink className="h-3 w-3" />
+          </Link>
+        )
+      }
+      return <span className="text-muted-foreground">{"\u2014"}</span>
+    },
+  },
+  {
+    accessorKey: "status",
+    header: "Status",
+    cell: ({ row }) => getStatusBadge(row.original.status),
+  },
+  {
+    id: "actions",
+    cell: () => null, // Rendered inline in the row for Dialog support
+    enableHiding: false,
+  },
+]
+
 export default function TasksPage() {
   const params = useParams()
+  const router = useRouter()
   const orgId = params?.orgId as string
-  const [page, setPage] = useState(1)
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(undefined)
-  const [jurisdictionFilter, setJurisdictionFilter] =
-    useState<JurisdictionFilter>("all")
-  const [searchQuery, setSearchQuery] = useState("")
-  const [debouncedSearch, setDebouncedSearch] = useState("")
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [taskToDelete, setTaskToDelete] = useState<string | null>(null)
-  const [isRefetching, setIsRefetching] = useState(false)
 
-  const pageSize = 20
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(undefined)
+  const [jurisdictionFilter, setJurisdictionFilter] = React.useState<JurisdictionFilter>("all")
+  const [searchQuery, setSearchQuery] = React.useState("")
+  const [debouncedSearch, setDebouncedSearch] = React.useState("")
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
+  const [taskToDelete, setTaskToDelete] = React.useState<string | null>(null)
+  const [isRefetching, setIsRefetching] = React.useState(false)
+  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
+  const [sorting, setSorting] = React.useState<SortingState>([])
+  const [rowSelection, setRowSelection] = React.useState({})
+  const [pagination, setPagination] = React.useState({
+    pageIndex: 0,
+    pageSize: 20,
+  })
 
   // Debounce search input
-  useEffect(() => {
+  React.useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchQuery)
-      setPage(1)
+      setPagination((prev) => ({ ...prev, pageIndex: 0 }))
     }, 300)
     return () => clearTimeout(timer)
   }, [searchQuery])
 
   // Reset page when filter changes
-  useEffect(() => {
-    setPage(1)
-    setSelected(new Set())
+  React.useEffect(() => {
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }))
+    setRowSelection({})
   }, [jurisdictionFilter, statusFilter])
 
   const { data, isLoading, refetch } = api.taxReturn.listTasks.useQuery({
-    orgId, // Filter by org from URL
-    page,
-    pageSize,
+    orgId,
+    page: pagination.pageIndex + 1,
+    pageSize: pagination.pageSize,
     jurisdictionCode:
       jurisdictionFilter === "all" ? undefined : jurisdictionFilter,
     status: statusFilter,
     search: debouncedSearch || undefined,
   }, {
-    enabled: !!orgId, // Only run if we have an orgId
+    enabled: !!orgId,
   })
 
   const deleteTasksMutation = api.taxReturn.deleteTasks.useMutation({
     onSuccess: () => {
-      setSelected(new Set())
+      setRowSelection({})
       refetch()
     }
   })
@@ -137,52 +296,37 @@ export default function TasksPage() {
     if (taskToDelete) {
       deleteTasksMutation.mutate([taskToDelete])
     } else {
-      deleteTasksMutation.mutate(Array.from(selected))
+      const selectedIds = table.getSelectedRowModel().rows.map(r => r.original.id)
+      deleteTasksMutation.mutate(selectedIds)
     }
     setDeleteDialogOpen(false)
     setTaskToDelete(null)
   }
 
-  const toggleSelectAll = (checked: boolean) => {
-    if (checked && data) {
-      const allIds = data.tasks.map(t => t.id)
-      setSelected(new Set(allIds))
-    } else {
-      setSelected(new Set())
-    }
-  }
+  const columns = React.useMemo(() => createColumns(orgId), [orgId])
 
-  const toggleSelectRow = (id: string, checked: boolean) => {
-    const newSelected = new Set(selected)
-    if (checked) {
-      newSelected.add(id)
-    } else {
-      newSelected.delete(id)
-    }
-    setSelected(newSelected)
-  }
+  const table = useReactTable({
+    data: (data?.tasks as TaskRow[] | undefined) ?? [],
+    columns,
+    state: {
+      sorting,
+      columnVisibility,
+      rowSelection,
+      pagination,
+    },
+    getRowId: (row) => row.id,
+    enableRowSelection: true,
+    manualPagination: true,
+    pageCount: data?.totalPages ?? 1,
+    onRowSelectionChange: setRowSelection,
+    onSortingChange: setSorting,
+    onColumnVisibilityChange: setColumnVisibility,
+    onPaginationChange: setPagination,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  })
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "completed":
-        return <Badge className="bg-green-500/10 text-green-600 border-green-500/20 hover:bg-green-500/20">Completed</Badge>
-      case "running":
-      case "in_progress":
-        return <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20 hover:bg-blue-500/20">Running</Badge>
-      case "failed":
-        return <Badge className="bg-red-500/10 text-red-600 border-red-500/20 hover:bg-red-500/20">Failed</Badge>
-      case "cancelled":
-        return <Badge variant="secondary">Cancelled</Badge>
-      default:
-        return <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20 hover:bg-yellow-500/20">Pending</Badge>
-    }
-  }
-
-  const getTaskTypeLabel = (type: string) => {
-    return type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
-  }
-
-  const isAllSelected = data?.tasks.length ? data.tasks.every(t => selected.has(t.id)) : false
+  const selectedCount = table.getSelectedRowModel().rows.length
 
   return (
     <>
@@ -212,14 +356,15 @@ export default function TasksPage() {
           </div>
 
           <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-3 bg-background p-1 rounded-lg border shadow-sm">
-                <div className="relative flex-1 max-w-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="relative min-w-[220px] max-w-sm">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     placeholder="Search tasks..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-9 pr-9 border-none shadow-none focus-visible:ring-0 bg-muted"
+                    className="pl-9 pr-9 h-8"
                   />
                   {searchQuery && (
                     <button
@@ -230,333 +375,447 @@ export default function TasksPage() {
                     </button>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <Tooltip>
+                <Tooltip>
+                  <DropdownMenu>
                     <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 bg-muted hover:bg-muted/80"
-                        onClick={handleRefetch}
-                        disabled={isRefetching}
-                      >
-                        <RotateCcw className={`h-4 w-4 ${isRefetching ? "animate-spin" : ""}`} />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Refresh tasks</p>
-                    </TooltipContent>
-                  </Tooltip>
-                  <Select
-                    value={jurisdictionFilter}
-                    onValueChange={(value) =>
-                      setJurisdictionFilter(value as JurisdictionFilter)
-                    }
-                  >
-                    <SelectTrigger className="w-[160px] border-none shadow-none focus:ring-0 bg-muted">
-                      <SelectValue placeholder="All jurisdictions" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All jurisdictions</SelectItem>
-                      <SelectItem value="GG">Guernsey</SelectItem>
-                      <SelectItem value="JE">Jersey</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={statusFilter ?? "all"}
-                    onValueChange={(value) => setStatusFilter(value === "all" ? undefined : value as StatusFilter)}
-                  >
-                    <SelectTrigger className="w-[180px] border-none shadow-none focus:ring-0 bg-muted">
-                      <SelectValue placeholder="All statuses" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All statuses</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="in_progress">Running</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="failed">Failed</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {selected.size > 0 && (
-                  <>
-                     <div className="h-6 w-px bg-border" />
-                     <Button
-                        variant="destructive"
-                        size="sm"
-                        className="mr-1"
-                        onClick={handleDeleteSelected}
-                     >
-                       <Trash className="mr-2 h-4 w-4" />
-                       Delete ({selected.size})
-                     </Button>
-                  </>
-                )}
-            </div>
-
-            <div className="rounded-md border bg-background">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[40px]">
-                      <Checkbox
-                        checked={isAllSelected}
-                        onCheckedChange={toggleSelectAll}
-                        aria-label="Select all"
-                      />
-                    </TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Jurisdiction</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Related Return</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    Array.from({ length: 5 }).map((_, i) => (
-                      <TableRow key={i}>
-                        <TableCell><Skeleton className="h-4 w-4" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-                        <TableCell><Skeleton className="h-5 w-12" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                        <TableCell><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
-                      </TableRow>
-                    ))
-                  ) : !data?.tasks || data.tasks.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="h-64 text-center text-muted-foreground">
-                        <div className="flex flex-col items-center justify-center">
-                          <Terminal className="h-12 w-12 mb-4 opacity-20" />
-                          <p>No tasks found.</p>
-                          <Button variant="link" asChild className="mt-2">
-                            <Link href={`/org/${orgId}/returns`}>Go to Returns to create a task</Link>
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    data.tasks.map((task) => (
-                      <TableRow key={task.id} data-state={selected.has(task.id) && "selected"}>
-                        <TableCell>
-                          <Checkbox
-                            checked={selected.has(task.id)}
-                            onCheckedChange={(checked) => toggleSelectRow(task.id, !!checked)}
-                            aria-label="Select row"
-                          />
-                        </TableCell>
-                        <TableCell className="font-medium">{task.name}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{getTaskTypeLabel(task.taskType)}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {task.jurisdiction?.code || "—"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{new Date(task.createdAt).toLocaleDateString()}</TableCell>
-                        <TableCell>
-                          {task.taxReturn ? (
-                            <Link
-                              href={`/org/${orgId}/returns/${task.taxReturn.id}`}
-                              className="flex items-center gap-1 hover:underline text-primary"
-                            >
-                              {task.taxReturn.entityName}
-                              <ExternalLink className="h-3 w-3" />
-                            </Link>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="relative size-8">
+                          <IconCircleDot className="h-4 w-4" />
+                          {statusFilter && (
+                            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
                           )}
-                        </TableCell>
-                        <TableCell>{getStatusBadge(task.status)}</TableCell>
-                        <TableCell className="text-right">
-                          <Dialog>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                  <span className="sr-only">Open menu</span>
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                <DropdownMenuItem asChild>
-                                  <Link href={`/org/${orgId}/tasks/${task.id}`}>
-                                    <Monitor className="mr-2 h-4 w-4" />
-                                    Open Task
-                                  </Link>
-                                </DropdownMenuItem>
-                                <DialogTrigger asChild>
-                                  <DropdownMenuItem>
-                                    <ExternalLink className="mr-2 h-4 w-4" />
-                                    View Details
-                                  </DropdownMenuItem>
-                                </DialogTrigger>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  variant="destructive"
-                                  onClick={() => handleDeleteSingle(task.id)}
-                                >
-                                  <Trash className="mr-2 h-4 w-4" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-
-                            <DialogContent className="max-w-2xl">
-                              <DialogHeader>
-                                <DialogTitle className="flex items-center gap-2">
-                                  {task.name}
-                                  {getStatusBadge(task.status)}
-                                </DialogTitle>
-                                <DialogDescription>
-                                  Task ID: <span className="font-mono text-xs">{task.id}</span>
-                                </DialogDescription>
-                              </DialogHeader>
-                              <div className="grid gap-4 py-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="space-y-1">
-                                    <h4 className="text-sm font-medium text-muted-foreground">Task Type</h4>
-                                    <p>{getTaskTypeLabel(task.taskType)}</p>
-                                  </div>
-                                  <div className="space-y-1">
-                                    <h4 className="text-sm font-medium text-muted-foreground">Created At</h4>
-                                    <p>{new Date(task.createdAt).toLocaleString()}</p>
-                                  </div>
-                                </div>
-                                
-                                <div className="space-y-2 border rounded-lg p-4 bg-muted/30">
-                                  <h4 className="text-sm font-medium">Associated Tax Return</h4>
-                                  {task.taxReturn ? (
-                                    <div className="grid gap-2 text-sm">
-                                      <div className="flex justify-between">
-                                        <span className="text-muted-foreground">Entity:</span>
-                                        <span className="font-medium">{task.taxReturn.entityName}</span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                        <span className="text-muted-foreground">Tax Year:</span>
-                                        <span>{task.taxReturn.taxYear}</span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                        <span className="text-muted-foreground">Jurisdiction:</span>
-                                        <span>{task.jurisdiction?.name || "—"}</span>
-                                      </div>
-                                      <div className="pt-2 mt-2 border-t flex justify-end">
-                                        <Button variant="secondary" size="sm" asChild>
-                                          <Link href={`/org/${orgId}/returns/${task.taxReturn.id}`}>
-                                            View Return
-                                          </Link>
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <p className="text-sm text-muted-foreground">No tax return associated.</p>
-                                  )}
-                                </div>
-
-                                {task.substanceForm && (
-                                  <div className="space-y-2 border rounded-lg p-4 bg-muted/30">
-                                    <div className="flex items-center justify-between">
-                                      <h4 className="text-sm font-medium">Substance Form Status</h4>
-                                      {task.substanceForm.isComplete ? (
-                                        <Badge className="bg-green-500/10 text-green-600 border-green-500/20">Complete</Badge>
-                                      ) : (
-                                        <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
-                                          {(task.substanceForm.missingFields as string[])?.length ?? 0} Fields Missing
-                                        </Badge>
-                                      )}
-                                    </div>
-                                    <div className="pt-2 flex justify-end">
-                                      <Button variant="secondary" size="sm" asChild>
-                                        <Link href={`/org/${orgId}/tasks/${task.id}/substance-form`}>
-                                          View Form
-                                        </Link>
-                                      </Button>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {task.status === "pending" && (
-                                  <div className="flex items-center gap-2 p-3 bg-blue-500/10 text-blue-700 rounded-md text-sm border border-blue-500/20">
-                                    <Play className="h-4 w-4" />
-                                    Ready to start processing.
-                                  </div>
-                                )}
-                              </div>
-                              <DialogFooter className="gap-2 sm:gap-0">
-                                {task.status === "in_progress" && (
-                                  <Button className="w-full sm:w-auto" asChild>
-                                    <Link href={`/org/${orgId}/tasks/${task.id}`}>
-                                      <Monitor className="h-4 w-4 mr-2" />
-                                      View Live Stream
-                                    </Link>
-                                  </Button>
-                                )}
-                                {task.status === "pending" && (
-                                  <>
-                                    <Button variant="destructive" className="w-full sm:w-auto sm:mr-auto">
-                                      <Ban className="h-4 w-4 mr-2" />
-                                      Cancel Task
-                                    </Button>
-                                    {task.substanceForm && !task.substanceForm.isComplete ? (
-                                      <Button disabled className="w-full sm:w-auto">
-                                        <AlertCircle className="h-4 w-4 mr-2" />
-                                        Missing fields
-                                      </Button>
-                                    ) : (
-                                      <Button className="w-full sm:w-auto" asChild>
-                                        <Link href={`/org/${orgId}/tasks/${task.id}`}>
-                                          <Play className="h-4 w-4 mr-2" />
-                                          Open & Start
-                                        </Link>
-                                      </Button>
-                                    )}
-                                  </>
-                                )}
-                              </DialogFooter>
-                            </DialogContent>
-                          </Dialog>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Status</TooltipContent>
+                    <DropdownMenuContent align="start" className="w-44">
+                      <DropdownMenuLabel>Status</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {([
+                      ["all", "All statuses"],
+                      ["pending", "Pending"],
+                      ["in_progress", "Running"],
+                      ["completed", "Completed"],
+                      ["failed", "Failed"],
+                      ["cancelled", "Cancelled"],
+                    ] as const).map(([value, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={value}
+                        checked={value === "all" ? !statusFilter : statusFilter === value}
+                        onCheckedChange={() => setStatusFilter(value === "all" ? undefined : value as StatusFilter)}
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </Tooltip>
+                <Tooltip>
+                  <DropdownMenu>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="relative size-8">
+                          <IconGlobe className="h-4 w-4" />
+                          {jurisdictionFilter !== "all" && (
+                            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Jurisdiction</TooltipContent>
+                    <DropdownMenuContent align="start" className="w-44">
+                      <DropdownMenuLabel>Jurisdiction</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {([
+                      ["all", "All jurisdictions"],
+                      ["GG", "Guernsey"],
+                      ["JE", "Jersey"],
+                    ] as const).map(([value, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={value}
+                        checked={jurisdictionFilter === value}
+                        onCheckedChange={() => setJurisdictionFilter(value as JurisdictionFilter)}
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </Tooltip>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedCount > 0 && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleDeleteSelected}
+                  >
+                    <Trash className="mr-2 h-4 w-4" />
+                    Delete ({selectedCount})
+                  </Button>
+                )}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-8"
+                      onClick={handleRefetch}
+                      disabled={isRefetching}
+                    >
+                      <RotateCcw className={`h-4 w-4 ${isRefetching ? "animate-spin" : ""}`} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Refresh tasks</p>
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <DropdownMenu>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="size-8">
+                          <IconLayoutColumns className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Columns</TooltipContent>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {table
+                        .getAllColumns()
+                        .filter(
+                          (column) =>
+                            typeof column.accessorFn !== "undefined" && column.getCanHide()
+                        )
+                        .map((column) => (
+                          <DropdownMenuCheckboxItem
+                            key={column.id}
+                            className="capitalize"
+                            checked={column.getIsVisible()}
+                            onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                          >
+                            {column.id}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </Tooltip>
+              </div>
             </div>
 
-            {data && data.totalPages > 1 && (
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">
-                  Page {data.page} of {data.totalPages}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page <= 1}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))}
-                    disabled={page >= data.totalPages}
-                  >
-                    Next
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
+            <div className="relative flex flex-col gap-4 overflow-auto">
+              <div className="overflow-hidden rounded-lg border">
+                <Table>
+                  <TableHeader className="bg-muted sticky top-0 z-10">
+                    {table.getHeaderGroups().map((headerGroup) => (
+                      <TableRow key={headerGroup.id}>
+                        {headerGroup.headers.map((header) => (
+                          <TableHead key={header.id} colSpan={header.colSpan}>
+                            {header.id === "actions" ? (
+                              <span className="sr-only">Actions</span>
+                            ) : header.isPlaceholder ? null : (
+                              flexRender(
+                                header.column.columnDef.header,
+                                header.getContext()
+                              )
+                            )}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading ? (
+                      Array.from({ length: 5 }).map((_, i) => (
+                        <TableRow key={i}>
+                          <TableCell><Skeleton className="h-4 w-4 mx-auto" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                          <TableCell><Skeleton className="h-5 w-12" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                          <TableCell><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
+                        </TableRow>
+                      ))
+                    ) : table.getRowModel().rows?.length ? (
+                      table.getRowModel().rows.map((row) => {
+                        const task = row.original
+                        return (
+                          <TableRow
+                            key={row.id}
+                            data-state={row.getIsSelected() && "selected"}
+                            className="cursor-pointer"
+                            onClick={() => router.push(`/org/${orgId}/tasks/${task.id}`)}
+                          >
+                            {row.getVisibleCells().map((cell) => {
+                              // Render the actions column with Dialog support
+                              if (cell.column.id === "actions") {
+                                return (
+                                  <TableCell key={cell.id} className="text-right" onClick={(e) => e.stopPropagation()}>
+                                    <Dialog>
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button
+                                            variant="ghost"
+                                            className="data-[state=open]:bg-muted text-muted-foreground flex size-8"
+                                            size="icon"
+                                          >
+                                            <IconDotsVertical />
+                                            <span className="sr-only">Open menu</span>
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="w-40">
+                                          <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                          <DropdownMenuItem asChild>
+                                            <Link href={`/org/${orgId}/tasks/${task.id}`}>
+                                              <Monitor className="mr-2 h-4 w-4" />
+                                              Open Task
+                                            </Link>
+                                          </DropdownMenuItem>
+                                          <DialogTrigger asChild>
+                                            <DropdownMenuItem>
+                                              <ExternalLink className="mr-2 h-4 w-4" />
+                                              View Details
+                                            </DropdownMenuItem>
+                                          </DialogTrigger>
+                                          <DropdownMenuSeparator />
+                                          <DropdownMenuItem
+                                            variant="destructive"
+                                            onClick={() => handleDeleteSingle(task.id)}
+                                          >
+                                            <Trash className="mr-2 h-4 w-4" />
+                                            Delete
+                                          </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+
+                                      <DialogContent className="max-w-2xl">
+                                        <DialogHeader>
+                                          <DialogTitle className="flex items-center gap-2">
+                                            {task.name}
+                                            {getStatusBadge(task.status)}
+                                          </DialogTitle>
+                                          <DialogDescription>
+                                            Task ID: <span className="font-mono text-xs">{task.id}</span>
+                                          </DialogDescription>
+                                        </DialogHeader>
+                                        <div className="grid gap-4 py-4">
+                                          <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-1">
+                                              <h4 className="text-sm font-medium text-muted-foreground">Task Type</h4>
+                                              <p>{getTaskTypeLabel(task.taskType)}</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                              <h4 className="text-sm font-medium text-muted-foreground">Created At</h4>
+                                              <p>{new Date(task.createdAt).toLocaleString()}</p>
+                                            </div>
+                                          </div>
+
+                                          <div className="space-y-2 border rounded-lg p-4 bg-muted/30">
+                                            <h4 className="text-sm font-medium">Associated Tax Return</h4>
+                                            {task.taxReturn ? (
+                                              <div className="grid gap-2 text-sm">
+                                                <div className="flex justify-between">
+                                                  <span className="text-muted-foreground">Entity:</span>
+                                                  <span className="font-medium">{task.taxReturn.entityName}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span className="text-muted-foreground">Tax Year:</span>
+                                                  <span>{task.taxReturn.taxYear}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span className="text-muted-foreground">Jurisdiction:</span>
+                                                  <span>{task.jurisdiction?.name || "\u2014"}</span>
+                                                </div>
+                                                <div className="pt-2 mt-2 border-t flex justify-end">
+                                                  <Button variant="secondary" size="sm" asChild>
+                                                    <Link href={`/org/${orgId}/returns/${task.taxReturn.id}`}>
+                                                      View Return
+                                                    </Link>
+                                                  </Button>
+                                                </div>
+                                              </div>
+                                            ) : (
+                                              <p className="text-sm text-muted-foreground">No tax return associated.</p>
+                                            )}
+                                          </div>
+
+                                          {task.substanceForm && (
+                                            <div className="space-y-2 border rounded-lg p-4 bg-muted/30">
+                                              <div className="flex items-center justify-between">
+                                                <h4 className="text-sm font-medium">Substance Form Status</h4>
+                                                {task.substanceForm.isComplete ? (
+                                                  <span className="inline-flex rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400">
+                                                    Complete
+                                                  </span>
+                                                ) : (
+                                                  <span className="inline-flex rounded-lg border border-amber-500/50 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400">
+                                                    {(task.substanceForm.missingFields as string[])?.length ?? 0} Fields Missing
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="pt-2 flex justify-end">
+                                                <Button variant="secondary" size="sm" asChild>
+                                                  <Link href={`/org/${orgId}/tasks/${task.id}/substance-form`}>
+                                                    View Form
+                                                  </Link>
+                                                </Button>
+                                              </div>
+                                            </div>
+                                          )}
+
+                                          {task.status === "pending" && (
+                                            <div className="flex items-center gap-2 p-3 bg-blue-500/10 text-blue-700 rounded-md text-sm border border-blue-500/20">
+                                              <Play className="h-4 w-4" />
+                                              Ready to start processing.
+                                            </div>
+                                          )}
+                                        </div>
+                                        <DialogFooter className="gap-2 sm:gap-0">
+                                          {(task.status === "in_progress" ||
+                                            task.status === "running" ||
+                                            task.status === "queued" ||
+                                            task.status === "starting" ||
+                                            task.status === "paused") && (
+                                            <Button className="w-full sm:w-auto" asChild>
+                                              <Link href={`/org/${orgId}/tasks/${task.id}`}>
+                                                <Monitor className="h-4 w-4 mr-2" />
+                                                {task.status === "paused" ? "Open Task" : "View Live Stream"}
+                                              </Link>
+                                            </Button>
+                                          )}
+                                          {task.status === "pending" && (
+                                            <>
+                                              <Button variant="destructive" className="w-full sm:w-auto sm:mr-auto">
+                                                <Ban className="h-4 w-4 mr-2" />
+                                                Cancel Task
+                                              </Button>
+                                              {task.substanceForm && !task.substanceForm.isComplete ? (
+                                                <Button disabled className="w-full sm:w-auto">
+                                                  <AlertCircle className="h-4 w-4 mr-2" />
+                                                  Missing fields
+                                                </Button>
+                                              ) : (
+                                                <Button className="w-full sm:w-auto" asChild>
+                                                  <Link href={`/org/${orgId}/tasks/${task.id}`}>
+                                                    <Play className="h-4 w-4 mr-2" />
+                                                    Open & Start
+                                                  </Link>
+                                                </Button>
+                                              )}
+                                            </>
+                                          )}
+                                        </DialogFooter>
+                                      </DialogContent>
+                                    </Dialog>
+                                  </TableCell>
+                                )
+                              }
+                              return (
+                                <TableCell key={cell.id}>
+                                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                </TableCell>
+                              )
+                            })}
+                          </TableRow>
+                        )
+                      })
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={columns.length} className="h-64 text-center text-muted-foreground">
+                          <div className="flex flex-col items-center justify-center">
+                            <Terminal className="h-12 w-12 mb-4 opacity-20" />
+                            <p>No tasks found.</p>
+                            <Button variant="link" asChild className="mt-2">
+                              <Link href={`/org/${orgId}/returns`}>Go to Returns to create a task</Link>
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="flex items-center justify-between px-4">
+                <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
+                  {selectedCount} of{" "}
+                  {data?.total ?? data?.tasks?.length ?? 0} row(s) selected.
+                </div>
+                <div className="flex w-full items-center gap-8 lg:w-fit">
+                  <div className="hidden items-center gap-2 lg:flex">
+                    <Label htmlFor="rows-per-page" className="text-sm font-medium">
+                      Rows per page
+                    </Label>
+                    <Select
+                      value={`${table.getState().pagination.pageSize}`}
+                      onValueChange={(value) => {
+                        table.setPageSize(Number(value))
+                      }}
+                    >
+                      <SelectTrigger size="sm" className="w-20" id="rows-per-page">
+                        <SelectValue placeholder={table.getState().pagination.pageSize} />
+                      </SelectTrigger>
+                      <SelectContent side="top">
+                        {[10, 20, 30, 40, 50].map((size) => (
+                          <SelectItem key={size} value={`${size}`}>
+                            {size}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex w-fit items-center justify-center text-sm font-medium">
+                    Page {(data?.page ?? 1)} of{" "}
+                    {(data?.totalPages ?? 1) || 1}
+                  </div>
+                  <div className="ml-auto flex items-center gap-2 lg:ml-0">
+                    <Button
+                      variant="outline"
+                      className="hidden h-8 w-8 p-0 lg:flex"
+                      onClick={() => table.setPageIndex(0)}
+                      disabled={!table.getCanPreviousPage()}
+                    >
+                      <span className="sr-only">Go to first page</span>
+                      <IconChevronsLeft />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="size-8"
+                      size="icon"
+                      onClick={() => table.previousPage()}
+                      disabled={!table.getCanPreviousPage()}
+                    >
+                      <span className="sr-only">Go to previous page</span>
+                      <IconChevronLeft />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="size-8"
+                      size="icon"
+                      onClick={() => table.nextPage()}
+                      disabled={!table.getCanNextPage()}
+                    >
+                      <span className="sr-only">Go to next page</span>
+                      <IconChevronRight />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="hidden size-8 lg:flex"
+                      size="icon"
+                      onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+                      disabled={!table.getCanNextPage()}
+                    >
+                      <span className="sr-only">Go to last page</span>
+                      <IconChevronsRight />
+                    </Button>
+                  </div>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
         </main>
@@ -564,11 +823,11 @@ export default function TasksPage() {
         <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete {taskToDelete ? "Task" : `${selected.size} Tasks`}?</AlertDialogTitle>
+              <AlertDialogTitle>Delete {taskToDelete ? "Task" : `${selectedCount} Tasks`}?</AlertDialogTitle>
               <AlertDialogDescription>
                 {taskToDelete
                   ? "This action cannot be undone. This will permanently delete the task and all associated data."
-                  : `This action cannot be undone. This will permanently delete ${selected.size} selected tasks and all associated data.`
+                  : `This action cannot be undone. This will permanently delete ${selectedCount} selected tasks and all associated data.`
                 }
               </AlertDialogDescription>
             </AlertDialogHeader>

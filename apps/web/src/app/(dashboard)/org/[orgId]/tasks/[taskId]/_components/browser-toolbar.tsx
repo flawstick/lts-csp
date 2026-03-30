@@ -84,6 +84,27 @@ function JobStatusIcon({ status }: { status: string }) {
   }
 }
 
+function getJobStatusLabel(status: string) {
+  switch (status) {
+    case "queued":
+      return "Queued"
+    case "starting":
+      return "Starting"
+    case "running":
+      return "Running"
+    case "paused":
+      return "Awaiting Input"
+    case "completed":
+      return "Completed"
+    case "failed":
+      return "Failed"
+    case "cancelled":
+      return "Cancelled"
+    default:
+      return "Pending"
+  }
+}
+
 export function BrowserToolbar({
   jurisdictionName,
   liveUrl,
@@ -109,7 +130,7 @@ export function BrowserToolbar({
   isDeletePending,
 }: BrowserToolbarProps) {
   return (
-    <div className="flex shrink-0 items-center justify-between border-b bg-muted/20 px-3 py-1.5">
+    <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
       <div className="flex items-center gap-2">
         <Monitor className="size-3.5 text-muted-foreground" />
         <span className="text-xs font-medium text-muted-foreground">
@@ -163,7 +184,7 @@ export function BrowserToolbar({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium">Run #{job.jobNumber}</span>
-                      <span className="text-[10px] capitalize text-muted-foreground">{job.status}</span>
+                      <span className="text-[10px] text-muted-foreground">{getJobStatusLabel(job.status)}</span>
                     </div>
                     <span className="text-[10px] text-muted-foreground">
                       {new Date(job.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}

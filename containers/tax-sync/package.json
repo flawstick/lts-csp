@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node --import tsx src/index.ts",
+    "dev:server": "bun --watch src/server.ts",
+    "start:server": "bun src/server.ts",
     "docker:build": "docker build -t repo-tax-sync -f Dockerfile ../.."
   },
   "dependencies": {

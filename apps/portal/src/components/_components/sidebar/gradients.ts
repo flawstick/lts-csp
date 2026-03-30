@@ -1,5 +1,5 @@
 const JURISDICTION_GRADIENTS: Record<string, [string, string]> = {
-  GG: ["#22d3ee", "#2563eb"],
+  GG: ["#4ade80", "#16a34a"],
   JE: ["#fb7185", "#f59e0b"],
   IM: ["#34d399", "#14b8a6"],
 };

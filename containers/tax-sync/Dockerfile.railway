@@ -1,0 +1,18 @@
+FROM oven/bun:1 AS base
+
+WORKDIR /app
+
+COPY package.json bun.lock turbo.json ./
+COPY packages/database/package.json packages/database/package.json
+COPY containers/tax-sync/package.json containers/tax-sync/package.json
+
+RUN bun install --frozen-lockfile
+
+COPY packages/database ./packages/database
+COPY containers/tax-sync ./containers/tax-sync
+
+ENV NODE_ENV=production
+
+WORKDIR /app/containers/tax-sync
+
+CMD ["bun", "run", "start:server"]

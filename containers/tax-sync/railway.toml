@@ -1,0 +1,17 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "containers/tax-sync/Dockerfile.railway"
+watchPatterns = [
+  "containers/tax-sync/**",
+  "packages/database/**",
+  "package.json",
+  "bun.lock",
+]
+
+[deploy]
+numReplicas = 1
+sleepApplication = false
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

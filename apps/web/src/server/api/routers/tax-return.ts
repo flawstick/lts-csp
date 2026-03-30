@@ -25,7 +25,8 @@ import {
   GetLogEventsCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
 import * as cheerio from "cheerio";
-import { launchTaxSync, launchBrowserTask } from "@/lib/ecs";
+import { launchBrowserTask } from "@/lib/ecs";
+import { triggerTaxSync } from "@/lib/tax-sync-launcher";
 import {
   jerseyCompanyReturnFormSchema,
   sanitizeJerseyCompanyReturnData,
@@ -73,6 +74,29 @@ function isActiveBrowserJobStatus(status: string) {
     status === "running" ||
     status === "paused"
   );
+}
+
+function getTaskDisplayStatus(
+  taskStatus: string,
+  latestJobStatus?: string | null,
+) {
+  if (!latestJobStatus) {
+    return taskStatus;
+  }
+
+  if (
+    latestJobStatus === "queued" ||
+    latestJobStatus === "starting" ||
+    latestJobStatus === "running" ||
+    latestJobStatus === "paused" ||
+    latestJobStatus === "completed" ||
+    latestJobStatus === "failed" ||
+    latestJobStatus === "cancelled"
+  ) {
+    return latestJobStatus;
+  }
+
+  return taskStatus;
 }
 
 function getBrowserJobStaleReason(job: {
@@ -1091,7 +1115,7 @@ export const taxReturnRouter = createTRPCRouter({
 
       if (!job) throw new Error("Failed to create job");
 
-      const result = await launchTaxSync({
+      const result = await triggerTaxSync({
         jobId: job.id,
         orgId: org.id,
         jurisdictionCode: jurisdiction.code,
@@ -1099,16 +1123,17 @@ export const taxReturnRouter = createTRPCRouter({
         portalPassword: credentials?.password,
       });
 
-      // Extract log stream from task ARN (task ID is at the end)
-      const taskId = result.taskArn?.split("/").pop();
+      const isEcsLaunch = result.mode === "ecs";
+      const taskId = isEcsLaunch ? result.taskArn?.split("/").pop() : null;
       const logStream = taskId ? `ecs/lts-tax-sync/${taskId}` : null;
 
       // Update job with ECS info
       await ctx.db
         .update(taxSyncJobs)
         .set({
-          ecsTaskArn: result.taskArn,
-          cloudwatchLogStream: logStream,
+          ecsTaskArn: isEcsLaunch ? result.taskArn ?? null : null,
+          cloudwatchLogGroup: isEcsLaunch ? "/ecs/lts-tax-sync" : null,
+          cloudwatchLogStream: isEcsLaunch ? logStream : null,
           status: "running",
           startedAt: new Date(),
         })
@@ -1118,6 +1143,7 @@ export const taxReturnRouter = createTRPCRouter({
         jobId: job.id,
         taskArn: result.taskArn,
         jurisdictionCode: jurisdiction.code,
+        mode: result.mode,
       };
     }),
 
@@ -1291,8 +1317,40 @@ export const taxReturnRouter = createTRPCRouter({
       const total = Number(countResult[0]?.count || 0);
       const totalPages = Math.ceil(total / pageSize);
 
+      const taskIds = taskList.map((task) => task.id);
+      const latestJobsByTaskId = new Map<string, string>();
+
+      if (taskIds.length > 0) {
+        const pageJobs = await ctx.db.query.jobs.findMany({
+          where: inArray(jobs.taskId, taskIds),
+          orderBy: desc(jobs.createdAt),
+        });
+
+        for (const job of pageJobs) {
+          if (latestJobsByTaskId.has(job.taskId)) {
+            continue;
+          }
+
+          const relatedTask = taskList.find((task) => task.id === job.taskId);
+          const normalizedJob = await maybeMarkBrowserJobStale(ctx.db, job, {
+            taskId: job.taskId,
+            taxReturnId: relatedTask?.taxReturn?.id ?? null,
+          });
+
+          latestJobsByTaskId.set(job.taskId, normalizedJob.status);
+        }
+      }
+
+      const normalizedTasks = taskList.map((task) => ({
+        ...task,
+        status: getTaskDisplayStatus(
+          task.status,
+          latestJobsByTaskId.get(task.id),
+        ),
+      }));
+
       return {
-        tasks: taskList,
+        tasks: normalizedTasks,
         total,
         page,
         pageSize,

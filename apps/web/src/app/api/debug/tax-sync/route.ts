@@ -2,7 +2,7 @@ import { CloudWatchLogsClient, GetLogEventsCommand } from "@aws-sdk/client-cloud
 import { db, taxSyncJobs, organisations, jurisdictions } from "@repo/database"
 import { eq, desc } from "drizzle-orm"
 import { NextResponse } from "next/server"
-import { launchTaxSync } from "@/lib/ecs"
+import { triggerTaxSync } from "@/lib/tax-sync-launcher"
 
 export async function POST(_request: Request) {
   try {
@@ -47,20 +47,31 @@ export async function POST(_request: Request) {
     let ecsResult = null
     let logStream: string | null = null
     try {
-      ecsResult = await launchTaxSync({
+      ecsResult = await triggerTaxSync({
         jobId: job.id,
         orgId: org.id,
         jurisdictionCode: jurisdiction.code,
       })
 
-      if (ecsResult.taskArn) {
+      if (ecsResult.mode === "ecs" && ecsResult.taskArn) {
         logStream = `ecs/lts-tax-sync/${ecsResult.taskArn.split("/").pop()}`
         await db
           .update(taxSyncJobs)
           .set({
             status: "running",
             ecsTaskArn: ecsResult.taskArn,
+            cloudwatchLogGroup: "/ecs/lts-tax-sync",
             cloudwatchLogStream: logStream,
+          })
+          .where(eq(taxSyncJobs.id, job.id))
+      } else {
+        await db
+          .update(taxSyncJobs)
+          .set({
+            status: "running",
+            ecsTaskArn: null,
+            cloudwatchLogGroup: null,
+            cloudwatchLogStream: null,
           })
           .where(eq(taxSyncJobs.id, job.id))
       }
@@ -82,12 +93,17 @@ export async function POST(_request: Request) {
         id: job.id,
         status: "running",
         ecsTaskArn: ecsResult?.taskArn,
-        cloudwatchLogGroup: job.cloudwatchLogGroup,
+        mode: ecsResult?.mode,
+        cloudwatchLogGroup:
+          ecsResult?.mode === "ecs" ? "/ecs/lts-tax-sync" : null,
         cloudwatchLogStream: logStream,
       },
       organisation: { id: org.id, name: org.name },
       jurisdiction: { id: jurisdiction.id, code: jurisdiction.code, name: jurisdiction.name },
-      message: "Tax sync job launched on ECS",
+      message:
+        ecsResult?.mode === "railway"
+          ? "Tax sync job sent to Railway handler"
+          : "Tax sync job launched on ECS",
     })
   } catch (error) {
     console.error("Tax sync error:", error)
