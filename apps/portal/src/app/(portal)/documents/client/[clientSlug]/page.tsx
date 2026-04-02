@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   ChevronRight,
-  FileText,
   Sparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -157,7 +156,6 @@ export default function ClientDocumentsPage() {
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {filteredReturns.map((returnFolder) => {
             const href = getReturnHref(client.slug, returnFolder.id);
-            const filePreview = returnFolder.files.slice(0, 2);
             const folderItems = buildFolderPreviewItems(
               returnFolder.files.map((file) => file.name),
             );
@@ -171,60 +169,39 @@ export default function ClientDocumentsPage() {
                 onFocus={() => router.prefetch(href)}
                 className="portal-card group rounded-xl border border-border/60 p-4 transition hover:bg-muted/20"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-border/60 bg-background/85 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        {returnFolder.taxYear}
-                      </span>
-                      <span className="rounded-full border border-border/60 bg-background/85 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        {returnFolder.jurisdictionCode}
-                      </span>
-                    </div>
-                    <p className="mt-2.5 text-sm font-semibold leading-tight [overflow-wrap:anywhere]">
-                      {returnFolder.name}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-                      {returnFolder.jurisdictionName}
-                    </p>
-                  </div>
-                  <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5" />
-                </div>
-
-                <div className="mt-3">
-                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    <FileText className="size-3.5" />
-                    Files
-                  </div>
-                  {filePreview.length > 0 ? (
-                    <div className="mt-2 space-y-2">
-                      {filePreview.map((file) => (
-                        <div
-                          key={`${returnFolder.id}-${file.url}`}
-                          className="truncate rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
-                        >
-                          {file.name}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      No files uploaded yet.
-                    </p>
-                  )}
-                </div>
-
-                <div className="mt-4 flex items-end justify-between gap-4 border-t border-border/50 pt-3">
-                  <div className="min-w-0 text-xs text-muted-foreground">
-                    <p>{returnFolder.files.length} file{returnFolder.files.length === 1 ? "" : "s"} attached</p>
-                    <p className="mt-1 truncate">Updated {formatDateTime(returnFolder.updatedAt)}</p>
-                  </div>
+                <div className="flex items-start gap-3">
                   <Folder
                     color={getFolderColor(returnFolder.id)}
-                    size={0.62}
+                    size={0.54}
                     items={folderItems}
                     className="shrink-0"
                   />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-lg font-semibold leading-none">
+                          {returnFolder.taxYear}
+                        </p>
+                        <p className="mt-1 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                          {returnFolder.jurisdictionCode}
+                        </p>
+                      </div>
+                      <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5" />
+                    </div>
+
+                    <p className="mt-2 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                      {returnFolder.jurisdictionName}
+                    </p>
+
+                    <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                      <span className="rounded-full border border-border/60 px-2 py-1 text-muted-foreground">
+                        {returnFolder.files.length} file{returnFolder.files.length === 1 ? "" : "s"}
+                      </span>
+                      <span className="rounded-full border border-border/60 px-2 py-1 text-muted-foreground">
+                        Updated {formatDateTime(returnFolder.updatedAt)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </Link>
             );
