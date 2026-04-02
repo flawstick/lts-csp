@@ -69,6 +69,17 @@ export type SubstanceAutofillPreviewField = {
   value: string;
 };
 
+type SubstanceAutofillSourceInput =
+  | Partial<SubstanceForm>
+  | SubstanceAutofillValues
+  | null
+  | undefined;
+
+type SubstanceAutofillMergeSource = {
+  taxYear: number;
+  values: SubstanceAutofillSourceInput;
+};
+
 export function normalizeSubstanceAutofillEntityName(
   value: string | null | undefined,
 ): string {
@@ -146,4 +157,48 @@ export function getSubstanceAutofillPreviewFields(
   }
 
   return preview;
+}
+
+export function mergeSubstanceAutofillValues(
+  sources: SubstanceAutofillMergeSource[],
+): SubstanceAutofillValues {
+  const merged: SubstanceAutofillValues = {};
+  const sortedSources = [...sources].sort((a, b) => b.taxYear - a.taxYear);
+
+  for (const source of sortedSources) {
+    const picked = pickSubstanceAutofillValues(source.values);
+
+    for (const field of SUBSTANCE_AUTOFILL_FIELDS) {
+      if (field in merged) {
+        continue;
+      }
+
+      const value = picked[field];
+      if (normalizePreviewValue(value) === null) {
+        continue;
+      }
+
+      merged[field] = value;
+    }
+  }
+
+  return merged;
+}
+
+export function getMergedSubstanceAutofillPreviewFields(
+  sources: SubstanceAutofillMergeSource[],
+): SubstanceAutofillPreviewField[] {
+  return getSubstanceAutofillPreviewFields(mergeSubstanceAutofillValues(sources));
+}
+
+export function getLatestSubstanceAutofillTaxYear(
+  sources: SubstanceAutofillMergeSource[],
+): number | null {
+  for (const source of [...sources].sort((a, b) => b.taxYear - a.taxYear)) {
+    if (Object.keys(pickSubstanceAutofillValues(source.values)).length > 0) {
+      return source.taxYear;
+    }
+  }
+
+  return null;
 }

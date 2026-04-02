@@ -128,7 +128,7 @@ export default function ReturnDocumentsPage() {
             )}
             {returnFolder?.autofillFieldCount ? (
               <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">
-                Autofill from {returnFolder.autofillSourceTaxYear} is available for {returnFolder.autofillFieldCount} field{returnFolder.autofillFieldCount === 1 ? "" : "s"} when the GRS form is initialized.
+                Autofill is available for {returnFolder.autofillFieldCount} field{returnFolder.autofillFieldCount === 1 ? "" : "s"} when the GRS form is initialized, using the latest available values from prior company returns.
               </p>
             ) : null}
           </div>

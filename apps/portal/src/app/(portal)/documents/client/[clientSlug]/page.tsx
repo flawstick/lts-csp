@@ -117,6 +117,42 @@ export default function ClientDocumentsPage() {
         </section>
       ) : null}
 
+      {!isLoading && !error && client ? (
+        <section className="portal-card p-4">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            <Sparkles className="size-3.5" />
+            Company autofill
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Autofill is combined across this company’s prior returns, with later
+            tax years taking priority for each field.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {client.autofillFields.length > 0 ? (
+              <>
+                {client.autofillFields.slice(0, 8).map((field) => (
+                  <span
+                    key={field.key}
+                    className="inline-flex rounded-full border border-blue-500/20 bg-blue-500/[0.06] px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:text-blue-300"
+                  >
+                    {field.label}
+                  </span>
+                ))}
+                {client.autofillFields.length > 8 ? (
+                  <span className="inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                    +{client.autofillFields.length - 8} more
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">
+                No prior-return autofill is available for this company yet.
+              </span>
+            )}
+          </div>
+        </section>
+      ) : null}
+
       {!isLoading && !error && client && filteredReturns.length > 0 ? (
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {filteredReturns.map((returnFolder) => {
@@ -144,11 +180,6 @@ export default function ClientDocumentsPage() {
                       <span className="rounded-full border border-border/60 bg-background/85 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                         {returnFolder.jurisdictionCode}
                       </span>
-                      {returnFolder.autofillFieldCount > 0 ? (
-                        <span className="rounded-full border border-blue-500/20 bg-blue-500/[0.06] px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:text-blue-300">
-                          {returnFolder.autofillFieldCount} autofill
-                        </span>
-                      ) : null}
                     </div>
                     <p className="mt-2.5 text-sm font-semibold leading-tight [overflow-wrap:anywhere]">
                       {returnFolder.name}
@@ -158,41 +189,6 @@ export default function ClientDocumentsPage() {
                     </p>
                   </div>
                   <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5" />
-                </div>
-
-                <div className="mt-3">
-                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    <Sparkles className="size-3.5" />
-                    Autofill
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {returnFolder.autofillFields.length > 0 ? (
-                      <>
-                        {returnFolder.autofillFields.slice(0, 3).map((field) => (
-                          <span
-                            key={field.key}
-                            className="inline-flex rounded-full border border-blue-500/20 bg-blue-500/[0.06] px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:text-blue-300"
-                          >
-                            {field.label}
-                          </span>
-                        ))}
-                        {returnFolder.autofillFields.length > 3 ? (
-                          <span className="inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                            +{returnFolder.autofillFields.length - 3} more
-                          </span>
-                        ) : null}
-                        {returnFolder.autofillSourceTaxYear ? (
-                          <span className="inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                            From {returnFolder.autofillSourceTaxYear}
-                          </span>
-                        ) : null}
-                      </>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        No autofill available for this return.
-                      </span>
-                    )}
-                  </div>
                 </div>
 
                 <div className="mt-3">

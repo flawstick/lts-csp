@@ -1,7 +1,10 @@
 import { useMemo, type ReactNode } from "react";
 
 import { api } from "@/trpc/react";
-import type { SubstanceAutofillPreviewField } from "@repo/database/substance-autofill";
+import {
+  SUBSTANCE_AUTOFILL_FIELDS,
+  type SubstanceAutofillPreviewField,
+} from "@repo/database/substance-autofill";
 
 type ListMyReturnsRow = {
   entityName: string;
@@ -43,6 +46,8 @@ export type ReturnFolder = {
 
 export type ClientFolder = {
   autofillReadyCount: number;
+  autofillFieldCount: number;
+  autofillFields: SubstanceAutofillPreviewField[];
   id: string;
   name: string;
   orgId: string;
@@ -53,6 +58,9 @@ export type ClientFolder = {
 };
 
 const FOLDER_COLORS = ["#0EA5E9", "#F97316", "#0EA05A", "#6366F1", "#EC4899", "#14B8A6", "#F43F5E"];
+const AUTOFILL_FIELD_ORDER = new Map(
+  SUBSTANCE_AUTOFILL_FIELDS.map((field, index) => [field, index]),
+);
 
 function normalizePathnamePart(value: string) {
   return value
@@ -165,6 +173,8 @@ function buildClientFolders(rows: ListMyReturnsRow[]): ClientFolder[] {
         returns: [returnFolder],
         totalFiles: files.length,
         autofillReadyCount: returnFolder.autofillFieldCount > 0 ? 1 : 0,
+        autofillFieldCount: 0,
+        autofillFields: [],
         slug: createClientSlug(row.orgId, clientName),
       });
     } else {
@@ -177,14 +187,39 @@ function buildClientFolders(rows: ListMyReturnsRow[]): ClientFolder[] {
   }
 
   return Array.from(grouped.values())
-    .map((client) => ({
-      ...client,
-      returns: [...client.returns].sort((a, b) => {
+    .map((client) => {
+      const sortedReturns = [...client.returns].sort((a, b) => {
         const yearDiff = b.taxYear - a.taxYear;
         if (yearDiff !== 0) return yearDiff;
         return toTimestamp(b.updatedAt) - toTimestamp(a.updatedAt);
-      }),
-    }))
+      });
+
+      const combinedAutofillFields = new Map<
+        SubstanceAutofillPreviewField["key"],
+        SubstanceAutofillPreviewField
+      >();
+
+      for (const returnFolder of sortedReturns) {
+        for (const field of returnFolder.autofillFields) {
+          if (!combinedAutofillFields.has(field.key)) {
+            combinedAutofillFields.set(field.key, field);
+          }
+        }
+      }
+
+      const autofillFields = Array.from(combinedAutofillFields.values()).sort(
+        (a, b) =>
+          (AUTOFILL_FIELD_ORDER.get(a.key) ?? Number.MAX_SAFE_INTEGER) -
+          (AUTOFILL_FIELD_ORDER.get(b.key) ?? Number.MAX_SAFE_INTEGER),
+      );
+
+      return {
+        ...client,
+        returns: sortedReturns,
+        autofillFields,
+        autofillFieldCount: autofillFields.length,
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

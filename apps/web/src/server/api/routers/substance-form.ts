@@ -3,6 +3,7 @@ import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
 import type { Database } from "@repo/database";
 import { organisations, substanceForms, taxReturns } from "@repo/database";
 import {
+  mergeSubstanceAutofillValues,
   normalizeSubstanceAutofillEntityName,
   pickSubstanceAutofillValues,
   type SubstanceAutofillValues,
@@ -276,6 +277,11 @@ async function findPreviousSubstanceAutofillSource(
     taxReturn.entityName,
   );
 
+  const matchingSources: Array<{
+    taxYear: number;
+    values: typeof candidates[number]["substanceForm"];
+  }> = [];
+
   for (const candidate of candidates) {
     if (candidate.id === taxReturn.id) {
       continue;
@@ -299,10 +305,14 @@ async function findPreviousSubstanceAutofillSource(
       continue;
     }
 
-    return candidate.substanceForm;
+    matchingSources.push({
+      taxYear: candidate.taxYear,
+      values: candidate.substanceForm,
+    });
   }
 
-  return null;
+  const merged = mergeSubstanceAutofillValues(matchingSources);
+  return Object.keys(merged).length > 0 ? merged : null;
 }
 
 function buildInitializedSubstanceFormValues(input: {

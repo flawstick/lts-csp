@@ -68,13 +68,7 @@ function ClientViewToggle({
 }
 
 function collectAutofillLabels(client: ClientFolder) {
-  return Array.from(
-    new Set(
-      client.returns.flatMap((returnFolder) =>
-        returnFolder.autofillFields.map((field) => field.label),
-      ),
-    ),
-  );
+  return client.autofillFields.map((field) => field.label);
 }
 
 function getClientMonogram(name: string) {
@@ -219,9 +213,9 @@ export default function DocumentsPage() {
                     <span className="rounded-full border border-border/60 px-2 py-1 text-muted-foreground">
                       {client.totalFiles} files
                     </span>
-                    {client.autofillReadyCount > 0 ? (
+                    {client.autofillFieldCount > 0 ? (
                       <span className="rounded-full border border-blue-500/20 bg-blue-500/[0.06] px-2 py-1 text-blue-700 dark:text-blue-300">
-                        {client.autofillReadyCount} autofill-ready
+                        {client.autofillFieldCount} autofill field{client.autofillFieldCount === 1 ? "" : "s"}
                       </span>
                     ) : null}
                   </div>

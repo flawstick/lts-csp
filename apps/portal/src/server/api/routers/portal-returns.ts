@@ -24,7 +24,9 @@ import {
 } from "@repo/database";
 import {
   buildSubstanceAutofillGroupKey,
-  getSubstanceAutofillPreviewFields,
+  getLatestSubstanceAutofillTaxYear,
+  getMergedSubstanceAutofillPreviewFields,
+  mergeSubstanceAutofillValues,
   normalizeSubstanceAutofillEntityName,
   pickSubstanceAutofillValues,
   type SubstanceAutofillPreviewField,
@@ -310,6 +312,11 @@ async function findPreviousSubstanceAutofillSource(
     taxReturn.entityName,
   );
 
+  const matchingSources: Array<{
+    taxYear: number;
+    values: typeof candidates[number]["substanceForm"];
+  }> = [];
+
   for (const candidate of candidates) {
     if (candidate.id === taxReturn.id) {
       continue;
@@ -333,10 +340,14 @@ async function findPreviousSubstanceAutofillSource(
       continue;
     }
 
-    return candidate.substanceForm;
+    matchingSources.push({
+      taxYear: candidate.taxYear,
+      values: candidate.substanceForm,
+    });
   }
 
-  return null;
+  const merged = mergeSubstanceAutofillValues(matchingSources);
+  return Object.keys(merged).length > 0 ? merged : null;
 }
 
 function buildInitializedSubstanceFormValues(input: {
@@ -965,7 +976,7 @@ export const portalReturnsRouter = createTRPCRouter({
       Array<{
         returnId: string;
         taxYear: number;
-        previewFields: SubstanceAutofillPreviewField[];
+        values: typeof autofillCandidates[number]["substanceForm"];
       }>
     >();
 
@@ -974,11 +985,10 @@ export const portalReturnsRouter = createTRPCRouter({
         continue;
       }
 
-      const previewFields = getSubstanceAutofillPreviewFields(
-        candidate.substanceForm,
-      );
-
-      if (!previewFields.length) {
+      if (
+        Object.keys(pickSubstanceAutofillValues(candidate.substanceForm)).length ===
+        0
+      ) {
         continue;
       }
 
@@ -991,7 +1001,7 @@ export const portalReturnsRouter = createTRPCRouter({
       existing.push({
         returnId: candidate.id,
         taxYear: candidate.taxYear,
-        previewFields,
+        values: candidate.substanceForm,
       });
       groupedAutofillSources.set(key, existing);
     }
@@ -1016,16 +1026,18 @@ export const portalReturnsRouter = createTRPCRouter({
         jurisdictionId: row.jurisdictionId,
         entityName: row.entityName,
       });
-      const source = groupedAutofillSources
-        .get(key)
-        ?.find((candidate) => candidate.taxYear < row.taxYear);
+      const priorSources =
+        groupedAutofillSources
+          .get(key)
+          ?.filter((candidate) => candidate.taxYear < row.taxYear) ?? [];
+      const previewFields = getMergedSubstanceAutofillPreviewFields(priorSources);
 
       return {
         ...row,
-        autofillSourceReturnId: source?.returnId ?? null,
-        autofillSourceTaxYear: source?.taxYear ?? null,
-        autofillFields: source?.previewFields ?? [],
-        autofillFieldCount: source?.previewFields.length ?? 0,
+        autofillSourceReturnId: priorSources[0]?.returnId ?? null,
+        autofillSourceTaxYear: getLatestSubstanceAutofillTaxYear(priorSources),
+        autofillFields: previewFields,
+        autofillFieldCount: previewFields.length,
       };
     });
   }),
