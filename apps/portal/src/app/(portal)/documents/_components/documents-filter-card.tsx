@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { ChevronDown, Search, SlidersHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ type FilterOption = {
 };
 
 type DocumentsFilterCardProps = {
+  actions?: ReactNode;
   filterLabel: string;
   filterOptions: FilterOption[];
   filterValue: string;
@@ -32,6 +34,7 @@ type DocumentsFilterCardProps = {
 };
 
 export function DocumentsFilterCard({
+  actions,
   filterLabel,
   filterOptions,
   filterValue,
@@ -108,6 +111,7 @@ export function DocumentsFilterCard({
             {resultLabel}
           </span>
         ) : null}
+        {actions}
     </div>
     </section>
   );
