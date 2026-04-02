@@ -4,15 +4,17 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   ChevronRight,
-  Clock3,
   FileText,
   Sparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import Folder from "@/components/Folder";
 import { DocumentsBackLink } from "../../_components/documents-back-link";
 import {
+  buildFolderPreviewItems,
   formatDateTime,
+  getFolderColor,
   getReturnHref,
   useDocumentsTree,
 } from "../../_components/documents-tree";
@@ -120,6 +122,9 @@ export default function ClientDocumentsPage() {
           {filteredReturns.map((returnFolder) => {
             const href = getReturnHref(client.slug, returnFolder.id);
             const filePreview = returnFolder.files.slice(0, 2);
+            const folderItems = buildFolderPreviewItems(
+              returnFolder.files.map((file) => file.name),
+            );
 
             return (
               <Link
@@ -155,53 +160,76 @@ export default function ClientDocumentsPage() {
                   <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5" />
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="inline-flex items-center gap-1 rounded-md border bg-background/80 px-2 py-1">
-                    <FileText className="size-3.5" />
-                    {returnFolder.files.length} file{returnFolder.files.length === 1 ? "" : "s"}
-                  </span>
-                  <span className="inline-flex items-center gap-1 rounded-md border bg-background/80 px-2 py-1 text-muted-foreground">
-                    <Clock3 className="size-3.5" />
-                    Updated {formatDateTime(returnFolder.updatedAt)}
-                  </span>
+                <div className="mt-3">
+                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    <Sparkles className="size-3.5" />
+                    Autofill
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {returnFolder.autofillFields.length > 0 ? (
+                      <>
+                        {returnFolder.autofillFields.slice(0, 3).map((field) => (
+                          <span
+                            key={field.key}
+                            className="inline-flex rounded-full border border-blue-500/20 bg-blue-500/[0.06] px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:text-blue-300"
+                          >
+                            {field.label}
+                          </span>
+                        ))}
+                        {returnFolder.autofillFields.length > 3 ? (
+                          <span className="inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                            +{returnFolder.autofillFields.length - 3} more
+                          </span>
+                        ) : null}
+                        {returnFolder.autofillSourceTaxYear ? (
+                          <span className="inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                            From {returnFolder.autofillSourceTaxYear}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        No autofill available for this return.
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                {filePreview.length > 0 ? (
-                  <div className="mt-3 space-y-2">
-                    {filePreview.map((file) => (
-                      <div
-                        key={`${returnFolder.id}-${file.url}`}
-                        className="truncate rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
-                      >
-                        {file.name}
-                      </div>
-                    ))}
+                <div className="mt-3">
+                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    <FileText className="size-3.5" />
+                    Files
                   </div>
-                ) : null}
-
-                {returnFolder.autofillFields.length > 0 ? (
-                  <div className="mt-3">
-                    <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                      <Sparkles className="size-3.5" />
-                      Autofill from {returnFolder.autofillSourceTaxYear}
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {returnFolder.autofillFields.slice(0, 3).map((field) => (
-                        <span
-                          key={field.key}
-                          className="inline-flex rounded-full border border-blue-500/20 bg-blue-500/[0.06] px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:text-blue-300"
+                  {filePreview.length > 0 ? (
+                    <div className="mt-2 space-y-2">
+                      {filePreview.map((file) => (
+                        <div
+                          key={`${returnFolder.id}-${file.url}`}
+                          className="truncate rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
                         >
-                          {field.label}
-                        </span>
+                          {file.name}
+                        </div>
                       ))}
-                      {returnFolder.autofillFields.length > 3 ? (
-                        <span className="inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                          +{returnFolder.autofillFields.length - 3} more
-                        </span>
-                      ) : null}
                     </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      No files uploaded yet.
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-4 flex items-end justify-between gap-4 border-t border-border/50 pt-3">
+                  <div className="min-w-0 text-xs text-muted-foreground">
+                    <p>{returnFolder.files.length} file{returnFolder.files.length === 1 ? "" : "s"} attached</p>
+                    <p className="mt-1 truncate">Updated {formatDateTime(returnFolder.updatedAt)}</p>
                   </div>
-                ) : null}
+                  <Folder
+                    color={getFolderColor(returnFolder.id)}
+                    size={0.62}
+                    items={folderItems}
+                    className="shrink-0"
+                  />
+                </div>
               </Link>
             );
           })}
