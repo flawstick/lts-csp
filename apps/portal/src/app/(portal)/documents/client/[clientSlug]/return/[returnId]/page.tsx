@@ -113,7 +113,7 @@ export default function ReturnDocumentsPage() {
         <div className="space-y-2">
           <DocumentsBackLink
             href={client ? getClientHref(client.slug) : "/documents"}
-            label="Back to return folders"
+            label="Back to client returns"
           />
           <div>
             <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">
@@ -156,7 +156,7 @@ export default function ReturnDocumentsPage() {
 
       {!isLoading && !error && !returnFolder ? (
         <section className="portal-card p-10 text-center text-sm text-muted-foreground">
-          Return folder not found.
+          Return not found.
         </section>
       ) : null}
 

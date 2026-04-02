@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileSpreadsheet, FolderOpen, Search, Sparkles } from "lucide-react";
+import { Building2, FileSpreadsheet, Search, Sparkles } from "lucide-react";
 
 import { PORTAL_ASK_AI_OPEN_EVENT, PORTAL_COMMAND_OPEN_EVENT } from "@/lib/portal-command";
 import type { PortalNavItem } from "@/lib/portal-navigation";
@@ -153,7 +153,7 @@ export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuP
     () => (debouncedQuery.length > 0 ? searchedReturns ?? [] : []),
     [debouncedQuery.length, searchedReturns],
   );
-  const folderSearchResults = useMemo(() => {
+  const clientSearchResults = useMemo(() => {
     if (debouncedQuery.length === 0) return [];
 
     const grouped = new Map<string, { id: string; name: string; orgName: string; slug: string; matchCount: number }>();
@@ -183,7 +183,7 @@ export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuP
     debouncedQuery.length > 0 &&
     !isSearchingReturns &&
     returnSearchResults.length === 0 &&
-    folderSearchResults.length === 0;
+    clientSearchResults.length === 0;
 
   return (
     <>
@@ -288,19 +288,19 @@ export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuP
                 ))}
               </CommandGroup>
 
-              {folderSearchResults.length ? (
+              {clientSearchResults.length ? (
                 <>
                   <CommandSeparator />
                   <CommandGroup heading="Clients">
-                    {folderSearchResults.map((folder) => (
+                    {clientSearchResults.map((client) => (
                       <CommandItem
-                        key={folder.id}
-                        value={`${folder.name} ${folder.orgName} client returns files`}
-                        onSelect={() => navigateTo(`/documents/client/${folder.slug}`)}
+                        key={client.id}
+                        value={`${client.name} ${client.orgName} client returns files`}
+                        onSelect={() => navigateTo(`/documents/client/${client.slug}`)}
                       >
-                        <FolderOpen className="size-4" />
-                        <span className="truncate">{folder.name}</span>
-                        <CommandShortcut>{folder.matchCount} returns</CommandShortcut>
+                        <Building2 className="size-4" />
+                        <span className="truncate">{client.name}</span>
+                        <CommandShortcut>{client.matchCount} returns</CommandShortcut>
                       </CommandItem>
                     ))}
                   </CommandGroup>

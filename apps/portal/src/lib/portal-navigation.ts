@@ -1,8 +1,8 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Building2,
   FileText,
   FileSpreadsheet,
-  FolderOpen,
   LayoutDashboard,
   Search,
   Settings,
@@ -18,7 +18,7 @@ export type PortalNavKey =
   | "documents"
   | "team";
 
-type PortalNavIconKey = "search" | "dashboard" | "tasks" | "documents" | "teams";
+type PortalNavIconKey = "search" | "dashboard" | "tasks" | "documents" | "teams" | "company";
 
 export type PortalNavItem = {
   key: PortalNavKey;
@@ -115,8 +115,8 @@ function buildBaseNavItems(linkOrgId: string | null): Omit<PortalNavItem, "isAct
       key: "documents",
       title: "Clients",
       href: "/documents",
-      icon: FolderOpen,
-      iconKey: "documents",
+      icon: Building2,
+      iconKey: "company",
     },
     {
       key: "team",
@@ -231,7 +231,7 @@ export function buildPortalNavigationModel({
         breadcrumbs.push({
           key: `documents-client-${clientSegment}`,
           title: titleFromClientSlug(clientSegment),
-          icon: FolderOpen,
+          icon: Building2,
           href: clientPath,
           isCurrent: false,
         });
