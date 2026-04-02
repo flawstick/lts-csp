@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
+import type { Database } from "@repo/database";
 import { organisations, substanceForms, taxReturns } from "@repo/database";
+import {
+  normalizeSubstanceAutofillEntityName,
+  pickSubstanceAutofillValues,
+  type SubstanceAutofillValues,
+} from "@repo/database/substance-autofill";
 import { eq } from "drizzle-orm";
 import { createGateway } from "@ai-sdk/gateway";
 import { generateObject } from "ai";
@@ -51,6 +57,8 @@ type ExtractionContextSource =
       economicClassificationCode?: string | null;
       cigaPerformed?: string | null;
       cigaDetails?: string | null;
+      activityGrossIncome?: string | null;
+      adequacyExpenditureDetails?: string | null;
     }
   | null
   | undefined;
@@ -225,6 +233,12 @@ function buildExistingExtractionContext(form: ExtractionContextSource) {
     form.cigaPerformed
       ? `- Existing cigaPerformed: ${form.cigaPerformed}`
       : null,
+    form.activityGrossIncome
+      ? `- Existing activityGrossIncome: ${form.activityGrossIncome}`
+      : null,
+    form.adequacyExpenditureDetails
+      ? `- Existing activityOperatingExpenditure: ${form.adequacyExpenditureDetails}`
+      : null,
   ].filter(Boolean);
 
   if (!lines.length) {
@@ -232,6 +246,100 @@ function buildExistingExtractionContext(form: ExtractionContextSource) {
   }
 
   return `Use this saved form context as prior context when the new files are ambiguous or incomplete:\n${lines.join("\n")}`;
+}
+
+async function findPreviousSubstanceAutofillSource(
+  db: Database,
+  taxReturn: {
+    id: string;
+    orgId: string;
+    jurisdictionId: string;
+    entityName: string;
+    taxYear: number;
+  },
+) {
+  const candidates = await db.query.taxReturns.findMany({
+    where: (table, { and, eq, lt }) =>
+      and(
+        eq(table.orgId, taxReturn.orgId),
+        eq(table.jurisdictionId, taxReturn.jurisdictionId),
+        eq(table.returnType, "economic_substance"),
+        lt(table.taxYear, taxReturn.taxYear),
+      ),
+    orderBy: (table, { desc }) => [desc(table.taxYear), desc(table.updatedAt)],
+    with: {
+      substanceForm: true,
+    },
+  });
+
+  const normalizedEntityName = normalizeSubstanceAutofillEntityName(
+    taxReturn.entityName,
+  );
+
+  for (const candidate of candidates) {
+    if (candidate.id === taxReturn.id) {
+      continue;
+    }
+
+    if (
+      normalizeSubstanceAutofillEntityName(candidate.entityName) !==
+      normalizedEntityName
+    ) {
+      continue;
+    }
+
+    if (!candidate.substanceForm) {
+      continue;
+    }
+
+    if (
+      Object.keys(pickSubstanceAutofillValues(candidate.substanceForm)).length ===
+      0
+    ) {
+      continue;
+    }
+
+    return candidate.substanceForm;
+  }
+
+  return null;
+}
+
+function buildInitializedSubstanceFormValues(input: {
+  taxReturnId: string;
+  taxYear: number;
+  entityName: string;
+  externalId?: string | null;
+  preparedByName: string;
+  sourceForm?: Partial<SubstanceAutofillValues> | null;
+}) {
+  const rawAutofillValues = pickSubstanceAutofillValues(input.sourceForm ?? null);
+  const autofillValues = Object.fromEntries(
+    Object.entries(rawAutofillValues).filter(([, value]) => value != null),
+  ) as Partial<SubstanceFormData>;
+  const values = {
+    ...autofillValues,
+    taxReturnId: input.taxReturnId,
+    entityName: input.entityName,
+    taxReferenceNumber: normalizeTaxReferenceNumber({
+      externalId: input.externalId,
+      taxYear: input.taxYear,
+    }),
+    accountingPeriodStart: `${Number(input.taxYear) - 1}-04-06`,
+    accountingPeriodEnd: `${input.taxYear}-04-05`,
+    certificateType: DEFAULT_CERTIFICATE_TYPE,
+    preparedBy: input.preparedByName,
+    profitAllocation: autofillValues.profitAllocation ?? "Investment",
+    isGuernseyFiFatca: autofillValues.isGuernseyFiFatca ?? "No",
+    isGuernseyFiCrs: autofillValues.isGuernseyFiCrs ?? "No",
+    isRegisteredOnIgor: autofillValues.isRegisteredOnIgor ?? "No",
+    isConstituentEntity: "No" as const,
+  };
+
+  return {
+    ...values,
+    missingFields: getMissingFields(values),
+  };
 }
 
 // AI Extraction Schema - Uses inline enums to avoid Zod v4 JSON schema conversion issues
@@ -394,10 +502,12 @@ const aiExtractionSchema = z.object({
   ipIncomeType: z.string().optional().describe("Type of IP income received"),
 
   // SECTION 6B: ADEQUACY ASSESSMENT
-  hasAdequateExpenditure: z
-    .enum(["Yes", "No", "N/A"])
+  activityGrossIncome: z
+    .string()
     .optional()
-    .describe("Does the entity have adequate expenditure for substance?"),
+    .describe(
+      "Turnover or gross income generated from the relevant activity. Return the numeric amount only when clearly stated.",
+    ),
   hasAdequatePhysicalPresence: z
     .enum(["Yes", "No", "N/A"])
     .optional()
@@ -405,7 +515,9 @@ const aiExtractionSchema = z.object({
   adequacyExpenditureDetails: z
     .string()
     .optional()
-    .describe("Details about adequacy of expenditure"),
+    .describe(
+      "Operating expenditure relating to the relevant activity. Return the numeric amount only when clearly stated.",
+    ),
   adequacyPhysicalPresenceDetails: z
     .string()
     .optional()
@@ -652,33 +764,24 @@ export const substanceFormRouter = createTRPCRouter({
         return existing;
       }
 
+      const previousForm = await findPreviousSubstanceAutofillSource(
+        ctx.db,
+        taxReturn,
+      );
+
       // Create new form with basic info from tax return
       const [form] = await ctx.db
         .insert(substanceForms)
-        .values({
-          taxReturnId: input.taxReturnId,
-          entityName: taxReturn.entityName,
-          taxReferenceNumber: normalizeTaxReferenceNumber({
-            externalId: taxReturn.externalId,
+        .values(
+          buildInitializedSubstanceFormValues({
+            taxReturnId: input.taxReturnId,
             taxYear: taxReturn.taxYear,
+            entityName: taxReturn.entityName,
+            externalId: taxReturn.externalId,
+            preparedByName,
+            sourceForm: previousForm,
           }),
-          // Calculate accounting period from tax year
-          accountingPeriodStart: `${Number(taxReturn.taxYear) - 1}-04-06`,
-          accountingPeriodEnd: `${taxReturn.taxYear}-04-05`,
-          // Set defaults
-          certificateType: DEFAULT_CERTIFICATE_TYPE,
-          preparedBy: preparedByName,
-          profitAllocation: "Investment",
-          isGuernseyFiFatca: "No",
-          isGuernseyFiCrs: "No",
-          isRegisteredOnIgor: "No",
-          isConstituentEntity: "No",
-          missingFields: getMissingFields({
-            preparedBy: preparedByName,
-            profitAllocation: "Investment",
-            isConstituentEntity: "No",
-          }),
-        })
+        )
         .returning();
 
       return form;
@@ -763,20 +866,22 @@ export const substanceFormRouter = createTRPCRouter({
       });
 
       if (!form) {
+        const previousForm = await findPreviousSubstanceAutofillSource(
+          ctx.db,
+          taxReturn,
+        );
         const [newForm] = await ctx.db
           .insert(substanceForms)
-          .values({
-            taxReturnId: input.taxReturnId,
-            entityName: taxReturn.entityName,
-            taxReferenceNumber: normalizeTaxReferenceNumber({
-              externalId: taxReturn.externalId,
+          .values(
+            buildInitializedSubstanceFormValues({
+              taxReturnId: input.taxReturnId,
               taxYear: taxReturn.taxYear,
+              entityName: taxReturn.entityName,
+              externalId: taxReturn.externalId,
+              preparedByName,
+              sourceForm: previousForm,
             }),
-            accountingPeriodStart: `${taxReturn.taxYear}-01-01`,
-            accountingPeriodEnd: `${taxReturn.taxYear}-12-31`,
-            certificateType: DEFAULT_CERTIFICATE_TYPE,
-            missingFields: getMissingFields({}),
-          })
+          )
           .returning();
         if (!newForm) {
           throw new Error("Failed to create substance form");
@@ -953,9 +1058,9 @@ SECTION 6A: INTELLECTUAL PROPERTY (if IP Holding Company)
 - Type of IP income received
 
 SECTION 6B: ADEQUACY ASSESSMENT
-- Has adequate expenditure for substance? (Yes/No/N/A)
+- Turnover / gross income from the relevant activity
+- Operating expenditure relating to the relevant activity
 - Has adequate physical presence? (Yes/No/N/A)
-- Details about expenditure adequacy
 - Details about physical presence adequacy
 
 SECTION 7: CIGA (Core Income Generating Activities)
@@ -1015,6 +1120,8 @@ IMPORTANT RULES:
 - accountsPreparerName is the ACCOUNTANT who prepared the financial accounts, NOT "LTS Tax Limited".
 - relevantActivity is REQUIRED — pick the single most applicable option. Use the saved form context plus the entity activity/business description if the new documents are ambiguous. If the existing saved form already identifies the relevant activity and the new files do not clearly contradict it, keep that activity.
 - allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey are helpful but not required. Extract them when the documents state them, otherwise leave them empty.
+- activityGrossIncome should be the turnover or gross income from the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
+- adequacyExpenditureDetails should be the operating expenditure relating to the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
 - If the entity has no relevant activity ("None of the above"), leave sections 6B, 7, 8, 9, and 10 empty.`;
 
       console.log(

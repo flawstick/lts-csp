@@ -113,7 +113,7 @@ function buildBaseNavItems(linkOrgId: string | null): Omit<PortalNavItem, "isAct
     },
     {
       key: "documents",
-      title: "Documents",
+      title: "Clients",
       href: "/documents",
       icon: FolderOpen,
       iconKey: "documents",

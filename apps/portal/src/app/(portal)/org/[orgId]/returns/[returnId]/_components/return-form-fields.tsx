@@ -62,7 +62,6 @@ const LONG_TEXT_FIELDS = new Set([
   "postBalanceSheetEventDetails",
   "c42AssociatedCompanies",
   "contractInformation",
-  "adequacyExpenditureDetails",
   "adequacyPhysicalPresenceDetails",
   "additionalInformation",
   "igorNotRegisteredReason",
@@ -86,6 +85,11 @@ const NUMBER_FIELDS = new Set([
   "outsourcerCount",
 ]);
 
+const MONEY_FIELDS = new Set([
+  "activityGrossIncome",
+  "adequacyExpenditureDetails",
+]);
+
 const YES_NO_FIELDS = new Set([
   "isCollectiveInvestmentVehicle",
   "areFinancialStatementsConsolidated",
@@ -105,14 +109,13 @@ const YES_NO_FIELDS = new Set([
   "isSolelyGuernseyPartners",
   "partnershipActivitiesWhollyInGuernsey",
   "partnershipPoeMOutsideGuernsey",
-  "isRegisteredWithIgor",
+  "isRegisteredOnIgor",
   "hasFailedEconomicSubstance",
   "isPillar2InScope",
   "expectConstituentEntityNextPeriod",
 ]);
 
 const YES_NO_NA_FIELDS = new Set([
-  "hasAdequateExpenditure",
   "hasAdequatePhysicalPresence",
   "hasCigaOutsourcing",
   "adequateMeetingFrequency",
@@ -427,7 +430,45 @@ export function ReturnFormFields({
             options={options}
             placeholder="Select"
             onChange={(v) =>
-              setDraftForm((prev) => ({ ...prev, [field]: v ?? undefined }))
+              setDraftForm((prev) => {
+                if (field === "hasMultipleRelevantActivities" && v !== "Yes") {
+                  return {
+                    ...prev,
+                    hasMultipleRelevantActivities: (v ?? undefined) as
+                      | SubstanceFormData["hasMultipleRelevantActivities"]
+                      | undefined,
+                    secondRelevantActivity: undefined,
+                    secondCigaCheckboxes: undefined,
+                  };
+                }
+
+                return { ...prev, [field]: v ?? undefined };
+              })
+            }
+          />
+        </FieldShell>
+      );
+    }
+
+    if (MONEY_FIELDS.has(field)) {
+      return (
+        <FieldShell
+          key={field}
+          label={label}
+          fieldId={fieldId}
+          required={required}
+          surface={surface}
+        >
+          <Input
+            id={fieldId}
+            type="text"
+            inputMode="decimal"
+            value={(value as string | undefined) ?? ""}
+            onChange={(e) =>
+              setDraftForm((prev) => ({
+                ...prev,
+                [field]: e.target.value || undefined,
+              }))
             }
           />
         </FieldShell>

@@ -7,6 +7,7 @@ import * as schema from "./schema";
 export * from "./schema";
 export * from "./jersey-company-return";
 export * from "./queries";
+export * from "./substance-autofill";
 export { schema };
 export { eq, and, or, desc, asc, sql };
 

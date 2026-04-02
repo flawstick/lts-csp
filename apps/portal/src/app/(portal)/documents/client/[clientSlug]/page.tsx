@@ -75,7 +75,7 @@ export default function ClientDocumentsPage() {
             <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">
               {client ? client.name : "Client folders"}
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">Choose a return folder to open its files.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Choose a return folder to open its files and review what can be autofilled from the previous Guernsey return.</p>
           </div>
         </div>
       </section>
@@ -133,6 +133,11 @@ export default function ClientDocumentsPage() {
                       <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">
                         {returnFolder.jurisdictionCode} • Updated {formatDateTime(returnFolder.updatedAt)}
                       </p>
+                      {returnFolder.autofillFieldCount > 0 ? (
+                        <p className="mt-2 text-xs text-blue-700 [overflow-wrap:anywhere] dark:text-blue-300">
+                          Autofill from {returnFolder.autofillSourceTaxYear} available for {returnFolder.autofillFieldCount} field{returnFolder.autofillFieldCount === 1 ? "" : "s"}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5" />
@@ -142,12 +147,34 @@ export default function ClientDocumentsPage() {
                     <FileText className="size-3.5" />
                     {returnFolder.files.length} file(s)
                   </span>
+                  {returnFolder.autofillFieldCount > 0 ? (
+                    <span className="inline-flex rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-blue-700">
+                      {returnFolder.autofillFieldCount} autofill field{returnFolder.autofillFieldCount === 1 ? "" : "s"}
+                    </span>
+                  ) : null}
                   {hiddenFiles > 0 ? (
                     <span className="inline-flex rounded-md border border-primary/35 bg-primary/10 px-2 py-1 text-primary">
                       +{hiddenFiles} more inside
                     </span>
                   ) : null}
                 </div>
+                {returnFolder.autofillFields.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {returnFolder.autofillFields.slice(0, 3).map((field) => (
+                      <span
+                        key={field.key}
+                        className="inline-flex rounded-full border border-blue-500/25 bg-blue-500/[0.08] px-2.5 py-1 text-[11px] font-medium text-blue-700"
+                      >
+                        {field.label}
+                      </span>
+                    ))}
+                    {returnFolder.autofillFields.length > 3 ? (
+                      <span className="inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                        +{returnFolder.autofillFields.length - 3} more
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
               </Link>
             );
           })}

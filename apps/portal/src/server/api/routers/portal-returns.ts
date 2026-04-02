@@ -23,6 +23,14 @@ import {
   taxReturnFileRoles,
 } from "@repo/database";
 import {
+  buildSubstanceAutofillGroupKey,
+  getSubstanceAutofillPreviewFields,
+  normalizeSubstanceAutofillEntityName,
+  pickSubstanceAutofillValues,
+  type SubstanceAutofillPreviewField,
+  type SubstanceAutofillValues,
+} from "@repo/database/substance-autofill";
+import {
   CIGA_BY_ACTIVITY,
   getMissingFields,
   relevantActivityEnum,
@@ -56,6 +64,8 @@ type ExtractionContextSource =
       economicClassificationCode?: string | null;
       cigaPerformed?: string | null;
       cigaDetails?: string | null;
+      activityGrossIncome?: string | null;
+      adequacyExpenditureDetails?: string | null;
     }
   | null
   | undefined;
@@ -257,6 +267,12 @@ function buildExistingExtractionContext(form: ExtractionContextSource) {
       ? `- Existing cigaPerformed: ${form.cigaPerformed}`
       : null,
     form.cigaDetails ? `- Existing cigaDetails: ${form.cigaDetails}` : null,
+    form.activityGrossIncome
+      ? `- Existing activityGrossIncome: ${form.activityGrossIncome}`
+      : null,
+    form.adequacyExpenditureDetails
+      ? `- Existing activityOperatingExpenditure: ${form.adequacyExpenditureDetails}`
+      : null,
   ].filter(Boolean);
 
   if (!lines.length) {
@@ -264,6 +280,102 @@ function buildExistingExtractionContext(form: ExtractionContextSource) {
   }
 
   return `Use this saved form context as prior context when the new files are ambiguous or incomplete:\n${lines.join("\n")}`;
+}
+
+async function findPreviousSubstanceAutofillSource(
+  db: TRPCContext["db"],
+  taxReturn: {
+    id: string;
+    orgId: string;
+    jurisdictionId: string;
+    entityName: string;
+    taxYear: number;
+  },
+) {
+  const candidates = await db.query.taxReturns.findMany({
+    where: (table, { and, eq, lt }) =>
+      and(
+        eq(table.orgId, taxReturn.orgId),
+        eq(table.jurisdictionId, taxReturn.jurisdictionId),
+        eq(table.returnType, "economic_substance"),
+        lt(table.taxYear, taxReturn.taxYear),
+      ),
+    orderBy: (table, { desc }) => [desc(table.taxYear), desc(table.updatedAt)],
+    with: {
+      substanceForm: true,
+    },
+  });
+
+  const normalizedEntityName = normalizeSubstanceAutofillEntityName(
+    taxReturn.entityName,
+  );
+
+  for (const candidate of candidates) {
+    if (candidate.id === taxReturn.id) {
+      continue;
+    }
+
+    if (
+      normalizeSubstanceAutofillEntityName(candidate.entityName) !==
+      normalizedEntityName
+    ) {
+      continue;
+    }
+
+    if (!candidate.substanceForm) {
+      continue;
+    }
+
+    if (
+      Object.keys(pickSubstanceAutofillValues(candidate.substanceForm)).length ===
+      0
+    ) {
+      continue;
+    }
+
+    return candidate.substanceForm;
+  }
+
+  return null;
+}
+
+function buildInitializedSubstanceFormValues(input: {
+  taxReturnId: string;
+  taxYear: number;
+  entityName: string;
+  externalId?: string | null;
+  preparedByName: string;
+  lastEditedBy?: string | null;
+  sourceForm?: Partial<SubstanceAutofillValues> | null;
+}) {
+  const rawAutofillValues = pickSubstanceAutofillValues(input.sourceForm ?? null);
+  const autofillValues = Object.fromEntries(
+    Object.entries(rawAutofillValues).filter(([, value]) => value != null),
+  ) as Partial<SubstanceFormData>;
+  const values = {
+    ...autofillValues,
+    taxReturnId: input.taxReturnId,
+    entityName: input.entityName,
+    taxReferenceNumber: normalizeTaxReferenceNumber({
+      externalId: input.externalId,
+      taxYear: input.taxYear,
+    }),
+    accountingPeriodStart: `${Number(input.taxYear) - 1}-04-06`,
+    accountingPeriodEnd: `${input.taxYear}-04-05`,
+    certificateType: DEFAULT_CERTIFICATE_TYPE,
+    preparedBy: input.preparedByName,
+    profitAllocation: autofillValues.profitAllocation ?? "Investment",
+    isGuernseyFiFatca: autofillValues.isGuernseyFiFatca ?? "No",
+    isGuernseyFiCrs: autofillValues.isGuernseyFiCrs ?? "No",
+    isRegisteredOnIgor: autofillValues.isRegisteredOnIgor ?? "No",
+    isConstituentEntity: "No" as const,
+    lastEditedBy: input.lastEditedBy ?? undefined,
+  };
+
+  return {
+    ...values,
+    missingFields: getMissingFields(values),
+  };
 }
 
 const aiExtractionSchema = z.object({
@@ -355,9 +467,19 @@ const aiExtractionSchema = z.object({
   wantsToRebutHighRiskStatus: z.enum(["Yes", "No"]).optional(),
   highRiskRebuttalNarrative: z.string().optional(),
   ipIncomeType: z.string().optional(),
-  hasAdequateExpenditure: z.enum(["Yes", "No", "N/A"]).optional(),
+  activityGrossIncome: z
+    .string()
+    .optional()
+    .describe(
+      "Turnover or gross income generated from the relevant activity. Return the numeric amount only when clearly stated.",
+    ),
   hasAdequatePhysicalPresence: z.enum(["Yes", "No", "N/A"]).optional(),
-  adequacyExpenditureDetails: z.string().optional(),
+  adequacyExpenditureDetails: z
+    .string()
+    .optional()
+    .describe(
+      "Operating expenditure relating to the relevant activity. Return the numeric amount only when clearly stated.",
+    ),
   adequacyPhysicalPresenceDetails: z.string().optional(),
   cigaPerformed: z.string().optional(),
   cigaDetails: z.string().optional(),
@@ -774,9 +896,11 @@ export const portalReturnsRouter = createTRPCRouter({
       .select({
         id: taxReturns.id,
         orgId: taxReturns.orgId,
+        jurisdictionId: taxReturns.jurisdictionId,
         entityName: taxReturns.entityName,
         taxYear: taxReturns.taxYear,
         status: taxReturns.status,
+        returnType: taxReturns.returnType,
         externalId: taxReturns.externalId,
         files: taxReturns.files,
         updatedAt: taxReturns.updatedAt,
@@ -791,7 +915,119 @@ export const portalReturnsRouter = createTRPCRouter({
       .where(inArray(taxReturns.orgId, orgIds))
       .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt));
 
-    return rows;
+    const autofillCandidates = await ctx.db.query.taxReturns.findMany({
+      where: and(
+        inArray(taxReturns.orgId, orgIds),
+        eq(taxReturns.returnType, "economic_substance"),
+      ),
+      columns: {
+        id: true,
+        orgId: true,
+        jurisdictionId: true,
+        entityName: true,
+        taxYear: true,
+      },
+      with: {
+        substanceForm: {
+          columns: {
+            entityType: true,
+            companyNumber: true,
+            registeredAddress: true,
+            principalPlaceOfBusiness: true,
+            isIncorporatedInGuernsey: true,
+            economicClassificationCode: true,
+            entityActivity: true,
+            areFinancialStatementsConsolidated: true,
+            accountsPreparerName: true,
+            accountsPreparerQualification: true,
+            profitAllocation: true,
+            isGuernseyFiFatca: true,
+            isGuernseyFiCrs: true,
+            isRegisteredOnIgor: true,
+            relevantActivity: true,
+            hasMultipleRelevantActivities: true,
+            hasIntellectualPropertyHolding: true,
+            isHighRiskIpEntity: true,
+            wantsToRebutHighRiskStatus: true,
+            ipIncomeType: true,
+            cigaPerformed: true,
+            cigaDetails: true,
+            hasAdequatePhysicalPresence: true,
+            hasCigaOutsourcing: true,
+            outsourcingDetails: true,
+          },
+        },
+      },
+    });
+
+    const groupedAutofillSources = new Map<
+      string,
+      Array<{
+        returnId: string;
+        taxYear: number;
+        previewFields: SubstanceAutofillPreviewField[];
+      }>
+    >();
+
+    for (const candidate of autofillCandidates) {
+      if (!candidate.substanceForm) {
+        continue;
+      }
+
+      const previewFields = getSubstanceAutofillPreviewFields(
+        candidate.substanceForm,
+      );
+
+      if (!previewFields.length) {
+        continue;
+      }
+
+      const key = buildSubstanceAutofillGroupKey({
+        orgId: candidate.orgId,
+        jurisdictionId: candidate.jurisdictionId,
+        entityName: candidate.entityName,
+      });
+      const existing = groupedAutofillSources.get(key) ?? [];
+      existing.push({
+        returnId: candidate.id,
+        taxYear: candidate.taxYear,
+        previewFields,
+      });
+      groupedAutofillSources.set(key, existing);
+    }
+
+    for (const sources of groupedAutofillSources.values()) {
+      sources.sort((a, b) => b.taxYear - a.taxYear);
+    }
+
+    return rows.map((row) => {
+      if (row.returnType !== "economic_substance") {
+        return {
+          ...row,
+          autofillSourceReturnId: null,
+          autofillSourceTaxYear: null,
+          autofillFields: [] as SubstanceAutofillPreviewField[],
+          autofillFieldCount: 0,
+        };
+      }
+
+      const key = buildSubstanceAutofillGroupKey({
+        orgId: row.orgId,
+        jurisdictionId: row.jurisdictionId,
+        entityName: row.entityName,
+      });
+      const source = groupedAutofillSources
+        .get(key)
+        ?.find((candidate) => candidate.taxYear < row.taxYear);
+
+      return {
+        ...row,
+        autofillSourceReturnId: source?.returnId ?? null,
+        autofillSourceTaxYear: source?.taxYear ?? null,
+        autofillFields: source?.previewFields ?? [],
+        autofillFieldCount: source?.previewFields.length ?? 0,
+      };
+    });
   }),
 
   searchMyReturns: protectedProcedure
@@ -996,23 +1232,24 @@ export const portalReturnsRouter = createTRPCRouter({
         where: eq(organisations.id, input.orgId),
       });
       const preparedByName = org?.accountName ?? org?.name ?? "LTS Tax Limited";
+      const previousForm = await findPreviousSubstanceAutofillSource(
+        ctx.db,
+        returnRecord,
+      );
 
       const [created] = await ctx.db
         .insert(substanceForms)
-        .values({
-          taxReturnId: input.taxReturnId,
-          entityName: returnRecord.entityName,
-          taxReferenceNumber: normalizeTaxReferenceNumber({
-            externalId: returnRecord.externalId,
+        .values(
+          buildInitializedSubstanceFormValues({
+            taxReturnId: input.taxReturnId,
             taxYear: returnRecord.taxYear,
+            entityName: returnRecord.entityName,
+            externalId: returnRecord.externalId,
+            preparedByName,
+            lastEditedBy: account.id,
+            sourceForm: previousForm,
           }),
-          accountingPeriodStart: `${Number(returnRecord.taxYear) - 1}-04-06`,
-          accountingPeriodEnd: `${returnRecord.taxYear}-04-05`,
-          certificateType: DEFAULT_CERTIFICATE_TYPE,
-          preparedBy: preparedByName,
-          missingFields: getMissingFields({ preparedBy: preparedByName }),
-          lastEditedBy: account.id,
-        })
+        )
         .returning();
 
       return created ?? null;
@@ -1607,29 +1844,23 @@ export const portalReturnsRouter = createTRPCRouter({
       });
 
       if (!form) {
+        const previousForm = await findPreviousSubstanceAutofillSource(
+          ctx.db,
+          returnRecord,
+        );
         const [created] = await ctx.db
           .insert(substanceForms)
-          .values({
-            taxReturnId: input.taxReturnId,
-            entityName: returnRecord.entityName,
-            taxReferenceNumber: normalizeTaxReferenceNumber({
-              externalId: returnRecord.externalId,
+          .values(
+            buildInitializedSubstanceFormValues({
+              taxReturnId: input.taxReturnId,
               taxYear: returnRecord.taxYear,
+              entityName: returnRecord.entityName,
+              externalId: returnRecord.externalId,
+              preparedByName,
+              lastEditedBy: account.id,
+              sourceForm: previousForm,
             }),
-            accountingPeriodStart: `${returnRecord.taxYear}-01-01`,
-            accountingPeriodEnd: `${returnRecord.taxYear}-12-31`,
-            certificateType: DEFAULT_CERTIFICATE_TYPE,
-            preparedBy: preparedByName,
-            isGuernseyFiFatca: "No",
-            isGuernseyFiCrs: "No",
-            isRegisteredOnIgor: "No",
-            isConstituentEntity: "No",
-            missingFields: getMissingFields({
-              preparedBy: preparedByName,
-              isConstituentEntity: "No",
-            }),
-            lastEditedBy: account.id,
-          })
+          )
           .returning();
 
         form = created ?? undefined;
@@ -1778,6 +2009,8 @@ Use these strict output rules:
 - entityActivity: always try to extract the nature of the entity's activity (e.g., "Property Holdings").
 - relevantActivity is REQUIRED — pick the single most applicable option. Use the saved form context plus the entity activity/business description if the new documents are ambiguous. If the existing saved form already identifies the relevant activity and the new files do not clearly contradict it, keep that activity.
 - allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey are helpful but not required. Extract them when the documents state them, otherwise leave them empty.
+- activityGrossIncome should be the turnover or gross income from the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
+- adequacyExpenditureDetails should be the operating expenditure relating to the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
 - If the entity has no relevant activity ("None of the above"), leave adequacy, CIGA, employees, outsourcing, and beneficial ownership sections empty.
 
 For CIGA, use these activity mappings:

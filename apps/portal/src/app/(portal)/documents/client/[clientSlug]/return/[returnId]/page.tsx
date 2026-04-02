@@ -124,8 +124,13 @@ export default function ReturnDocumentsPage() {
                 {returnFolder.jurisdictionName} ({returnFolder.jurisdictionCode}) • {returnFolder.taxYear}
               </p>
             ) : (
-              <p className="mt-1 text-sm text-muted-foreground">Open and review documents for this return.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Open and review files for this return.</p>
             )}
+            {returnFolder?.autofillFieldCount ? (
+              <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">
+                Autofill from {returnFolder.autofillSourceTaxYear} is available for {returnFolder.autofillFieldCount} field{returnFolder.autofillFieldCount === 1 ? "" : "s"} when the GRS form is initialized.
+              </p>
+            ) : null}
           </div>
         </div>
       </section>

@@ -412,10 +412,9 @@ ${field("High Risk Rebuttal Narrative", form.highRiskRebuttalNarrative)}
 ${field("IP Income Type", form.ipIncomeType)}
 
 ### Adequacy Assessment:
-${field("Turnover", form.activityGrossIncome)}
-${field("Has Adequate Expenditure", form.hasAdequateExpenditure)}
+${field("Turnover / Gross Income from Relevant Activity", form.activityGrossIncome)}
+${field("Operating Expenditure Relating to the Activity", form.adequacyExpenditureDetails)}
 ${field("Has Adequate Physical Presence", form.hasAdequatePhysicalPresence)}
-${field("Adequacy Expenditure Details", form.adequacyExpenditureDetails)}
 ${field("Adequacy Physical Presence Details", form.adequacyPhysicalPresenceDetails)}`
     : `
 **No relevant activity — IP Holdings and Adequacy Assessment sections are not applicable. Leave blank.`;

@@ -67,13 +67,13 @@ The workspace for a specific return. Has two tabs:
 
 For Jersey company returns, the workspace uses a specialized layout with Jersey-specific form sections (Residency, Economic Substance, Schedule A, Distributions, Compliance, Additional Info).
 
-### Documents — [Documents](/documents)
-A file explorer that organises all uploaded documents by client and return. Features:
+### Clients — [Clients](/documents)
+A client explorer that organises all uploaded return files by client and return. Features:
 - **Client folders**: Each client entity has a folder showing return count and total file count
 - **Search**: Filter by client name, org name, tax year, or jurisdiction code
 - **Filters**: All clients, Multi-return clients, With files
-- Click a client folder to drill into their yearly return folders and view/manage individual files
-- This is a cross-cutting view of all files — for uploading new files to a specific return, use the Return Workspace's Files & Documents tab instead
+- Click a client folder to drill into yearly return folders, view individual files, and see what prior-return autofill is available for Guernsey
+- This is a cross-cutting client view — for uploading new files to a specific return, use the Return Workspace's Files & Documents tab instead
 
 ### Team — [Team](/team)
 Manage portal members and access roles.

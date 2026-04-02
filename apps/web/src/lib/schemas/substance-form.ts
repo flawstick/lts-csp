@@ -144,7 +144,7 @@ export const substanceFormSchema = z.object({
   // =========================================================================
   // SECTION 6B: ADEQUACY ASSESSMENT
   // =========================================================================
-  hasAdequateExpenditure: yesNoNaEnum.optional(),
+  activityGrossIncome: z.string().optional(),
   hasAdequatePhysicalPresence: yesNoNaEnum.optional(),
   adequacyExpenditureDetails: z.string().optional(),
   adequacyPhysicalPresenceDetails: z.string().optional(),
@@ -322,9 +322,9 @@ export const FIELD_LABELS: Record<string, string> = {
   ipIncomeType: "IP Income Type",
 
   // Adequacy Assessment
-  hasAdequateExpenditure: "Has Adequate Expenditure?",
+  activityGrossIncome: "Turnover / Gross Income from Relevant Activity",
   hasAdequatePhysicalPresence: "Has Adequate Physical Presence?",
-  adequacyExpenditureDetails: "Adequacy Expenditure Details",
+  adequacyExpenditureDetails: "Operating Expenditure Relating to the Activity",
   adequacyPhysicalPresenceDetails: "Adequacy Physical Presence Details",
 
   // CIGA
@@ -465,7 +465,7 @@ export const FORM_SECTIONS = [
     description:
       "Assessment of adequate substance (expenditure and physical presence)",
     fields: [
-      "hasAdequateExpenditure",
+      "activityGrossIncome",
       "hasAdequatePhysicalPresence",
       "adequacyExpenditureDetails",
       "adequacyPhysicalPresenceDetails",

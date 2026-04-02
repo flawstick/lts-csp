@@ -291,11 +291,11 @@ export function PortalCommandMenu({ navItems, currentOrgId }: PortalCommandMenuP
               {folderSearchResults.length ? (
                 <>
                   <CommandSeparator />
-                  <CommandGroup heading="Folders">
+                  <CommandGroup heading="Clients">
                     {folderSearchResults.map((folder) => (
                       <CommandItem
                         key={folder.id}
-                        value={`${folder.name} ${folder.orgName} folder documents`}
+                        value={`${folder.name} ${folder.orgName} client returns files`}
                         onSelect={() => navigateTo(`/documents/client/${folder.slug}`)}
                       >
                         <FolderOpen className="size-4" />

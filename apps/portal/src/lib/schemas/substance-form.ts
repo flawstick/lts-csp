@@ -138,7 +138,7 @@ export const substanceFormSchema = z.object({
   // SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
   // =========================================================================
   isGuernseyFiFatca: yesNoEnum.optional(), // Is Guernsey Financial Institution under FATCA?
-  isRegisteredWithIgor: yesNoEnum.optional(), // IGOR - Information Gateway Online Reporter
+  isRegisteredOnIgor: yesNoEnum.optional(), // IGOR - Information Gateway Online Reporter
   igorNotRegisteredReason: z.string().optional(),
   isGuernseyFiCrs: yesNoEnum.optional(), // Is Financial Institution under CRS?
 
@@ -163,7 +163,7 @@ export const substanceFormSchema = z.object({
   // =========================================================================
   // SECTION 6B: ADEQUACY ASSESSMENT
   // =========================================================================
-  hasAdequateExpenditure: yesNoNaEnum.optional(),
+  activityGrossIncome: z.string().optional(),
   hasAdequatePhysicalPresence: yesNoNaEnum.optional(),
   adequacyExpenditureDetails: z.string().optional(),
   adequacyPhysicalPresenceDetails: z.string().optional(),
@@ -348,7 +348,7 @@ export const FIELD_LABELS: Record<string, string> = {
 
   // Financial Institutions
   isGuernseyFiFatca: "Is Guernsey FI under FATCA?",
-  isRegisteredWithIgor: "Is Registered with IGOR?",
+  isRegisteredOnIgor: "Is Registered with IGOR?",
   igorNotRegisteredReason: "Reason Not Registered with IGOR",
   isGuernseyFiCrs: "Is Guernsey FI under CRS?",
 
@@ -367,9 +367,9 @@ export const FIELD_LABELS: Record<string, string> = {
   ipIncomeType: "IP Income Type",
 
   // Adequacy Assessment
-  hasAdequateExpenditure: "Has Adequate Expenditure?",
+  activityGrossIncome: "Turnover / Gross Income from Relevant Activity",
   hasAdequatePhysicalPresence: "Has Adequate Physical Presence?",
-  adequacyExpenditureDetails: "Adequacy Expenditure Details",
+  adequacyExpenditureDetails: "Operating Expenditure Relating to the Activity",
   adequacyPhysicalPresenceDetails: "Adequacy Physical Presence Details",
 
   // CIGA
@@ -500,7 +500,7 @@ export const FORM_SECTIONS = [
     description: "FATCA, IGOR, and CRS registration status",
     fields: [
       "isGuernseyFiFatca",
-      "isRegisteredWithIgor",
+      "isRegisteredOnIgor",
       "igorNotRegisteredReason",
       "isGuernseyFiCrs",
     ],
@@ -540,6 +540,7 @@ export const FORM_SECTIONS = [
       "Relevant activities and core income generating activities (CIGA)",
     fields: [
       "relevantActivity",
+      "hasMultipleRelevantActivities",
       "cigaCheckboxes",
       "cigaPerformed",
       "cigaDetails",
@@ -554,12 +555,14 @@ export const FORM_SECTIONS = [
       "totalQualifiedFte",
       "employees",
       "hasAdequateEmployees",
+      "activityGrossIncome",
       "hasAdequatePhysicalPresence",
-      "hasAdequateExpenditure",
       "hasCigaOutsourcing",
       "outsourcerCount",
       "outsourcers",
       "outsourcingDetails",
+      "adequacyExpenditureDetails",
+      "adequacyPhysicalPresenceDetails",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
       data.relevantActivity !== undefined &&
@@ -570,11 +573,11 @@ export const FORM_SECTIONS = [
     title: "Economic Substance 2",
     description: "Additional relevant activity if income from more than one",
     fields: [
-      "hasMultipleRelevantActivities",
       "secondRelevantActivity",
       "secondCigaCheckboxes",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
+      data.hasMultipleRelevantActivities === "Yes" &&
       data.relevantActivity !== undefined &&
       data.relevantActivity !== "None of the above",
   },

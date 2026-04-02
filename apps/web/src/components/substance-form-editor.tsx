@@ -124,6 +124,7 @@ export function SubstanceFormEditor({
     // Yes/No/N/A fields
     if (
       field === "hasCigaOutsourcing" ||
+      field === "hasAdequatePhysicalPresence" ||
       field === "adequateMeetingFrequency" ||
       field === "enoughDirectorsPresent" ||
       field === "directorsHaveExpertise" ||
@@ -148,6 +149,21 @@ export function SubstanceFormEditor({
               ))}
             </SelectContent>
           </Select>
+        </div>
+      )
+    }
+
+    if (field === "activityGrossIncome" || field === "adequacyExpenditureDetails") {
+      return (
+        <div key={field} className="space-y-2">
+          <Label htmlFor={field}>{label}</Label>
+          <Input
+            id={field}
+            type="text"
+            inputMode="decimal"
+            value={(value as string) ?? ""}
+            onChange={(e) => updateField(field, e.target.value || undefined)}
+          />
         </div>
       )
     }

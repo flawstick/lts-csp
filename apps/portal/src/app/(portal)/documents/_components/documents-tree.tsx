@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 
 import { api } from "@/trpc/react";
+import type { SubstanceAutofillPreviewField } from "@repo/database/substance-autofill";
 
 type ListMyReturnsRow = {
   entityName: string;
@@ -10,6 +11,9 @@ type ListMyReturnsRow = {
   jurisdictionName: string;
   orgId: string;
   orgName: string;
+  autofillFields?: SubstanceAutofillPreviewField[] | null;
+  autofillFieldCount?: number | null;
+  autofillSourceTaxYear?: number | null;
   taxYear: number;
   updatedAt: Date | string | null;
 };
@@ -25,6 +29,9 @@ export type ExplorerFile = {
 };
 
 export type ReturnFolder = {
+  autofillFieldCount: number;
+  autofillFields: SubstanceAutofillPreviewField[];
+  autofillSourceTaxYear: number | null;
   files: ExplorerFile[];
   id: string;
   jurisdictionCode: string;
@@ -35,6 +42,7 @@ export type ReturnFolder = {
 };
 
 export type ClientFolder = {
+  autofillReadyCount: number;
   id: string;
   name: string;
   orgId: string;
@@ -135,6 +143,9 @@ function buildClientFolders(rows: ListMyReturnsRow[]): ClientFolder[] {
     const files = normalizeFiles(row.files);
 
     const returnFolder: ReturnFolder = {
+      autofillFieldCount: row.autofillFieldCount ?? 0,
+      autofillFields: row.autofillFields ?? [],
+      autofillSourceTaxYear: row.autofillSourceTaxYear ?? null,
       id: row.id,
       name: `${clientName}-${row.taxYear}`,
       taxYear: row.taxYear,
@@ -153,11 +164,15 @@ function buildClientFolders(rows: ListMyReturnsRow[]): ClientFolder[] {
         orgName: row.orgName,
         returns: [returnFolder],
         totalFiles: files.length,
+        autofillReadyCount: returnFolder.autofillFieldCount > 0 ? 1 : 0,
         slug: createClientSlug(row.orgId, clientName),
       });
     } else {
       existingClient.returns.push(returnFolder);
       existingClient.totalFiles += files.length;
+      if (returnFolder.autofillFieldCount > 0) {
+        existingClient.autofillReadyCount += 1;
+      }
     }
   }
 

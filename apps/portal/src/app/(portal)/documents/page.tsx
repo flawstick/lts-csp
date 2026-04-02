@@ -59,8 +59,8 @@ export default function DocumentsPage() {
   return (
     <main className="mx-auto max-w-6xl space-y-3 pb-10">
       <section className="portal-card p-5">
-        <h1 className="text-xl font-semibold tracking-tight">Documents Explorer</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Open a client folder to browse yearly return folders and files.</p>
+        <h1 className="text-xl font-semibold tracking-tight">Clients</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Open a client to browse yearly return folders, files, and available autofill from prior Guernsey returns.</p>
       </section>
 
       {!isLoading && !error ? (
@@ -84,7 +84,7 @@ export default function DocumentsPage() {
 
       {!isLoading && !error && clients.length === 0 ? (
         <section className="portal-card border-dashed p-10 text-center text-sm text-muted-foreground">
-          No clients or files are available yet.
+          No clients or return files are available yet.
         </section>
       ) : null}
 
@@ -126,6 +126,11 @@ export default function DocumentsPage() {
                     <FileText className="size-3.5" />
                     {client.totalFiles} file(s)
                   </span>
+                  {client.autofillReadyCount > 0 ? (
+                    <span className="inline-flex rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-blue-700">
+                      {client.autofillReadyCount} autofill-ready return(s)
+                    </span>
+                  ) : null}
                 </div>
               </Link>
             );

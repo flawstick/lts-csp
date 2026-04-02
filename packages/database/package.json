@@ -25,6 +25,10 @@
     "./jersey-company-return": {
       "types": "./src/jersey-company-return.ts",
       "default": "./src/jersey-company-return.ts"
+    },
+    "./substance-autofill": {
+      "types": "./src/substance-autofill.ts",
+      "default": "./src/substance-autofill.ts"
     }
   },
   "scripts": {
