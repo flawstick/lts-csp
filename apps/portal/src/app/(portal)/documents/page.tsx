@@ -5,16 +5,17 @@ import { useRouter } from "next/navigation";
 import {
   Building2,
   ChevronRight,
+  FileText,
   LayoutGrid,
   Rows3,
+  Sparkles,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
   getClientHref,
   getFolderColor,
-  type ClientFolder,
   useDocumentsTree,
 } from "./_components/documents-tree";
 import { DocumentsFilterCard } from "./_components/documents-filter-card";
@@ -25,6 +26,8 @@ import {
 
 type ClientFilter = "all" | "multi_return" | "with_files";
 type ViewMode = "grid" | "list";
+
+const PAGE_SIZE = 12;
 
 const CLIENT_FILTER_OPTIONS: Array<{ label: string; value: ClientFilter }> = [
   { value: "all", label: "All clients" },
@@ -67,10 +70,6 @@ function ClientViewToggle({
   );
 }
 
-function collectAutofillLabels(client: ClientFolder) {
-  return client.autofillFields.map((field) => field.label);
-}
-
 function getClientMonogram(name: string) {
   const letters = name
     .split(/\s+/)
@@ -82,12 +81,29 @@ function getClientMonogram(name: string) {
   return letters || "CL";
 }
 
+function ClientMonogram({ name, id }: { name: string; id: string }) {
+  const color = getFolderColor(id);
+  return (
+    <div
+      className="flex size-10 shrink-0 items-center justify-center rounded-xl text-xs font-bold"
+      style={{
+        backgroundColor: `${color}14`,
+        color,
+      }}
+    >
+      {getClientMonogram(name)}
+    </div>
+  );
+}
+
 export default function DocumentsPage() {
   const router = useRouter();
   const { clients, error, isLoading } = useDocumentsTree();
   const [searchValue, setSearchValue] = useState("");
   const [filterValue, setFilterValue] = useState<ClientFilter>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("portal-clients-view");
@@ -125,11 +141,41 @@ export default function DocumentsPage() {
     });
   }, [clients, filterValue, searchValue]);
 
+  // Reset visible count when filters change
   useEffect(() => {
-    filteredClients.slice(0, 8).forEach((client) => {
+    setVisibleCount(PAGE_SIZE);
+  }, [searchValue, filterValue]);
+
+  const visibleClients = useMemo(
+    () => filteredClients.slice(0, visibleCount),
+    [filteredClients, visibleCount],
+  );
+  const hasMore = visibleCount < filteredClients.length;
+
+  // Infinite scroll: load more when sentinel enters viewport
+  const loadMore = useCallback(() => {
+    setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, filteredClients.length));
+  }, [filteredClients.length]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasMore) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) loadMore();
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore]);
+
+  useEffect(() => {
+    visibleClients.slice(0, 8).forEach((client) => {
       router.prefetch(getClientHref(client.slug));
     });
-  }, [filteredClients, router]);
+  }, [visibleClients, router]);
 
   return (
     <main className="mx-auto max-w-6xl space-y-3 pb-10">
@@ -174,10 +220,13 @@ export default function DocumentsPage() {
       {!isLoading && !error && filteredClients.length > 0 ? (
         viewMode === "grid" ? (
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {filteredClients.map((client) => {
+            {visibleClients.map((client) => {
               const href = getClientHref(client.slug);
-              const autofillLabels = collectAutofillLabels(client);
-              const returnPreview = client.returns.slice(0, 3);
+              const years = Array.from(
+                new Set(client.returns.map((r) => r.taxYear)),
+              )
+                .sort((a, b) => b - a)
+                .slice(0, 4);
 
               return (
                 <Link
@@ -186,73 +235,54 @@ export default function DocumentsPage() {
                   prefetch
                   onMouseEnter={() => router.prefetch(href)}
                   onFocus={() => router.prefetch(href)}
-                  className="portal-card group rounded-xl border border-border/60 p-4 transition hover:bg-muted/20"
+                  className="portal-card group flex flex-col rounded-xl border border-border/60 p-4 transition hover:border-border hover:bg-muted/30"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <div
-                        className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/50 text-xs font-semibold"
-                        style={{ color: getFolderColor(client.id) }}
-                      >
-                        {getClientMonogram(client.name)}
-                      </div>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <ClientMonogram name={client.name} id={client.id} />
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{client.name}</p>
+                        <p className="truncate text-sm font-semibold leading-snug">
+                          {client.name}
+                        </p>
                         <p className="mt-0.5 truncate text-xs text-muted-foreground">
                           {client.orgName}
                         </p>
                       </div>
                     </div>
-                    <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5" />
+                    <ChevronRight className="mt-2.5 size-4 shrink-0 text-muted-foreground/50 transition group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
                   </div>
 
-                  <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                    <span className="rounded-full border border-border/60 px-2 py-1 text-muted-foreground">
-                      {client.returns.length} returns
-                    </span>
-                    <span className="rounded-full border border-border/60 px-2 py-1 text-muted-foreground">
-                      {client.totalFiles} files
-                    </span>
-                    {client.autofillFieldCount > 0 ? (
-                      <span className="rounded-full border border-blue-500/20 bg-blue-500/[0.06] px-2 py-1 text-blue-700 dark:text-blue-300">
-                        {client.autofillFieldCount} autofill field{client.autofillFieldCount === 1 ? "" : "s"}
+                  <div className="mt-auto pt-4">
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        <FileText className="size-3" />
+                        {client.returns.length} return{client.returns.length !== 1 ? "s" : ""}
                       </span>
-                    ) : null}
-                  </div>
+                      <span className="text-border/80">|</span>
+                      <span>{client.totalFiles} file{client.totalFiles !== 1 ? "s" : ""}</span>
+                      {client.autofillFieldCount > 0 ? (
+                        <>
+                          <span className="text-border/80">|</span>
+                          <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                            <Sparkles className="size-3" />
+                            {client.autofillFieldCount} autofill
+                          </span>
+                        </>
+                      ) : null}
+                    </div>
 
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {returnPreview.map((row) => (
-                      <span
-                        key={row.id}
-                        className="rounded-full border border-border/60 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-muted-foreground"
-                      >
-                        {row.taxYear} {row.jurisdictionCode}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {autofillLabels.length > 0 ? (
-                      <>
-                        {autofillLabels.slice(0, 3).map((label) => (
+                    {years.length > 0 ? (
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        {years.map((year) => (
                           <span
-                            key={label}
-                            className="inline-flex rounded-full border border-blue-500/20 bg-blue-500/[0.06] px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:text-blue-300"
+                            key={year}
+                            className="rounded-md bg-muted/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                           >
-                            {label}
+                            {year}
                           </span>
                         ))}
-                        {autofillLabels.length > 3 ? (
-                          <span className="inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                            +{autofillLabels.length - 3}
-                          </span>
-                        ) : null}
-                      </>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        No prior-return autofill
-                      </span>
-                    )}
+                      </div>
+                    ) : null}
                   </div>
                 </Link>
               );
@@ -260,17 +290,21 @@ export default function DocumentsPage() {
           </section>
         ) : (
           <section className="portal-card overflow-hidden rounded-xl border border-border/60 p-0">
-            <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(12rem,0.8fr)_minmax(10rem,0.75fr)_minmax(0,1.2fr)] gap-4 border-b border-border/60 bg-muted/20 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            <div className="hidden border-b border-border/60 bg-muted/30 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1.5fr)_8rem_10rem_minmax(0,1fr)_1.25rem] sm:gap-4">
               <span>Client</span>
-              <span>Recent years</span>
+              <span>Years</span>
               <span>Coverage</span>
               <span>Autofill</span>
+              <span />
             </div>
-            <div className="divide-y divide-border/60">
-              {filteredClients.map((client) => {
+            <div className="divide-y divide-border/50">
+              {visibleClients.map((client) => {
                 const href = getClientHref(client.slug);
-                const autofillLabels = collectAutofillLabels(client);
-                const years = client.returns.slice(0, 4).map((row) => row.taxYear);
+                const years = Array.from(
+                  new Set(client.returns.map((r) => r.taxYear)),
+                )
+                  .sort((a, b) => b - a)
+                  .slice(0, 4);
 
                 return (
                   <Link
@@ -279,60 +313,67 @@ export default function DocumentsPage() {
                     prefetch
                     onMouseEnter={() => router.prefetch(href)}
                     onFocus={() => router.prefetch(href)}
-                    className="group grid grid-cols-[minmax(0,1.4fr)_minmax(12rem,0.8fr)_minmax(10rem,0.75fr)_minmax(0,1.2fr)] gap-4 px-4 py-4 transition hover:bg-muted/20"
+                    className="group flex flex-col gap-2 px-4 py-3.5 transition hover:bg-muted/20 sm:grid sm:grid-cols-[minmax(0,1.5fr)_8rem_10rem_minmax(0,1fr)_1.25rem] sm:items-center sm:gap-4"
                   >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="flex size-9 items-center justify-center rounded-2xl text-xs font-semibold text-slate-900"
-                          style={{
-                            background: `linear-gradient(145deg, ${getFolderColor(client.id)}22, ${getFolderColor(client.id)}55)`,
-                          }}
-                        >
-                          {getClientMonogram(client.name)}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">{client.name}</p>
-                          <p className="truncate text-xs text-muted-foreground">{client.orgName}</p>
-                        </div>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <ClientMonogram name={client.name} id={client.id} />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{client.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {client.orgName}
+                        </p>
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+
+                    <div className="flex flex-wrap gap-1.5 pl-[3.25rem] sm:pl-0">
                       {years.map((year) => (
                         <span
                           key={year}
-                          className="rounded-full border bg-background/80 px-2.5 py-1 text-[11px] font-medium"
+                          className="rounded-md bg-muted/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                         >
                           {year}
                         </span>
                       ))}
                     </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <span>{client.returns.length} returns</span>
-                      <span className="text-border">•</span>
-                      <span>{client.totalFiles} files</span>
+
+                    <p className="pl-[3.25rem] text-sm text-muted-foreground sm:pl-0">
+                      {client.returns.length} return{client.returns.length !== 1 ? "s" : ""}
+                      <span className="mx-1.5 text-border">·</span>
+                      {client.totalFiles} file{client.totalFiles !== 1 ? "s" : ""}
+                    </p>
+
+                    <div className="min-w-0 pl-[3.25rem] sm:pl-0">
+                      {client.autofillFieldCount > 0 ? (
+                        <p className="truncate text-sm text-blue-600 dark:text-blue-400">
+                          {client.autofillFieldCount} field{client.autofillFieldCount !== 1 ? "s" : ""}
+                        </p>
+                      ) : (
+                        <p className="truncate text-sm text-muted-foreground/60">
+                          None
+                        </p>
+                      )}
                     </div>
-                    <div className="flex min-w-0 items-center justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        {autofillLabels.length > 0 ? (
-                          <p className="truncate text-sm text-blue-700 dark:text-blue-300">
-                            {autofillLabels.slice(0, 2).join(" • ")}
-                            {autofillLabels.length > 2 ? ` +${autofillLabels.length - 2}` : ""}
-                          </p>
-                        ) : (
-                          <p className="truncate text-sm text-muted-foreground">
-                            No prior-return autofill
-                          </p>
-                        )}
-                      </div>
-                      <ChevronRight className="size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5" />
-                    </div>
+
+                    <ChevronRight className="hidden size-4 shrink-0 text-muted-foreground/40 transition group-hover:translate-x-0.5 group-hover:text-muted-foreground sm:block" />
                   </Link>
                 );
               })}
             </div>
           </section>
         )
+      ) : null}
+
+      {hasMore ? (
+        <div ref={sentinelRef} className="flex justify-center py-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 px-6"
+            onClick={loadMore}
+          >
+            Show more ({filteredClients.length - visibleCount} remaining)
+          </Button>
+        </div>
       ) : null}
 
       {!isLoading && !error && clients.length > 0 && filteredClients.length === 0 ? (

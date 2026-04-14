@@ -1164,6 +1164,49 @@ export const portalReturnsRouter = createTRPCRouter({
       return rows;
     }),
 
+  listByOrgSummary: protectedProcedure
+    .input(z.object({ orgId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      const rows = await ctx.db
+        .select({
+          id: taxReturns.id,
+          entityName: taxReturns.entityName,
+          taxYear: taxReturns.taxYear,
+          status: taxReturns.status,
+          jurisdictionCode: jurisdictions.code,
+          jurisdictionName: jurisdictions.name,
+          updatedAt: taxReturns.updatedAt,
+          isSubstanceComplete: sql<boolean | null>`
+            CASE
+              WHEN ${taxReturns.returnType} = 'economic_substance' THEN ${substanceForms.isComplete}
+              ELSE ${jerseyCompanyReturnForms.isComplete}
+            END
+          `,
+          fileCount: sql<number>`coalesce(jsonb_array_length(${taxReturns.files}), 0)`,
+        })
+        .from(taxReturns)
+        .innerJoin(
+          jurisdictions,
+          eq(taxReturns.jurisdictionId, jurisdictions.id),
+        )
+        .leftJoin(substanceForms, eq(substanceForms.taxReturnId, taxReturns.id))
+        .leftJoin(
+          jerseyCompanyReturnForms,
+          eq(jerseyCompanyReturnForms.taxReturnId, taxReturns.id),
+        )
+        .where(eq(taxReturns.orgId, input.orgId))
+        .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt));
+
+      return rows;
+    }),
+
   getSubstanceForm: protectedProcedure
     .input(
       z.object({

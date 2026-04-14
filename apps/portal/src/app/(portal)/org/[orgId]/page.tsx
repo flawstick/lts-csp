@@ -23,7 +23,7 @@ async function OrgDashboardData({
   orgName: string;
   accountName?: string | null;
 }) {
-  const rows = await api.portalReturns.listByOrg({ orgId }).catch(() => null);
+  const rows = await api.portalReturns.listByOrgSummary({ orgId }).catch(() => null);
 
   if (!rows) {
     notFound();
@@ -42,7 +42,7 @@ async function OrgDashboardData({
         jurisdictionCode: row.jurisdictionCode,
         jurisdictionName: row.jurisdictionName,
         isSubstanceComplete: !!row.isSubstanceComplete,
-        fileCount: row.files?.length ?? 0,
+        fileCount: Number(row.fileCount) || 0,
         updatedAt: row.updatedAt ? row.updatedAt.toISOString() : new Date(0).toISOString(),
       }))}
     />
