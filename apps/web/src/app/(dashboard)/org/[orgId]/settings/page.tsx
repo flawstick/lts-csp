@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
   Breadcrumb,
@@ -15,6 +15,8 @@ import { PageHeader } from "@/components/page-header"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { canEditOrgSettings, type OrgRole } from "@/lib/permissions"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
@@ -39,6 +41,11 @@ interface Organisation {
   name: string
   slug: string
   logoUrl: string | null
+  demoMode?: {
+    enabled: boolean
+    visibleClientNames: string[]
+  }
+  availableDemoClients?: string[]
 }
 
 interface Jurisdiction {
@@ -72,6 +79,11 @@ export default function OrgSettingsPage() {
   const [memberInfo, setMemberInfo] = useState<MemberInfo | null>(null)
   const [jurisdictions, setJurisdictions] = useState<Jurisdiction[]>([])
   const [credentials, setCredentials] = useState<Record<string, JurisdictionSetting>>({})
+  const [demoMode, setDemoMode] = useState({
+    enabled: false,
+    visibleClientNames: [] as string[],
+  })
+  const [demoClientSearch, setDemoClientSearch] = useState("")
   const [showPassword, setShowPassword] = useState<Record<string, boolean>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingJurisdictionSettings, setIsLoadingJurisdictionSettings] =
@@ -112,6 +124,19 @@ export default function OrgSettingsPage() {
     void fetchJurisdictionSettings()
   }, [orgId, canEdit])
 
+  const availableDemoClients = org?.availableDemoClients ?? []
+  const filteredDemoClients = useMemo(() => {
+    const query = demoClientSearch.trim().toLowerCase()
+
+    if (!query) {
+      return availableDemoClients
+    }
+
+    return availableDemoClients.filter((clientName) =>
+      clientName.toLowerCase().includes(query),
+    )
+  }, [availableDemoClients, demoClientSearch])
+
   async function fetchOrg() {
     try {
       const res = await fetch(`/api/orgs/${orgId}`)
@@ -123,6 +148,12 @@ export default function OrgSettingsPage() {
           slug: data.slug,
         })
         setLogoUrl(data.logoUrl)
+        setDemoMode({
+          enabled: data.demoMode?.enabled === true,
+          visibleClientNames: Array.isArray(data.demoMode?.visibleClientNames)
+            ? data.demoMode.visibleClientNames
+            : [],
+        })
       } else if (res.status === 404) {
         router.push("/")
       }
@@ -209,7 +240,10 @@ export default function OrgSettingsPage() {
       const res = await fetch(`/api/orgs/${org.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          demoMode,
+        }),
       })
 
       if (res.ok) {
@@ -297,6 +331,33 @@ export default function OrgSettingsPage() {
     setShowPassword((prev) => ({
       ...prev,
       [jurisdictionId]: !prev[jurisdictionId],
+    }))
+  }
+
+  function toggleDemoClient(clientName: string) {
+    setDemoMode((prev) => {
+      const hasClient = prev.visibleClientNames.includes(clientName)
+
+      return {
+        ...prev,
+        visibleClientNames: hasClient
+          ? prev.visibleClientNames.filter((name) => name !== clientName)
+          : [...prev.visibleClientNames, clientName],
+      }
+    })
+  }
+
+  function setAllDemoClients() {
+    setDemoMode((prev) => ({
+      ...prev,
+      visibleClientNames: availableDemoClients,
+    }))
+  }
+
+  function clearDemoClients() {
+    setDemoMode((prev) => ({
+      ...prev,
+      visibleClientNames: [],
     }))
   }
 
@@ -553,6 +614,121 @@ export default function OrgSettingsPage() {
 
           {canEdit && (
             <>
+              <Separator />
+
+              <div className="space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <h2 className="text-base font-medium">Portal Demo Mode</h2>
+                    <p className="text-muted-foreground text-sm">
+                      Restrict the portal to selected clients only for demos.
+                      This does not change the underlying returns.
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <Checkbox
+                      checked={demoMode.enabled}
+                      onCheckedChange={(checked) =>
+                        setDemoMode((prev) => ({
+                          ...prev,
+                          enabled: checked === true,
+                        }))
+                      }
+                    />
+                    Enable demo mode
+                  </label>
+                </div>
+
+                <div className="space-y-3 rounded-lg border p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Visible clients</p>
+                      <p className="text-muted-foreground text-xs">
+                        Selected clients stay visible across the portal while demo
+                        mode is enabled.
+                      </p>
+                    </div>
+                    <Badge variant="outline">
+                      {demoMode.visibleClientNames.length} selected
+                    </Badge>
+                  </div>
+
+                  {availableDemoClients.length > 0 ? (
+                    <>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <Input
+                          value={demoClientSearch}
+                          onChange={(e) => setDemoClientSearch(e.target.value)}
+                          placeholder="Search clients"
+                          className="h-9"
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={setAllDemoClients}
+                          >
+                            Select all
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={clearDemoClients}
+                          >
+                            Clear
+                          </Button>
+                        </div>
+                      </div>
+
+                      <ScrollArea className="h-56 rounded-md border">
+                        <div className="space-y-1 p-3">
+                          {filteredDemoClients.length > 0 ? (
+                            filteredDemoClients.map((clientName) => {
+                              const selected =
+                                demoMode.visibleClientNames.includes(clientName)
+
+                              return (
+                                <label
+                                  key={clientName}
+                                  className="flex cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-muted/50"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium">
+                                      {clientName}
+                                    </p>
+                                  </div>
+                                  <Checkbox
+                                    checked={selected}
+                                    onCheckedChange={() =>
+                                      toggleDemoClient(clientName)
+                                    }
+                                  />
+                                </label>
+                              )
+                            })
+                          ) : (
+                            <p className="text-muted-foreground px-2 py-6 text-sm">
+                              No clients match your search.
+                            </p>
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground text-sm">
+                      No existing clients were found for this organisation yet.
+                    </p>
+                  )}
+
+                  <p className="text-muted-foreground text-xs">
+                    If demo mode is enabled with no selected clients, the portal
+                    will show no client returns for this organisation.
+                  </p>
+                </div>
+              </div>
+
               <Separator />
 
               <div className="space-y-4">

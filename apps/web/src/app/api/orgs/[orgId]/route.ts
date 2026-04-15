@@ -1,8 +1,50 @@
-import { db } from "@repo/database"
-import { eq } from "drizzle-orm"
-import { accounts, organisations } from "@repo/database"
+import {
+  accounts,
+  db,
+  mergeOrgDemoModeSettings,
+  orgSettings,
+  organisations,
+  parseOrgDemoModeSettings,
+  taxReturns,
+} from "@repo/database"
+import { desc, eq } from "drizzle-orm"
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+
+async function getOrgResponse(orgId: string) {
+  const organisation = await db.query.organisations.findFirst({
+    where: eq(organisations.id, orgId),
+    with: {
+      settings: true,
+    },
+  })
+
+  if (!organisation) {
+    return null
+  }
+
+  const clientRows = await db
+    .select({
+      entityName: taxReturns.entityName,
+    })
+    .from(taxReturns)
+    .where(eq(taxReturns.orgId, orgId))
+    .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt))
+
+  const availableDemoClients = Array.from(
+    new Set(
+      clientRows
+        .map((row) => row.entityName.trim())
+        .filter((entityName) => entityName.length > 0),
+    ),
+  ).sort((a, b) => a.localeCompare(b))
+
+  return {
+    ...organisation,
+    demoMode: parseOrgDemoModeSettings(organisation.settings?.settings),
+    availableDemoClients,
+  }
+}
 
 export async function GET(
   request: Request,
@@ -17,9 +59,7 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const org = await db.query.organisations.findFirst({
-      where: eq(organisations.id, orgId),
-    })
+    const org = await getOrgResponse(orgId)
 
     if (!org) {
       return NextResponse.json({ error: "Organisation not found" }, { status: 404 })
@@ -55,7 +95,7 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { name, slug } = body
+    const { name, slug, demoMode } = body
 
     // Build update object
     const updateData: Partial<{ name: string; slug: string; updatedAt: Date }> = {
@@ -79,12 +119,40 @@ export async function PATCH(
       updateData.slug = slug
     }
 
-    // Update the organisation
-    const [updated] = await db
-      .update(organisations)
-      .set(updateData)
-      .where(eq(organisations.id, orgId))
-      .returning()
+    if (Object.keys(updateData).length > 1) {
+      await db
+        .update(organisations)
+        .set(updateData)
+        .where(eq(organisations.id, orgId))
+    }
+
+    if (demoMode !== undefined) {
+      const existingOrgSettings = await db.query.orgSettings.findFirst({
+        where: eq(orgSettings.orgId, orgId),
+      })
+
+      const nextSettings = mergeOrgDemoModeSettings(
+        existingOrgSettings?.settings,
+        demoMode,
+      )
+
+      if (existingOrgSettings) {
+        await db
+          .update(orgSettings)
+          .set({
+            settings: nextSettings,
+            updatedAt: new Date(),
+          })
+          .where(eq(orgSettings.orgId, orgId))
+      } else {
+        await db.insert(orgSettings).values({
+          orgId,
+          settings: nextSettings,
+        })
+      }
+    }
+
+    const updated = await getOrgResponse(orgId)
 
     return NextResponse.json(updated)
   } catch (error) {

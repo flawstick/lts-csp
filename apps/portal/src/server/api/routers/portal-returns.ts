@@ -11,10 +11,13 @@ import {
   accounts,
   createEmptyJerseyCompanyReturnFormData,
   getJerseyCompanyReturnMissingFields,
+  isDemoModeClientVisible,
   isJerseyCompanyReturnComplete,
   jerseyCompanyReturnForms,
   jurisdictions,
+  orgSettings,
   organisations,
+  parseOrgDemoModeSettings,
   portalMemberships,
   substanceForms,
   tasks,
@@ -704,12 +707,60 @@ async function assertActiveMembership(ctx: {
   return membership;
 }
 
+type PortalDemoModeMap = Map<
+  string,
+  ReturnType<typeof parseOrgDemoModeSettings>
+>;
+
+async function getPortalDemoModeMap(
+  db: TRPCContext["db"],
+  orgIds: string[],
+): Promise<PortalDemoModeMap> {
+  if (orgIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await db.query.orgSettings.findMany({
+    where: inArray(orgSettings.orgId, orgIds),
+    columns: {
+      orgId: true,
+      settings: true,
+    },
+  });
+
+  return new Map(
+    rows.map((row) => [row.orgId, parseOrgDemoModeSettings(row.settings)]),
+  );
+}
+
+function isPortalDemoVisible(
+  demoModeMap: PortalDemoModeMap,
+  orgId: string,
+  entityName: string | null | undefined,
+) {
+  const demoMode = demoModeMap.get(orgId);
+  if (!demoMode) {
+    return true;
+  }
+
+  return isDemoModeClientVisible(demoMode, entityName);
+}
+
+function filterPortalDemoRows<T extends { orgId: string; entityName: string }>(
+  rows: T[],
+  demoModeMap: PortalDemoModeMap,
+) {
+  return rows.filter((row) =>
+    isPortalDemoVisible(demoModeMap, row.orgId, row.entityName),
+  );
+}
+
 async function getPortalReturnForOrg(ctx: {
   db: TRPCContext["db"];
   orgId: string;
   taxReturnId: string;
 }) {
-  return ctx.db.query.taxReturns.findFirst({
+  const returnRecord = await ctx.db.query.taxReturns.findFirst({
     where: and(
       eq(taxReturns.id, ctx.taxReturnId),
       eq(taxReturns.orgId, ctx.orgId),
@@ -718,6 +769,17 @@ async function getPortalReturnForOrg(ctx: {
       jurisdiction: true,
     },
   });
+
+  if (!returnRecord) {
+    return null;
+  }
+
+  const demoModeMap = await getPortalDemoModeMap(ctx.db, [ctx.orgId]);
+  if (!isPortalDemoVisible(demoModeMap, ctx.orgId, returnRecord.entityName)) {
+    return null;
+  }
+
+  return returnRecord;
 }
 
 function assertGuernseyPortalReturnUnlocked(
@@ -805,6 +867,9 @@ export const portalReturnsRouter = createTRPCRouter({
         .where(eq(taxReturns.orgId, selectedOrg.orgId))
         .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt));
 
+      const demoModeMap = await getPortalDemoModeMap(ctx.db, [selectedOrg.orgId]);
+      const visibleRows = filterPortalDemoRows(rows, demoModeMap);
+
       const recentReturnIds = parseRecentReturnMetadata(
         ctx.user,
         selectedOrg.orgId,
@@ -820,7 +885,7 @@ export const portalReturnsRouter = createTRPCRouter({
         }
       >();
 
-      for (const row of rows) {
+      for (const row of visibleRows) {
         const entry = grouped.get(row.jurisdictionId);
         if (entry) {
           entry.rows.push(row);
@@ -925,6 +990,8 @@ export const portalReturnsRouter = createTRPCRouter({
       .innerJoin(jurisdictions, eq(taxReturns.jurisdictionId, jurisdictions.id))
       .where(inArray(taxReturns.orgId, orgIds))
       .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt));
+    const demoModeMap = await getPortalDemoModeMap(ctx.db, orgIds);
+    const visibleRows = filterPortalDemoRows(rows, demoModeMap);
 
     const autofillCandidates = await ctx.db.query.taxReturns.findMany({
       where: and(
@@ -1010,7 +1077,7 @@ export const portalReturnsRouter = createTRPCRouter({
       sources.sort((a, b) => b.taxYear - a.taxYear);
     }
 
-    return rows.map((row) => {
+    return visibleRows.map((row) => {
       if (row.returnType !== "economic_substance") {
         return {
           ...row,
@@ -1103,8 +1170,9 @@ export const portalReturnsRouter = createTRPCRouter({
         )
         .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt))
         .limit(input.limit);
+      const demoModeMap = await getPortalDemoModeMap(ctx.db, orgIds);
 
-      return rows;
+      return filterPortalDemoRows(rows, demoModeMap);
     }),
 
   listByOrg: protectedProcedure
@@ -1160,8 +1228,9 @@ export const portalReturnsRouter = createTRPCRouter({
         )
         .where(eq(taxReturns.orgId, input.orgId))
         .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt));
+      const demoModeMap = await getPortalDemoModeMap(ctx.db, [input.orgId]);
 
-      return rows;
+      return filterPortalDemoRows(rows, demoModeMap);
     }),
 
   listByOrgSummary: protectedProcedure
@@ -1177,6 +1246,7 @@ export const portalReturnsRouter = createTRPCRouter({
       const rows = await ctx.db
         .select({
           id: taxReturns.id,
+          orgId: taxReturns.orgId,
           entityName: taxReturns.entityName,
           taxYear: taxReturns.taxYear,
           status: taxReturns.status,
@@ -1203,8 +1273,9 @@ export const portalReturnsRouter = createTRPCRouter({
         )
         .where(eq(taxReturns.orgId, input.orgId))
         .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt));
+      const demoModeMap = await getPortalDemoModeMap(ctx.db, [input.orgId]);
 
-      return rows;
+      return filterPortalDemoRows(rows, demoModeMap);
     }),
 
   getSubstanceForm: protectedProcedure
@@ -1394,14 +1465,10 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
-        with: {
-          jurisdiction: true,
-        },
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -1444,14 +1511,10 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
-        with: {
-          jurisdiction: true,
-        },
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -1517,6 +1580,30 @@ export const portalReturnsRouter = createTRPCRouter({
         accountId: account.id,
         orgId: input.orgId,
       });
+
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
+      });
+
+      if (!returnRecord) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
+      }
+
+      if (
+        returnRecord.jurisdiction?.code !== "JE" ||
+        returnRecord.returnType !== "company"
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Jersey company form is only available for Jersey company returns.",
+        });
+      }
 
       const existing = await ctx.db.query.jerseyCompanyReturnForms.findFirst({
         where: eq(jerseyCompanyReturnForms.taxReturnId, input.taxReturnId),
@@ -1866,11 +1953,10 @@ export const portalReturnsRouter = createTRPCRouter({
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -2236,11 +2322,10 @@ ${cigaOptionsText}
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -2301,11 +2386,10 @@ ${cigaOptionsText}
         orgId: input.orgId,
       });
 
-      const returnRecord = await ctx.db.query.taxReturns.findFirst({
-        where: and(
-          eq(taxReturns.id, input.taxReturnId),
-          eq(taxReturns.orgId, input.orgId),
-        ),
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
       });
 
       if (!returnRecord) {
@@ -2345,15 +2429,23 @@ ${cigaOptionsText}
         orgId: input.orgId,
       });
 
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
+      });
+
+      if (!returnRecord) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
+      }
+
       await ctx.db
         .update(taxReturns)
         .set({ status: "pending", updatedAt: new Date() })
-        .where(
-          and(
-            eq(taxReturns.id, input.taxReturnId),
-            eq(taxReturns.orgId, input.orgId),
-          ),
-        );
+        .where(eq(taxReturns.id, input.taxReturnId));
 
       return { success: true };
     }),

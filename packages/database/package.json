@@ -29,6 +29,10 @@
     "./substance-autofill": {
       "types": "./src/substance-autofill.ts",
       "default": "./src/substance-autofill.ts"
+    },
+    "./demo-mode": {
+      "types": "./src/demo-mode.ts",
+      "default": "./src/demo-mode.ts"
     }
   },
   "scripts": {
