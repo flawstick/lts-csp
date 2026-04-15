@@ -5,9 +5,13 @@ import { z } from "zod";
 
 import {
   accounts,
+  mergeOrgDemoModeSettings,
+  orgSettings,
   organisations,
+  parseOrgDemoModeSettings,
   portalInvitations,
   portalMemberships,
+  taxReturns,
 } from "@repo/database";
 import { createTRPCRouter, protectedProcedure, publicProcedure } from "@/server/api/trpc";
 import type { TRPCContext } from "@/server/api/trpc";
@@ -364,11 +368,29 @@ export const portalAccessRouter = createTRPCRouter({
 
       const org = await ctx.db.query.organisations.findFirst({
         where: eq(organisations.id, input.orgId),
+        with: {
+          settings: true,
+        },
       });
 
       if (!org) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Organization not found" });
       }
+
+      const demoClientRows = await ctx.db
+        .select({
+          entityName: taxReturns.entityName,
+        })
+        .from(taxReturns)
+        .where(eq(taxReturns.orgId, input.orgId));
+
+      const availableDemoClients = Array.from(
+        new Set(
+          demoClientRows
+            .map((row) => row.entityName.trim())
+            .filter((entityName) => entityName.length > 0),
+        ),
+      ).sort((a, b) => a.localeCompare(b));
 
       return {
         id: org.id,
@@ -377,6 +399,8 @@ export const portalAccessRouter = createTRPCRouter({
         slug: org.slug,
         logoUrl: org.logoUrl,
         role: membership.role,
+        demoMode: parseOrgDemoModeSettings(org.settings?.settings),
+        availableDemoClients,
       };
     }),
 
@@ -410,6 +434,64 @@ export const portalAccessRouter = createTRPCRouter({
         .returning();
 
       return { accountName: updated?.accountName ?? null };
+    }),
+
+  updateDemoMode: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        enabled: z.boolean(),
+        visibleClientNames: z.array(z.string().min(1)).default([]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+
+      const membership = await ctx.db.query.portalMemberships.findFirst({
+        where: and(
+          eq(portalMemberships.accountId, account.id),
+          eq(portalMemberships.orgId, input.orgId),
+          eq(portalMemberships.status, "active"),
+        ),
+      });
+
+      if (membership?.role !== "admin") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only admins can update settings",
+        });
+      }
+
+      const existingSettings = await ctx.db.query.orgSettings.findFirst({
+        where: eq(orgSettings.orgId, input.orgId),
+      });
+
+      const nextSettings = mergeOrgDemoModeSettings(
+        existingSettings?.settings,
+        {
+          enabled: input.enabled,
+          visibleClientNames: input.visibleClientNames,
+        },
+      );
+
+      if (existingSettings) {
+        await ctx.db
+          .update(orgSettings)
+          .set({
+            settings: nextSettings,
+            updatedAt: new Date(),
+          })
+          .where(eq(orgSettings.orgId, input.orgId));
+      } else {
+        await ctx.db.insert(orgSettings).values({
+          orgId: input.orgId,
+          settings: nextSettings,
+        });
+      }
+
+      return {
+        demoMode: parseOrgDemoModeSettings(nextSettings),
+      };
     }),
 
   requestAccess: protectedProcedure.mutation(async ({ ctx }) => {

@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Check, Loader2, Settings } from "lucide-react";
 import { toast } from "sonner";
 
 import { api } from "@/trpc/react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function OrgSettingsPage() {
@@ -18,11 +20,37 @@ export default function OrgSettingsPage() {
   const utils = api.useUtils();
 
   const [accountName, setAccountName] = useState<string | null>(null);
+  const [demoEnabled, setDemoEnabled] = useState(false);
+  const [demoClientSearch, setDemoClientSearch] = useState("");
+  const [visibleClientNames, setVisibleClientNames] = useState<string[]>([]);
   const [hasEdited, setHasEdited] = useState(false);
+  const [hasDemoEdited, setHasDemoEdited] = useState(false);
 
   const displayValue = hasEdited
     ? (accountName ?? "")
     : (orgQuery.data?.accountName ?? "");
+
+  const availableDemoClients = orgQuery.data?.availableDemoClients ?? [];
+  const filteredDemoClients = useMemo(() => {
+    const query = demoClientSearch.trim().toLowerCase();
+    if (!query) {
+      return availableDemoClients;
+    }
+
+    return availableDemoClients.filter((clientName) =>
+      clientName.toLowerCase().includes(query),
+    );
+  }, [availableDemoClients, demoClientSearch]);
+
+  useEffect(() => {
+    if (!orgQuery.data) {
+      return;
+    }
+
+    setDemoEnabled(orgQuery.data.demoMode?.enabled === true);
+    setVisibleClientNames(orgQuery.data.demoMode?.visibleClientNames ?? []);
+    setHasDemoEdited(false);
+  }, [orgQuery.data]);
 
   const updateAccountName = api.portalAccess.updateAccountName.useMutation({
     onSuccess: () => {
@@ -33,7 +61,26 @@ export default function OrgSettingsPage() {
     onError: (err) => toast.error(err.message),
   });
 
+  const updateDemoMode = api.portalAccess.updateDemoMode.useMutation({
+    onSuccess: () => {
+      toast.success("Demo mode updated");
+      setHasDemoEdited(false);
+      void utils.portalAccess.getOrg.invalidate({ orgId });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const isAdmin = orgQuery.data?.role === "admin";
+
+  function toggleDemoClient(clientName: string) {
+    setVisibleClientNames((current) => {
+      const next = current.includes(clientName)
+        ? current.filter((name) => name !== clientName)
+        : [...current, clientName];
+      return next;
+    });
+    setHasDemoEdited(true);
+  }
 
   if (orgQuery.isLoading) {
     return (
@@ -53,6 +100,12 @@ export default function OrgSettingsPage() {
           <Skeleton className="h-4 w-28" />
           <Skeleton className="mt-1.5 h-3 w-64" />
           <Skeleton className="mt-4 h-9 w-full" />
+        </div>
+        <div className="rounded-xl border border-border/70 bg-card p-5 shadow-xs">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="mt-1.5 h-3 w-56" />
+          <Skeleton className="mt-4 h-9 w-full" />
+          <Skeleton className="mt-4 h-40 w-full" />
         </div>
       </div>
     );
@@ -117,6 +170,112 @@ export default function OrgSettingsPage() {
             Only admins can change this setting.
           </p>
         ) : null}
+      </div>
+
+      <div className="rounded-xl border border-border/70 bg-card p-5 shadow-xs">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold">Demo mode</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Restrict the portal to selected clients only for demos.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <Checkbox
+              checked={demoEnabled}
+              disabled={!isAdmin}
+              onCheckedChange={(checked) => {
+                setDemoEnabled(checked === true);
+                setHasDemoEdited(true);
+              }}
+            />
+            Enable
+          </label>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-xs text-muted-foreground">
+              Choose which clients stay visible while demo mode is on.
+            </p>
+            <span className="inline-flex items-center rounded-full border border-border/70 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+              {visibleClientNames.length} selected
+            </span>
+          </div>
+
+          <Input
+            value={demoClientSearch}
+            onChange={(e) => setDemoClientSearch(e.target.value)}
+            placeholder="Search clients"
+            disabled={!isAdmin || availableDemoClients.length === 0}
+            className="max-w-sm"
+          />
+
+          {availableDemoClients.length > 0 ? (
+            <ScrollArea className="h-56 rounded-lg border border-border/70">
+              <div className="space-y-1 p-3">
+                {filteredDemoClients.length > 0 ? (
+                  filteredDemoClients.map((clientName) => {
+                    const selected = visibleClientNames.includes(clientName);
+
+                    return (
+                      <label
+                        key={clientName}
+                        className="flex cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-muted/40"
+                      >
+                        <span className="min-w-0 truncate text-sm font-medium">
+                          {clientName}
+                        </span>
+                        <Checkbox
+                          checked={selected}
+                          disabled={!isAdmin}
+                          onCheckedChange={() => toggleDemoClient(clientName)}
+                        />
+                      </label>
+                    );
+                  })
+                ) : (
+                  <p className="px-2 py-6 text-sm text-muted-foreground">
+                    No clients match your search.
+                  </p>
+                )}
+              </div>
+            </ScrollArea>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No clients are available for this organisation yet.
+            </p>
+          )}
+
+          {isAdmin && hasDemoEdited ? (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                disabled={updateDemoMode.isPending}
+                onClick={() =>
+                  updateDemoMode.mutate({
+                    orgId,
+                    enabled: demoEnabled,
+                    visibleClientNames,
+                  })
+                }
+              >
+                {updateDemoMode.isPending ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Check className="size-3.5" />
+                )}
+                Save demo mode
+              </Button>
+            </div>
+          ) : null}
+
+          {!isAdmin ? (
+            <p className="text-xs text-muted-foreground">
+              Only admins can change this setting.
+            </p>
+          ) : null}
+        </div>
       </div>
     </div>
   );
