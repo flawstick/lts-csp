@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { PortalClientAccessActions } from "@/components/portal-client-access-actions";
 import {
   Select,
   SelectContent,
@@ -580,67 +581,74 @@ export default function OrgReturnsPage() {
                         <td className="text-muted-foreground px-4 py-3">
                           {formatDateTime(row.updatedAt)}
                         </td>
-                        <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                          <AlertDialog>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  className="size-8"
-                                >
-                                  <EllipsisVertical className="size-4" />
-                                  <span className="sr-only">Actions</span>
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-44">
-                                <DropdownMenuItem
-                                  className="cursor-pointer gap-2"
-                                  onClick={() => router.push(returnHref)}
-                                >
-                                  <ExternalLink className="size-3.5" />
-                                  Open
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                {isDismissed ? (
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-2">
+                            <PortalClientAccessActions
+                              taxReturnId={row.id}
+                              entityName={row.entityName}
+                              size="sm"
+                            />
+                            <AlertDialog>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    className="size-8"
+                                  >
+                                    <EllipsisVertical className="size-4" />
+                                    <span className="sr-only">Actions</span>
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-44">
                                   <DropdownMenuItem
                                     className="cursor-pointer gap-2"
-                                    onClick={() => undismissMutation.mutate({ orgId, taxReturnId: row.id })}
+                                    onClick={() => router.push(returnHref)}
                                   >
-                                    Restore
+                                    <ExternalLink className="size-3.5" />
+                                    Open
                                   </DropdownMenuItem>
-                                ) : (
-                                  <AlertDialogTrigger asChild>
+                                  <DropdownMenuSeparator />
+                                  {isDismissed ? (
                                     <DropdownMenuItem
-                                      variant="destructive"
                                       className="cursor-pointer gap-2"
-                                      onSelect={(e) => e.preventDefault()}
+                                      onClick={() => undismissMutation.mutate({ orgId, taxReturnId: row.id })}
                                     >
-                                      <XCircle className="size-3.5" />
-                                      Dismiss
+                                      Restore
                                     </DropdownMenuItem>
-                                  </AlertDialogTrigger>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Dismiss this return?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This will mark <strong>{row.entityName}</strong> ({row.taxYear}) as dismissed. You can restore it later from the returns list.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                  className={buttonVariants({ variant: "destructive" })}
-                                  onClick={() => dismissMutation.mutate({ orgId, taxReturnId: row.id })}
-                                >
-                                  Dismiss
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                                  ) : (
+                                    <AlertDialogTrigger asChild>
+                                      <DropdownMenuItem
+                                        variant="destructive"
+                                        className="cursor-pointer gap-2"
+                                        onSelect={(e) => e.preventDefault()}
+                                      >
+                                        <XCircle className="size-3.5" />
+                                        Dismiss
+                                      </DropdownMenuItem>
+                                    </AlertDialogTrigger>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Dismiss this return?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    This will mark <strong>{row.entityName}</strong> ({row.taxYear}) as dismissed. You can restore it later from the returns list.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    className={buttonVariants({ variant: "destructive" })}
+                                    onClick={() => dismissMutation.mutate({ orgId, taxReturnId: row.id })}
+                                  >
+                                    Dismiss
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
                         </td>
                       </tr>
                     );

@@ -22,6 +22,7 @@ import {
 import { buttonVariants } from "@/components/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import Magnet from "@/components/Magnet";
+import { PortalClientAccessActions } from "@/components/portal-client-access-actions";
 
 import {
   STATUS_CLASS,
@@ -106,6 +107,10 @@ export function ReturnWorkspaceHeader({
         </div>
 
         <div className="flex items-center gap-2">
+          <PortalClientAccessActions
+            taxReturnId={selectedReturn.id}
+            entityName={selectedReturn.entityName}
+          />
           {selectedStatus === "dismissed" && onUndismiss ? (
             <Button variant="outline" onClick={onUndismiss} disabled={isDismissing}>
               <RotateCcw className="size-4" />
