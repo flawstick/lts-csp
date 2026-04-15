@@ -162,7 +162,11 @@
   }
 
   .client-access-surface {
-    @apply portal-card rounded-[1.75rem] px-5 py-5 sm:px-6 sm:py-6;
+    @apply relative border border-border bg-card px-5 py-5 text-card-foreground sm:px-6 sm:py-6;
+    border-radius: var(--radius-3xl);
+    box-shadow:
+      0 0 0 4px oklch(0.922 0 0),
+      0 12px 24px -18px rgb(15 23 42 / 18%);
   }
 
   .client-access-kicker {
@@ -190,7 +194,11 @@
   }
 
   .client-access-card {
-    @apply portal-card rounded-[1.5rem] px-5 py-5;
+    @apply relative border border-border bg-card px-5 py-5 text-card-foreground;
+    border-radius: var(--radius-2xl);
+    box-shadow:
+      0 0 0 4px oklch(0.922 0 0),
+      0 12px 24px -18px rgb(15 23 42 / 18%);
   }
 
   .client-access-stat-grid {
@@ -223,5 +231,12 @@
 
   .client-access-section-button {
     @apply rounded-[1.15rem] border border-border bg-card px-4 py-4 text-left transition;
+  }
+
+  .dark .client-access-surface,
+  .dark .client-access-card {
+    box-shadow:
+      0 0 0 4px oklch(1 0 0 / 10%),
+      0 12px 24px -18px rgb(0 0 0 / 42%);
   }
 }

@@ -41,8 +41,16 @@ export async function upsertPortalClientProfile(input: {
   secondaryEmails?: string[] | null;
 }) {
   const normalizedEntityName = normalizeClientEntityName(input.entityName);
-  const displayName = input.displayName?.trim() || input.entityName.trim();
-  const primaryEmail = input.primaryEmail?.trim().toLowerCase() || null;
+  const trimmedDisplayName = input.displayName?.trim();
+  const displayName =
+    trimmedDisplayName && trimmedDisplayName.length > 0
+      ? trimmedDisplayName
+      : input.entityName.trim();
+  const trimmedPrimaryEmail = input.primaryEmail?.trim().toLowerCase();
+  const primaryEmail =
+    trimmedPrimaryEmail && trimmedPrimaryEmail.length > 0
+      ? trimmedPrimaryEmail
+      : null;
   const secondaryEmails = sanitizeClientSecondaryEmails(input.secondaryEmails);
 
   const existing = await input.db.query.portalClientProfiles.findFirst({
