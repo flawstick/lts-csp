@@ -65,7 +65,7 @@ export default function TermsOfServicePage() {
           <section className="space-y-4">
             <h2 className="text-xl font-semibold">6. Contact</h2>
             <p className="text-muted-foreground">
-              For questions about these Terms of Service, please contact us at legal@ltstax.com.
+              For questions about these Terms of Service, please contact us at legal@lts-tax.com.
             </p>
           </section>
         </div>

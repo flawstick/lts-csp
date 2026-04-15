@@ -15,6 +15,7 @@ import Folder from "@/components/Folder";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/trpc/react";
 import { DocumentsBackLink } from "../../_components/documents-back-link";
 import {
@@ -40,6 +41,7 @@ export default function ClientDocumentsPage() {
   const [searchValue, setSearchValue] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
   const [primaryEmail, setPrimaryEmail] = useState("");
+  const [secondaryEmails, setSecondaryEmails] = useState("");
   const [sendingReturnId, setSendingReturnId] = useState<string | null>(null);
 
   const clientSlug = params.clientSlug;
@@ -100,7 +102,12 @@ export default function ClientDocumentsPage() {
 
   useEffect(() => {
     setPrimaryEmail(clientProfileQuery.data?.primaryEmail ?? "");
-  }, [clientProfileQuery.data?.primaryEmail, client?.id]);
+    setSecondaryEmails((clientProfileQuery.data?.secondaryEmails ?? []).join("\n"));
+  }, [
+    clientProfileQuery.data?.primaryEmail,
+    clientProfileQuery.data?.secondaryEmails,
+    client?.id,
+  ]);
 
   useEffect(() => {
     if (!client || !filteredReturns.length) return;
@@ -163,8 +170,9 @@ export default function ClientDocumentsPage() {
               </p>
             </div>
 
-            <div className="flex w-full max-w-xl flex-col gap-2 sm:flex-row sm:items-end">
-              <div className="flex-1 space-y-2">
+            <div className="flex w-full max-w-3xl flex-col gap-3">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+                <div className="space-y-2">
                 <Label htmlFor="client-primary-email">Primary email</Label>
                 <Input
                   id="client-primary-email"
@@ -173,32 +181,51 @@ export default function ClientDocumentsPage() {
                   onChange={(event) => setPrimaryEmail(event.target.value)}
                   placeholder="client@example.com"
                 />
-              </div>
-              <Button
-                disabled={upsertClientProfileMutation.isPending}
-                onClick={async () => {
-                  if (!client) return;
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="client-secondary-emails">Secondary emails</Label>
+                  <Textarea
+                    id="client-secondary-emails"
+                    value={secondaryEmails}
+                    onChange={(event) => setSecondaryEmails(event.target.value)}
+                    placeholder={"finance@example.com\nops@example.com"}
+                    className="min-h-24"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    One email per line. Access links will be sent to the primary
+                    email and all secondary emails.
+                  </p>
+                </div>
+                <Button
+                  disabled={upsertClientProfileMutation.isPending}
+                  onClick={async () => {
+                    if (!client) return;
 
-                  try {
-                    await upsertClientProfileMutation.mutateAsync({
-                      orgId: client.orgId,
-                      entityName: client.name,
-                      displayName: client.name,
-                      primaryEmail: primaryEmail.trim() ? primaryEmail.trim() : null,
-                    });
-                    toast.success("Primary email saved.");
-                    void clientProfileQuery.refetch();
-                  } catch (error) {
-                    toast.error(
-                      error instanceof Error
-                        ? error.message
-                        : "Unable to save primary email.",
-                    );
-                  }
-                }}
-              >
-                Save email
-              </Button>
+                    try {
+                      await upsertClientProfileMutation.mutateAsync({
+                        orgId: client.orgId,
+                        entityName: client.name,
+                        displayName: client.name,
+                        primaryEmail: primaryEmail.trim() ? primaryEmail.trim() : null,
+                        secondaryEmails: secondaryEmails
+                          .split(/[\n,]+/)
+                          .map((email) => email.trim())
+                          .filter(Boolean),
+                      });
+                      toast.success("Client recipient emails saved.");
+                      void clientProfileQuery.refetch();
+                    } catch (error) {
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : "Unable to save client emails.",
+                      );
+                    }
+                  }}
+                >
+                  Save emails
+                </Button>
+              </div>
             </div>
           </div>
         </section>
@@ -302,28 +329,29 @@ export default function ClientDocumentsPage() {
                     className="h-8"
                     disabled={sendingReturnId === returnFolder.id}
                     onClick={async () => {
-                      const email = primaryEmail.trim();
-                      if (!email) {
-                        toast.error("Set a primary email first.");
-                        return;
-                      }
-
                       setSendingReturnId(returnFolder.id);
                       try {
                         await upsertClientProfileMutation.mutateAsync({
                           orgId: client.orgId,
                           entityName: client.name,
                           displayName: client.name,
-                          primaryEmail: email,
+                          primaryEmail: primaryEmail.trim() ? primaryEmail.trim() : null,
+                          secondaryEmails: secondaryEmails
+                            .split(/[\n,]+/)
+                            .map((email) => email.trim())
+                            .filter(Boolean),
                         });
                         const result =
                           await sendClientAccessLinkMutation.mutateAsync({
                             taxReturnId: returnFolder.id,
-                            email,
                             sendEmail: true,
                           });
-                        await navigator.clipboard.writeText(result.accessUrl);
-                        toast.success("Access link emailed and copied.");
+                        if (result.accessUrl) {
+                          await navigator.clipboard.writeText(result.accessUrl);
+                        }
+                        toast.success(
+                          `Access link emailed to ${result.recipientEmails.length} recipient(s).`,
+                        );
                       } catch (error) {
                         toast.error(
                           error instanceof Error
@@ -346,26 +374,26 @@ export default function ClientDocumentsPage() {
                     className="h-8"
                     disabled={sendingReturnId === returnFolder.id}
                     onClick={async () => {
-                      const email = primaryEmail.trim();
-                      if (!email) {
-                        toast.error("Set a primary email first.");
-                        return;
-                      }
-
                       setSendingReturnId(returnFolder.id);
                       try {
                         await upsertClientProfileMutation.mutateAsync({
                           orgId: client.orgId,
                           entityName: client.name,
                           displayName: client.name,
-                          primaryEmail: email,
+                          primaryEmail: primaryEmail.trim() ? primaryEmail.trim() : null,
+                          secondaryEmails: secondaryEmails
+                            .split(/[\n,]+/)
+                            .map((email) => email.trim())
+                            .filter(Boolean),
                         });
                         const result =
                           await sendClientAccessLinkMutation.mutateAsync({
                             taxReturnId: returnFolder.id,
-                            email,
                             sendEmail: false,
                           });
+                        if (!result.accessUrl) {
+                          throw new Error("No access URL could be generated.");
+                        }
                         await navigator.clipboard.writeText(result.accessUrl);
                         toast.success("Access link copied.");
                       } catch (error) {

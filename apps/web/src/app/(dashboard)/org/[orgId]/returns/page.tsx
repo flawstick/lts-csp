@@ -65,6 +65,7 @@ import Link from "next/link"
 import { api } from "@/trpc/react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SyncJobsDialog } from "@/components/sync-jobs-dialog"
+import { SendClientAccessAction } from "@/components/send-client-access-action"
 
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | "dismissed" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
@@ -249,6 +250,11 @@ function createColumns(
                     </a>
                   </DropdownMenuItem>
                 )}
+                <SendClientAccessAction
+                  taxReturnId={item.id}
+                  entityName={item.entityName}
+                  mode="menu-item"
+                />
                 <DropdownMenuSeparator />
                 {item.status !== "dismissed" && item.status !== "completed" ? (
                   <DropdownMenuItem onClick={() => dismissMutation.mutate({ taxReturnId: item.id })}>

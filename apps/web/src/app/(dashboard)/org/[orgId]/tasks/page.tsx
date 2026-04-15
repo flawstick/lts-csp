@@ -83,6 +83,7 @@ import {
 import Link from "next/link"
 import { api } from "@/trpc/react"
 import { useParams, useRouter } from "next/navigation"
+import { SendClientAccessAction } from "@/components/send-client-access-action"
 
 type StatusFilter = "pending" | "in_progress" | "completed" | "failed" | "cancelled" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
@@ -579,6 +580,13 @@ export default function TasksPage() {
                                           <ExternalLink className="mr-2 h-4 w-4" />
                                           View Details
                                         </DropdownMenuItem>
+                                        {task.taxReturn ? (
+                                          <SendClientAccessAction
+                                            taxReturnId={task.taxReturn.id}
+                                            entityName={task.taxReturn.entityName}
+                                            mode="menu-item"
+                                          />
+                                        ) : null}
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem
                                           variant="destructive"

@@ -16,9 +16,13 @@ import {
   portalMemberships,
   taxReturns,
 } from "@repo/database";
-import { hashClientAccessToken } from "@repo/database/client-access";
+import {
+  getClientAccessRecipientEmails,
+  hashClientAccessToken,
+} from "@repo/database/client-access";
 import {
   getPortalClientProfileByEntityName,
+  getPortalClientAccessRecipientEmails,
   upsertPortalClientProfile,
 } from "@/server/client-access";
 import { createTRPCRouter, protectedProcedure, publicProcedure } from "@/server/api/trpc";
@@ -553,6 +557,7 @@ export const portalAccessRouter = createTRPCRouter({
         entityName: z.string().min(1),
         displayName: z.string().min(1).max(256).optional(),
         primaryEmail: z.string().email().nullable().optional(),
+        secondaryEmails: z.array(z.string().email()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -579,6 +584,7 @@ export const portalAccessRouter = createTRPCRouter({
         entityName: input.entityName,
         displayName: input.displayName ?? input.entityName,
         primaryEmail: input.primaryEmail ?? null,
+        secondaryEmails: input.secondaryEmails ?? [],
       });
     }),
 
@@ -623,50 +629,62 @@ export const portalAccessRouter = createTRPCRouter({
         });
       }
 
+      const existingClientProfile = await getPortalClientProfileByEntityName({
+        db: ctx.db,
+        orgId: taxReturn.orgId,
+        entityName: taxReturn.entityName,
+      });
+
       const clientProfile = await upsertPortalClientProfile({
         db: ctx.db,
         orgId: taxReturn.orgId,
         entityName: taxReturn.entityName,
         displayName: taxReturn.entityName,
-        primaryEmail:
-          input.email ??
-          (
-            await getPortalClientProfileByEntityName({
-              db: ctx.db,
-              orgId: taxReturn.orgId,
-              entityName: taxReturn.entityName,
-            })
-          )?.primaryEmail ??
-          null,
+        primaryEmail: input.email ?? existingClientProfile?.primaryEmail ?? null,
+        secondaryEmails: existingClientProfile?.secondaryEmails ?? [],
       });
 
-      const recipientEmail = input.email ?? clientProfile?.primaryEmail ?? null;
-      if (!recipientEmail) {
+      const recipientEmails = input.email
+        ? getClientAccessRecipientEmails({ overrideEmail: input.email })
+        : getPortalClientAccessRecipientEmails(clientProfile);
+
+      if (!recipientEmails.length) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Set a primary email for this client before sending access.",
+          message:
+            "Set a primary or secondary client email before sending access.",
         });
       }
 
-      const rawToken = crypto.randomBytes(32).toString("hex");
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + input.expiresInDays);
+      const shareIds: string[] = [];
+      const accessUrls: string[] = [];
 
-      const [share] = await ctx.db
-        .insert(portalReturnShares)
-        .values({
-          orgId: taxReturn.orgId,
-          taxReturnId: taxReturn.id,
-          clientProfileId: clientProfile?.id ?? null,
-          recipientEmail,
-          tokenHash: hashClientAccessToken(rawToken),
-          expiresAt,
-          lastSentAt: new Date(),
-          createdBy: account.id,
-        })
-        .returning();
+      for (const recipientEmail of recipientEmails) {
+        const rawToken = crypto.randomBytes(32).toString("hex");
+        const [share] = await ctx.db
+          .insert(portalReturnShares)
+          .values({
+            orgId: taxReturn.orgId,
+            taxReturnId: taxReturn.id,
+            clientProfileId: clientProfile?.id ?? null,
+            recipientEmail,
+            tokenHash: hashClientAccessToken(rawToken),
+            expiresAt,
+            lastSentAt: new Date(),
+            createdBy: account.id,
+          })
+          .returning();
 
-      const accessUrl = buildClientAccessUrl(rawToken);
+        if (share?.id) {
+          shareIds.push(share.id);
+        }
+
+        accessUrls.push(buildClientAccessUrl(rawToken));
+      }
+
+      const accessUrl = accessUrls[0] ?? null;
 
       if (input.sendEmail) {
         if (!resend) {
@@ -676,61 +694,70 @@ export const portalAccessRouter = createTRPCRouter({
           });
         }
 
-        const { error } = await resend.emails.send({
-          from: "LTS Client Portal <noreply@ltstax.com>",
-          to: [recipientEmail],
-          subject: `${taxReturn.entityName} ${taxReturn.taxYear} return ready for completion`,
-          html: `
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              </head>
-              <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-                <div style="background: #0f172a; padding: 28px; border-radius: 10px 10px 0 0; text-align: center;">
-                  <h1 style="color: white; margin: 0; font-size: 28px;">LTS Client Portal</h1>
-                </div>
-                <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
-                  <h2 style="color: #1f2937; margin-top: 0;">Return ready for completion</h2>
-                  <p style="color: #4b5563;">
-                    You can now review and complete the <strong>${taxReturn.jurisdiction?.name ?? "tax"}</strong> return for <strong>${taxReturn.entityName}</strong> for tax year <strong>${taxReturn.taxYear}</strong>.
-                  </p>
-                  <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <p style="margin: 0; color: #475569; font-size: 14px;">
-                      <strong>Client:</strong> ${taxReturn.entityName}<br>
-                      <strong>Jurisdiction:</strong> ${taxReturn.jurisdiction?.name ?? "Tax return"}<br>
-                      <strong>Tax year:</strong> ${taxReturn.taxYear}<br>
-                      <strong>Link expires:</strong> ${expiresAt.toLocaleDateString("en-GB")}
-                    </p>
-                  </div>
-                  <p style="color: #4b5563;">
-                    The link below opens a dedicated client view where you can upload documents, run extraction, and complete the return without using the internal portal sidebar.
-                  </p>
-                  <div style="text-align: center; margin: 30px 0;">
-                    <a href="${accessUrl}" style="background: #0f172a; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; display: inline-block;">
-                      Open return
-                    </a>
-                  </div>
-                </div>
-              </body>
-            </html>
-          `,
-        });
+        for (let index = 0; index < recipientEmails.length; index += 1) {
+          const recipientEmail = recipientEmails[index];
+          const recipientAccessUrl = accessUrls[index];
+          if (!recipientEmail || !recipientAccessUrl) continue;
 
-        if (error) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: error.message,
+          const { error } = await resend.emails.send({
+            from: "LTS Client Portal <noreply@lts-tax.com>",
+            to: [recipientEmail],
+            subject: `${taxReturn.entityName} ${taxReturn.taxYear} return ready for completion`,
+            html: `
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <meta charset="utf-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                </head>
+                <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                  <div style="background: #0f172a; padding: 28px; border-radius: 10px 10px 0 0; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 28px;">LTS Client Portal</h1>
+                  </div>
+                  <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
+                    <h2 style="color: #1f2937; margin-top: 0;">Return ready for completion</h2>
+                    <p style="color: #4b5563;">
+                      You can now review and complete the <strong>${taxReturn.jurisdiction?.name ?? "tax"}</strong> return for <strong>${taxReturn.entityName}</strong> for tax year <strong>${taxReturn.taxYear}</strong>.
+                    </p>
+                    <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                      <p style="margin: 0; color: #475569; font-size: 14px;">
+                        <strong>Client:</strong> ${taxReturn.entityName}<br>
+                        <strong>Jurisdiction:</strong> ${taxReturn.jurisdiction?.name ?? "Tax return"}<br>
+                        <strong>Tax year:</strong> ${taxReturn.taxYear}<br>
+                        <strong>Link expires:</strong> ${expiresAt.toLocaleDateString("en-GB")}
+                      </p>
+                    </div>
+                    <p style="color: #4b5563;">
+                      The link below opens a dedicated client view where you can upload documents, run extraction, and complete the return without using the internal portal sidebar.
+                    </p>
+                    <div style="text-align: center; margin: 30px 0;">
+                      <a href="${recipientAccessUrl}" style="background: #0f172a; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; display: inline-block;">
+                        Open return
+                      </a>
+                    </div>
+                  </div>
+                </body>
+              </html>
+            `,
           });
+
+          if (error) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: error.message,
+            });
+          }
         }
       }
 
       return {
-        shareId: share?.id ?? null,
+        shareId: shareIds[0] ?? null,
+        shareIds,
         accessUrl,
+        accessUrls,
         expiresAt,
-        recipientEmail,
+        recipientEmail: recipientEmails[0] ?? null,
+        recipientEmails,
         emailed: input.sendEmail,
       };
     }),

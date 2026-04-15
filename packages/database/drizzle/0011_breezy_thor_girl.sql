@@ -1,0 +1,1 @@
+ALTER TABLE "lts_portal_client_profile" ADD COLUMN "secondary_emails" jsonb DEFAULT '[]'::jsonb NOT NULL;

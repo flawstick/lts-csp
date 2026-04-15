@@ -417,6 +417,7 @@ export const portalClientProfiles = createTable(
     }).notNull(),
     displayName: varchar("display_name", { length: 256 }).notNull(),
     primaryEmail: varchar("primary_email", { length: 320 }),
+    secondaryEmails: jsonb("secondary_emails").$type<string[]>().default([]).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

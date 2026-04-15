@@ -42,7 +42,7 @@ export const portalFeedbackRouter = createTRPCRouter({
         ?? "Portal User";
 
       const { error } = await resend.emails.send({
-        from: "LTS Tax Portal <noreply@ltstax.com>",
+        from: "LTS Tax Portal <noreply@lts-tax.com>",
         to: ["dev@flawstick.com"],
         replyTo: ctx.user.email ?? undefined,
         subject: `Portal Feedback from ${userName}`,

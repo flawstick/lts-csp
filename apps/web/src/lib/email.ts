@@ -29,7 +29,7 @@ export async function sendInvitationEmail(params: InvitationEmailParams) {
   });
 
   const { data, error } = await resend.emails.send({
-    from: "LTS Tax <noreply@ltstax.com>",
+    from: "LTS Tax <noreply@lts-tax.com>",
     to: [to],
     subject: `You've been invited to join ${organisationName} on LTS Tax`,
     html: `
@@ -116,7 +116,7 @@ export async function sendInvoiceEmail(params: InvoiceEmailParams) {
     : "Upon receipt";
 
   const { data, error } = await resend.emails.send({
-    from: "LTS Tax <billing@ltstax.com>",
+    from: "LTS Tax <billing@lts-tax.com>",
     to: [to],
     subject: `Invoice ${invoiceNumber} from LTS Tax`,
     html: `
@@ -197,7 +197,7 @@ export async function sendFeedbackEmail(params: FeedbackEmailParams) {
   const { from, userName, feedback } = params;
 
   const { data, error } = await resend.emails.send({
-    from: "LTS Tax <noreply@ltstax.com>",
+    from: "LTS Tax <noreply@lts-tax.com>",
     to: ["dev@flawstick.com"],
     replyTo: from,
     subject: `Feedback from ${userName}`,
@@ -240,6 +240,70 @@ export async function sendFeedbackEmail(params: FeedbackEmailParams) {
 
   if (error) {
     throw new Error(`Failed to send feedback email: ${error.message}`);
+  }
+
+  return data;
+}
+
+interface ClientReturnAccessEmailParams {
+  to: string;
+  jurisdictionName: string;
+  entityName: string;
+  taxYear: number;
+  accessUrl: string;
+  expiresAt: Date;
+}
+
+export async function sendClientReturnAccessEmail(
+  params: ClientReturnAccessEmailParams,
+) {
+  const { to, jurisdictionName, entityName, taxYear, accessUrl, expiresAt } =
+    params;
+
+  const { data, error } = await resend.emails.send({
+    from: "LTS Client Portal <noreply@lts-tax.com>",
+    to: [to],
+    subject: `${entityName} ${taxYear} return ready for completion`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: #0f172a; padding: 28px; border-radius: 10px 10px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 28px;">LTS Client Portal</h1>
+          </div>
+          <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
+            <h2 style="color: #1f2937; margin-top: 0;">Return ready for completion</h2>
+            <p style="color: #4b5563;">
+              You can now review and complete the <strong>${jurisdictionName}</strong> return for <strong>${entityName}</strong> for tax year <strong>${taxYear}</strong>.
+            </p>
+            <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <p style="margin: 0; color: #475569; font-size: 14px;">
+                <strong>Client:</strong> ${entityName}<br>
+                <strong>Jurisdiction:</strong> ${jurisdictionName}<br>
+                <strong>Tax year:</strong> ${taxYear}<br>
+                <strong>Link expires:</strong> ${expiresAt.toLocaleDateString("en-GB")}
+              </p>
+            </div>
+            <p style="color: #4b5563;">
+              The link below opens a dedicated client view where files can be uploaded, extraction can be run, and the return can be completed without using the internal portal sidebar.
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${accessUrl}" style="background: #0f172a; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; display: inline-block;">
+                Open return
+              </a>
+            </div>
+          </div>
+        </body>
+      </html>
+    `,
+  });
+
+  if (error) {
+    throw new Error(`Failed to send client access email: ${error.message}`);
   }
 
   return data;

@@ -7,8 +7,10 @@ import {
   taxReturns,
 } from "@repo/database";
 import {
+  getClientAccessRecipientEmails,
   hashClientAccessToken,
   normalizeClientEntityName,
+  sanitizeClientSecondaryEmails,
 } from "@repo/database/client-access";
 
 import type { TRPCContext } from "@/server/api/trpc";
@@ -36,10 +38,12 @@ export async function upsertPortalClientProfile(input: {
   entityName: string;
   displayName?: string | null;
   primaryEmail?: string | null;
+  secondaryEmails?: string[] | null;
 }) {
   const normalizedEntityName = normalizeClientEntityName(input.entityName);
   const displayName = input.displayName?.trim() || input.entityName.trim();
-  const primaryEmail = input.primaryEmail?.trim() || null;
+  const primaryEmail = input.primaryEmail?.trim().toLowerCase() || null;
+  const secondaryEmails = sanitizeClientSecondaryEmails(input.secondaryEmails);
 
   const existing = await input.db.query.portalClientProfiles.findFirst({
     where: and(
@@ -54,6 +58,7 @@ export async function upsertPortalClientProfile(input: {
       .set({
         displayName,
         primaryEmail,
+        secondaryEmails,
         updatedAt: new Date(),
       })
       .where(eq(portalClientProfiles.id, existing.id))
@@ -69,10 +74,21 @@ export async function upsertPortalClientProfile(input: {
       normalizedEntityName,
       displayName,
       primaryEmail,
+      secondaryEmails,
     })
     .returning();
 
   return created ?? null;
+}
+
+export function getPortalClientAccessRecipientEmails(profile: {
+  primaryEmail?: string | null;
+  secondaryEmails?: string[] | null;
+} | null | undefined) {
+  return getClientAccessRecipientEmails({
+    primaryEmail: profile?.primaryEmail ?? null,
+    secondaryEmails: profile?.secondaryEmails ?? [],
+  });
 }
 
 export async function getLatestPortalReturnShareForReturn(input: {

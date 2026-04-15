@@ -73,7 +73,7 @@ export default function PrivacyPolicyPage() {
           <section className="space-y-4">
             <h2 className="text-xl font-semibold">7. Contact</h2>
             <p className="text-muted-foreground">
-              For questions about this Privacy Policy, please contact us at privacy@ltstax.com.
+              For questions about this Privacy Policy, please contact us at privacy@lts-tax.com.
             </p>
           </section>
         </div>
