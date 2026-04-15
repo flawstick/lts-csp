@@ -99,7 +99,7 @@ function buildClientAccessUrl(token: string) {
   const baseUrl =
     process.env.PORTAL_BASE_URL ??
     process.env.NEXT_PUBLIC_PORTAL_BASE_URL ??
-    "http://localhost:3001";
+    "https://portal.lts-tax.com";
 
   return `${baseUrl.replace(/\/$/, "")}/client-access/${token}`;
 }

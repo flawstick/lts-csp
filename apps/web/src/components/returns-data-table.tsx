@@ -53,7 +53,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { api } from "@/trpc/react"
-import { SendClientAccessAction } from "@/components/send-client-access-action"
 
 type TaxReturn = {
   id: string
@@ -216,11 +215,6 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
               </a>
             </DropdownMenuItem>
           )}
-          <SendClientAccessAction
-            taxReturnId={row.original.id}
-            entityName={row.original.entityName}
-            mode="menu-item"
-          />
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive">Delete</DropdownMenuItem>
         </DropdownMenuContent>

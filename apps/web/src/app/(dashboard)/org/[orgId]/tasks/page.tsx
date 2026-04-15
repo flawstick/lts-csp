@@ -83,7 +83,6 @@ import {
 import Link from "next/link"
 import { api } from "@/trpc/react"
 import { useParams, useRouter } from "next/navigation"
-import { SendClientAccessAction } from "@/components/send-client-access-action"
 
 type StatusFilter = "pending" | "in_progress" | "completed" | "failed" | "cancelled" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
@@ -558,13 +557,6 @@ export default function TasksPage() {
                                 return (
                                   <TableCell key={cell.id} className="text-right" onClick={(e) => e.stopPropagation()}>
                                     <div className="flex items-center justify-end gap-2">
-                                      {task.taxReturn ? (
-                                        <SendClientAccessAction
-                                          taxReturnId={task.taxReturn.id}
-                                          entityName={task.taxReturn.entityName}
-                                          buttonLabel="Send to client"
-                                        />
-                                      ) : null}
                                       <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
                                           <Button

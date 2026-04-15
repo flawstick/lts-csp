@@ -65,7 +65,6 @@ import Link from "next/link"
 import { api } from "@/trpc/react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SyncJobsDialog } from "@/components/sync-jobs-dialog"
-import { SendClientAccessAction } from "@/components/send-client-access-action"
 
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | "dismissed" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
@@ -227,11 +226,6 @@ function createColumns(
                 </Link>
               </Button>
             )}
-            <SendClientAccessAction
-              taxReturnId={item.id}
-              entityName={item.entityName}
-              buttonLabel="Send to client"
-            />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="h-8 w-8 p-0">

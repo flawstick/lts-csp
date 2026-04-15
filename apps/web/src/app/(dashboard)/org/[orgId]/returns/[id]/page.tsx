@@ -46,7 +46,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { SendClientAccessAction } from "@/components/send-client-access-action";
 
 type FileInfo = {
   url: string;
@@ -371,11 +370,6 @@ export default function ReturnDetailPage() {
               >
                 {taxReturn.status.replace("_", " ")}
               </Badge>
-              <SendClientAccessAction
-                taxReturnId={taxReturn.id}
-                entityName={taxReturn.entityName}
-                buttonLabel="Send to client to fill out form"
-              />
               {taxReturn.link && (
                 <Button variant="outline" size="sm" asChild>
                   <a

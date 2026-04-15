@@ -1,11 +1,8 @@
 import { TRPCError } from "@trpc/server";
-import crypto from "crypto";
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
 import { env } from "@/env";
 import {
-  portalClientProfiles,
-  portalReturnShares,
   createEmptyJerseyCompanyReturnFormData,
   db,
   getJerseyCompanyReturnMissingFields,
@@ -23,11 +20,6 @@ import {
   taxReturnFileCategories,
   taxReturnFileRoles,
 } from "@repo/database";
-import {
-  getClientAccessRecipientEmails,
-  hashClientAccessToken,
-  normalizeClientEntityName,
-} from "@repo/database/client-access";
 import { asc, desc, sql, eq, and, lt, inArray, or } from "drizzle-orm";
 import {
   CloudWatchLogsClient,
@@ -37,7 +29,6 @@ import * as cheerio from "cheerio";
 import { decryptPortalCredentials } from "@repo/database/portal-credentials";
 import { launchBrowserTask } from "@/lib/ecs";
 import { triggerTaxSync } from "@/lib/tax-sync-launcher";
-import { sendClientReturnAccessEmail } from "@/lib/email";
 import {
   jerseyCompanyReturnFormSchema,
   sanitizeJerseyCompanyReturnData,
@@ -58,15 +49,6 @@ type TaxReturnFileRecord = {
 };
 
 const BROWSER_HEARTBEAT_STALE_MS = 60_000;
-
-function buildClientAccessUrl(token: string) {
-  const baseUrl =
-    process.env.PORTAL_BASE_URL ??
-    process.env.NEXT_PUBLIC_PORTAL_BASE_URL ??
-    "http://localhost:3001";
-
-  return `${baseUrl.replace(/\/$/, "")}/client-access/${token}`;
-}
 
 function getResultDataRecord(
   resultData: unknown,
@@ -554,105 +536,6 @@ export const taxReturnRouter = createTRPCRouter({
       }
 
       return taxReturn;
-    }),
-
-  sendClientAccessLink: publicProcedure
-    .input(
-      z.object({
-        taxReturnId: z.string().uuid(),
-        expiresInDays: z.number().int().min(1).max(30).default(14),
-        sendEmail: z.boolean().default(true),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const taxReturn = await ctx.db.query.taxReturns.findFirst({
-        where: eq(taxReturns.id, input.taxReturnId),
-        with: {
-          jurisdiction: true,
-        },
-      });
-
-      if (!taxReturn) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Return not found.",
-        });
-      }
-
-      const normalizedEntityName = normalizeClientEntityName(
-        taxReturn.entityName,
-      );
-      const clientProfile = await ctx.db.query.portalClientProfiles.findFirst({
-        where: and(
-          eq(portalClientProfiles.orgId, taxReturn.orgId),
-          eq(portalClientProfiles.normalizedEntityName, normalizedEntityName),
-        ),
-      });
-
-      const recipientEmails = getClientAccessRecipientEmails({
-        primaryEmail: clientProfile?.primaryEmail ?? null,
-        secondaryEmails: clientProfile?.secondaryEmails ?? [],
-      });
-
-      if (!recipientEmails.length) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message:
-            "Set a primary or secondary client email in the portal client page before sending access.",
-        });
-      }
-
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + input.expiresInDays);
-
-      const shareIds: string[] = [];
-      const accessUrls: string[] = [];
-
-      for (const recipientEmail of recipientEmails) {
-        const rawToken = crypto.randomBytes(32).toString("hex");
-        const [share] = await ctx.db
-          .insert(portalReturnShares)
-          .values({
-            orgId: taxReturn.orgId,
-            taxReturnId: taxReturn.id,
-            clientProfileId: clientProfile?.id ?? null,
-            recipientEmail,
-            tokenHash: hashClientAccessToken(rawToken),
-            expiresAt,
-            lastSentAt: new Date(),
-            createdBy: null,
-          })
-          .returning();
-
-        if (share?.id) {
-          shareIds.push(share.id);
-        }
-
-        const accessUrl = buildClientAccessUrl(rawToken);
-        accessUrls.push(accessUrl);
-
-        if (input.sendEmail) {
-          await sendClientReturnAccessEmail({
-            to: recipientEmail,
-            jurisdictionName: taxReturn.jurisdiction?.name ?? "Tax return",
-            entityName: taxReturn.entityName,
-            taxYear: taxReturn.taxYear,
-            accessUrl,
-            expiresAt,
-          });
-        }
-      }
-
-      return {
-        shareId: shareIds[0] ?? null,
-        shareIds,
-        accessUrl: accessUrls[0] ?? null,
-        accessUrls,
-        recipientEmail: recipientEmails[0] ?? null,
-        recipientEmails,
-        emailed: input.sendEmail,
-        expiresAt,
-      };
     }),
 
   // Add file to a tax return
