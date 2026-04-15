@@ -557,46 +557,48 @@ export default function TasksPage() {
                               if (cell.column.id === "actions") {
                                 return (
                                   <TableCell key={cell.id} className="text-right" onClick={(e) => e.stopPropagation()}>
-                                    <DropdownMenu>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button
-                                          variant="ghost"
-                                          className="data-[state=open]:bg-muted text-muted-foreground flex size-8"
-                                          size="icon"
-                                        >
-                                          <IconDotsVertical />
-                                          <span className="sr-only">Open menu</span>
-                                        </Button>
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end" className="w-40">
-                                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                        <DropdownMenuItem asChild>
-                                          <Link href={`/org/${orgId}/tasks/${task.id}`}>
-                                            <Monitor className="mr-2 h-4 w-4" />
-                                            Open Task
-                                          </Link>
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onSelect={() => setDetailTask(task)}>
-                                          <ExternalLink className="mr-2 h-4 w-4" />
-                                          View Details
-                                        </DropdownMenuItem>
-                                        {task.taxReturn ? (
-                                          <SendClientAccessAction
-                                            taxReturnId={task.taxReturn.id}
-                                            entityName={task.taxReturn.entityName}
-                                            mode="menu-item"
-                                          />
-                                        ) : null}
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem
-                                          variant="destructive"
-                                          onClick={() => handleDeleteSingle(task.id)}
-                                        >
-                                          <Trash className="mr-2 h-4 w-4" />
-                                          Delete
-                                        </DropdownMenuItem>
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
+                                    <div className="flex items-center justify-end gap-2">
+                                      {task.taxReturn ? (
+                                        <SendClientAccessAction
+                                          taxReturnId={task.taxReturn.id}
+                                          entityName={task.taxReturn.entityName}
+                                          buttonLabel="Send to client"
+                                        />
+                                      ) : null}
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button
+                                            variant="ghost"
+                                            className="data-[state=open]:bg-muted text-muted-foreground flex size-8"
+                                            size="icon"
+                                          >
+                                            <IconDotsVertical />
+                                            <span className="sr-only">Open menu</span>
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="w-40">
+                                          <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                          <DropdownMenuItem asChild>
+                                            <Link href={`/org/${orgId}/tasks/${task.id}`}>
+                                              <Monitor className="mr-2 h-4 w-4" />
+                                              Open Task
+                                            </Link>
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onSelect={() => setDetailTask(task)}>
+                                            <ExternalLink className="mr-2 h-4 w-4" />
+                                            View Details
+                                          </DropdownMenuItem>
+                                          <DropdownMenuSeparator />
+                                          <DropdownMenuItem
+                                            variant="destructive"
+                                            onClick={() => handleDeleteSingle(task.id)}
+                                          >
+                                            <Trash className="mr-2 h-4 w-4" />
+                                            Delete
+                                          </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    </div>
                                   </TableCell>
                                 )
                               }

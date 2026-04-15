@@ -227,6 +227,11 @@ function createColumns(
                 </Link>
               </Button>
             )}
+            <SendClientAccessAction
+              taxReturnId={item.id}
+              entityName={item.entityName}
+              buttonLabel="Send to client"
+            />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="h-8 w-8 p-0">
@@ -250,11 +255,6 @@ function createColumns(
                     </a>
                   </DropdownMenuItem>
                 )}
-                <SendClientAccessAction
-                  taxReturnId={item.id}
-                  entityName={item.entityName}
-                  mode="menu-item"
-                />
                 <DropdownMenuSeparator />
                 {item.status !== "dismissed" && item.status !== "completed" ? (
                   <DropdownMenuItem onClick={() => dismissMutation.mutate({ taxReturnId: item.id })}>

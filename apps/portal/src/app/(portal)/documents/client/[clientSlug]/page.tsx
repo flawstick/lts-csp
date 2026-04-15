@@ -158,21 +158,19 @@ export default function ClientDocumentsPage() {
 
       {!isLoading && !error && client ? (
         <section className="portal-card p-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl space-y-4">
             <div className="space-y-1">
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                 Client access
               </p>
-              <h2 className="text-base font-semibold">Primary email</h2>
+              <h2 className="text-base font-semibold">Recipient emails</h2>
               <p className="text-sm text-muted-foreground">
-                Access links for this client will use the email stored here by
-                default.
+                Access links for this client use the primary email by default and can optionally include secondary recipients.
               </p>
             </div>
 
-            <div className="flex w-full max-w-3xl flex-col gap-3">
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-                <div className="space-y-2">
+            <div className="space-y-4">
+              <div className="space-y-2">
                 <Label htmlFor="client-primary-email">Primary email</Label>
                 <Input
                   id="client-primary-email"
@@ -181,7 +179,9 @@ export default function ClientDocumentsPage() {
                   onChange={(event) => setPrimaryEmail(event.target.value)}
                   placeholder="client@example.com"
                 />
-                </div>
+              </div>
+
+              <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
                 <div className="space-y-2">
                   <Label htmlFor="client-secondary-emails">Secondary emails</Label>
                   <Textarea
@@ -189,13 +189,15 @@ export default function ClientDocumentsPage() {
                     value={secondaryEmails}
                     onChange={(event) => setSecondaryEmails(event.target.value)}
                     placeholder={"finance@example.com\nops@example.com"}
-                    className="min-h-24"
+                    className="min-h-28 bg-background"
                   />
                   <p className="text-xs text-muted-foreground">
-                    One email per line. Access links will be sent to the primary
-                    email and all secondary emails.
+                    One email per line. Access links will be sent to the primary email and all secondary emails.
                   </p>
                 </div>
+              </div>
+
+              <div className="flex justify-start">
                 <Button
                   disabled={upsertClientProfileMutation.isPending}
                   onClick={async () => {
