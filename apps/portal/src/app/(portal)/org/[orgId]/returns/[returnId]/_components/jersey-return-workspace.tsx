@@ -89,6 +89,8 @@ type JerseyReturnWorkspaceProps = {
   onDismiss?: () => void;
   onUndismiss?: () => void;
   isDismissing?: boolean;
+  accessToken?: string;
+  onNavigateToGuidedFinish?: () => void;
 };
 
 type SectionKey = keyof JerseyCompanyReturnFormData;
@@ -192,9 +194,12 @@ export function JerseyReturnWorkspace({
   onDismiss,
   onUndismiss,
   isDismissing,
+  accessToken,
+  onNavigateToGuidedFinish,
 }: JerseyReturnWorkspaceProps) {
   const router = useRouter();
   const utils = api.useUtils();
+  const isClientAccessMode = Boolean(accessToken);
 
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("form");
   const [draftForm, setDraftForm] = useState<Partial<JerseyCompanyReturnFormData>>(
@@ -207,19 +212,32 @@ export function JerseyReturnWorkspace({
   >(null);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
 
-  const formQuery = api.portalReturns.getJerseyCompanyReturnForm.useQuery(
+  const portalFormQuery = api.portalReturns.getJerseyCompanyReturnForm.useQuery(
     {
       orgId,
       taxReturnId: selectedReturn.id,
     },
     {
       enabled:
+        !isClientAccessMode &&
         selectedReturn.jurisdictionCode === "JE" &&
         selectedReturn.returnType === "company",
     },
   );
+  const clientFormQuery = api.clientAccess.getJerseyCompanyReturnForm.useQuery(
+    {
+      token: accessToken ?? "",
+    },
+    {
+      enabled:
+        isClientAccessMode &&
+        selectedReturn.jurisdictionCode === "JE" &&
+        selectedReturn.returnType === "company",
+    },
+  );
+  const formQuery = isClientAccessMode ? clientFormQuery : portalFormQuery;
 
-  const createFormMutation =
+  const portalCreateFormMutation =
     api.portalReturns.createJerseyCompanyReturnForm.useMutation({
       onSuccess: () => {
         void utils.portalReturns.getJerseyCompanyReturnForm.invalidate({
@@ -229,8 +247,18 @@ export function JerseyReturnWorkspace({
         void utils.portalReturns.listByOrg.invalidate({ orgId });
       },
     });
+  const clientCreateFormMutation =
+    api.clientAccess.createJerseyCompanyReturnForm.useMutation({
+      onSuccess: () => {
+        if (!accessToken) return;
+        void utils.clientAccess.getJerseyCompanyReturnForm.invalidate({
+          token: accessToken,
+        });
+        void utils.clientAccess.getAccess.invalidate({ token: accessToken });
+      },
+    });
 
-  const updateFormMutation =
+  const portalUpdateFormMutation =
     api.portalReturns.updateJerseyCompanyReturnForm.useMutation({
       onSuccess: () => {
         void utils.portalReturns.getJerseyCompanyReturnForm.invalidate({
@@ -240,26 +268,57 @@ export function JerseyReturnWorkspace({
         void utils.portalReturns.listByOrg.invalidate({ orgId });
       },
     });
+  const clientUpdateFormMutation =
+    api.clientAccess.updateJerseyCompanyReturnForm.useMutation({
+      onSuccess: () => {
+        if (!accessToken) return;
+        void utils.clientAccess.getJerseyCompanyReturnForm.invalidate({
+          token: accessToken,
+        });
+        void utils.clientAccess.getAccess.invalidate({ token: accessToken });
+      },
+    });
 
-  const addDocumentsMutation = api.portalReturns.addReturnDocuments.useMutation(
-    {
+  const portalAddDocumentsMutation =
+    api.portalReturns.addReturnDocuments.useMutation({
       onSuccess: () => {
         void utils.portalReturns.listByOrg.invalidate({ orgId });
+      },
+    });
+  const clientAddDocumentsMutation = api.clientAccess.addReturnDocuments.useMutation(
+    {
+      onSuccess: () => {
+        if (!accessToken) return;
+        void utils.clientAccess.getAccess.invalidate({ token: accessToken });
       },
     },
   );
 
-  const assignDocumentRoleMutation =
+  const portalAssignDocumentRoleMutation =
     api.portalReturns.assignReturnDocumentRole.useMutation({
       onSuccess: () => {
         void utils.portalReturns.listByOrg.invalidate({ orgId });
       },
     });
+  const clientAssignDocumentRoleMutation =
+    api.clientAccess.assignReturnDocumentRole.useMutation({
+      onSuccess: () => {
+        if (!accessToken) return;
+        void utils.clientAccess.getAccess.invalidate({ token: accessToken });
+      },
+    });
 
-  const removeDocumentMutation =
+  const portalRemoveDocumentMutation =
     api.portalReturns.removeReturnDocument.useMutation({
       onSuccess: () => {
         void utils.portalReturns.listByOrg.invalidate({ orgId });
+      },
+    });
+  const clientRemoveDocumentMutation =
+    api.clientAccess.removeReturnDocument.useMutation({
+      onSuccess: () => {
+        if (!accessToken) return;
+        void utils.clientAccess.getAccess.invalidate({ token: accessToken });
       },
     });
 
@@ -313,12 +372,26 @@ export function JerseyReturnWorkspace({
     toast.success(message);
   };
 
+  const isCreateFormPending = isClientAccessMode
+    ? clientCreateFormMutation.isPending
+    : portalCreateFormMutation.isPending;
+  const isUpdateFormPending = isClientAccessMode
+    ? clientUpdateFormMutation.isPending
+    : portalUpdateFormMutation.isPending;
+
   const ensureFormExists = async () => {
     if (formQuery.data) {
       return;
     }
 
-    await createFormMutation.mutateAsync({
+    if (isClientAccessMode) {
+      await clientCreateFormMutation.mutateAsync({
+        token: accessToken!,
+      });
+      return;
+    }
+
+    await portalCreateFormMutation.mutateAsync({
       orgId,
       taxReturnId: selectedReturn.id,
     });
@@ -481,11 +554,18 @@ export function JerseyReturnWorkspace({
   const handleSave = async () => {
     try {
       await ensureFormExists();
-      await updateFormMutation.mutateAsync({
-        orgId,
-        taxReturnId: selectedReturn.id,
-        data: normalizedDraft,
-      });
+      if (isClientAccessMode) {
+        await clientUpdateFormMutation.mutateAsync({
+          token: accessToken!,
+          data: normalizedDraft,
+        });
+      } else {
+        await portalUpdateFormMutation.mutateAsync({
+          orgId,
+          taxReturnId: selectedReturn.id,
+          data: normalizedDraft,
+        });
+      }
       showMessage("Jersey return form saved.");
     } catch (error) {
       showMessage(
@@ -512,15 +592,23 @@ export function JerseyReturnWorkspace({
             taxReturnId: selectedReturn.id,
             file,
             category: file.type.includes("pdf") ? "financial" : "supporting",
+            accessToken,
           }),
         ),
       );
 
-      await addDocumentsMutation.mutateAsync({
-        orgId,
-        taxReturnId: selectedReturn.id,
-        documents: uploaded,
-      });
+      if (isClientAccessMode) {
+        await clientAddDocumentsMutation.mutateAsync({
+          token: accessToken!,
+          documents: uploaded,
+        });
+      } else {
+        await portalAddDocumentsMutation.mutateAsync({
+          orgId,
+          taxReturnId: selectedReturn.id,
+          documents: uploaded,
+        });
+      }
 
       toast.dismiss();
       toast.success(`${uploaded.length} file(s) uploaded.`);
@@ -544,12 +632,20 @@ export function JerseyReturnWorkspace({
 
   const handleAssignFinancialStatements = async (fileUrl: string) => {
     try {
-      await assignDocumentRoleMutation.mutateAsync({
-        orgId,
-        taxReturnId: selectedReturn.id,
-        fileUrl,
-        role: "financial_statements",
-      });
+      if (isClientAccessMode) {
+        await clientAssignDocumentRoleMutation.mutateAsync({
+          token: accessToken!,
+          fileUrl,
+          role: "financial_statements",
+        });
+      } else {
+        await portalAssignDocumentRoleMutation.mutateAsync({
+          orgId,
+          taxReturnId: selectedReturn.id,
+          fileUrl,
+          role: "financial_statements",
+        });
+      }
       setUploadedFileUrls(null);
       showMessage("Signed financial statements assigned.");
     } catch (error) {
@@ -564,12 +660,20 @@ export function JerseyReturnWorkspace({
 
   const handleUnassignFinancialStatements = async (fileUrl: string) => {
     try {
-      await assignDocumentRoleMutation.mutateAsync({
-        orgId,
-        taxReturnId: selectedReturn.id,
-        fileUrl,
-        role: null,
-      });
+      if (isClientAccessMode) {
+        await clientAssignDocumentRoleMutation.mutateAsync({
+          token: accessToken!,
+          fileUrl,
+          role: null,
+        });
+      } else {
+        await portalAssignDocumentRoleMutation.mutateAsync({
+          orgId,
+          taxReturnId: selectedReturn.id,
+          fileUrl,
+          role: null,
+        });
+      }
       showMessage("Signed financial statements unassigned.");
     } catch (error) {
       showMessage(
@@ -583,11 +687,18 @@ export function JerseyReturnWorkspace({
 
   const handleRemoveDocument = async (fileUrl: string) => {
     try {
-      await removeDocumentMutation.mutateAsync({
-        orgId,
-        taxReturnId: selectedReturn.id,
-        fileUrl,
-      });
+      if (isClientAccessMode) {
+        await clientRemoveDocumentMutation.mutateAsync({
+          token: accessToken!,
+          fileUrl,
+        });
+      } else {
+        await portalRemoveDocumentMutation.mutateAsync({
+          orgId,
+          taxReturnId: selectedReturn.id,
+          fileUrl,
+        });
+      }
       showMessage("File removed.");
     } catch (error) {
       showMessage(
@@ -703,7 +814,14 @@ export function JerseyReturnWorkspace({
                     <Button
                       className="cursor-pointer px-5"
                       onClick={() => {
-                        router.push(`/org/${orgId}/returns/${selectedReturn.id}/jersey-guided-finish`);
+                        if (onNavigateToGuidedFinish) {
+                          onNavigateToGuidedFinish();
+                          return;
+                        }
+
+                        router.push(
+                          `/org/${orgId}/returns/${selectedReturn.id}/jersey-guided-finish`,
+                        );
                       }}
                     >
                       <Sparkles className="size-4" />
@@ -802,9 +920,9 @@ export function JerseyReturnWorkspace({
                             ),
                           );
                       }}
-                      disabled={createFormMutation.isPending}
+                      disabled={isCreateFormPending}
                     >
-                      {createFormMutation.isPending ? (
+                      {isCreateFormPending ? (
                         "Initializing..."
                       ) : (
                         <>
@@ -2397,11 +2515,11 @@ export function JerseyReturnWorkspace({
                               void handleSave();
                             }}
                             disabled={
-                              updateFormMutation.isPending ||
-                              createFormMutation.isPending
+                              isUpdateFormPending ||
+                              isCreateFormPending
                             }
                           >
-                            {updateFormMutation.isPending ? (
+                            {isUpdateFormPending ? (
                               <Loader2 className="size-4 animate-spin" />
                             ) : (
                               <Save className="size-4" />
@@ -2418,11 +2536,15 @@ export function JerseyReturnWorkspace({
               <div className="mt-6">
                 <ReturnFilesTab
                   selectedReturnId={selectedReturn.id}
-                  selectedFiles={selectedFiles}
-                  hasFinancialStatements={hasFinancialStatements}
-                  isUploading={isUploadingFiles}
-                  isExtractPending={false}
-                  isAssignPending={assignDocumentRoleMutation.isPending}
+              selectedFiles={selectedFiles}
+              hasFinancialStatements={hasFinancialStatements}
+              isUploading={isUploadingFiles}
+              isExtractPending={false}
+              isAssignPending={
+                isClientAccessMode
+                  ? clientAssignDocumentRoleMutation.isPending
+                  : portalAssignDocumentRoleMutation.isPending
+              }
                   uploadedFileUrls={uploadedFileUrls}
                   showAiExtraction={false}
                   uploadDescription="Upload signed financial statements, Jersey schedules, and supporting evidence files."

@@ -9,6 +9,8 @@ const PUBLIC_ROUTES = [
   "/signup",
   "/accept-invite",
   "/waiting-for-invite",
+  "/client-access",
+  "/api/client-upload",
   "/api/trpc",
 ];
 

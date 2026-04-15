@@ -402,6 +402,78 @@ export const portalInvitations = createTable(
 );
 
 // ============================================================================
+// PORTAL CLIENT PROFILES - Per-client portal metadata
+// ============================================================================
+
+export const portalClientProfiles = createTable(
+  "portal_client_profile",
+  (d) => ({
+    id: uuid().primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    normalizedEntityName: varchar("normalized_entity_name", {
+      length: 256,
+    }).notNull(),
+    displayName: varchar("display_name", { length: 256 }).notNull(),
+    primaryEmail: varchar("primary_email", { length: 320 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
+      () => new Date(),
+    ),
+  }),
+  (t) => [
+    index("lts_portal_client_profile_org_idx").on(t.orgId),
+    uniqueIndex("lts_portal_client_profile_org_entity_idx").on(
+      t.orgId,
+      t.normalizedEntityName,
+    ),
+  ],
+);
+
+// ============================================================================
+// PORTAL RETURN SHARES - Tokenized client-access links
+// ============================================================================
+
+export const portalReturnShares = createTable(
+  "portal_return_share",
+  (d) => ({
+    id: uuid().primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    taxReturnId: uuid("tax_return_id")
+      .notNull()
+      .references(() => taxReturns.id, { onDelete: "cascade" }),
+    clientProfileId: uuid("client_profile_id").references(
+      () => portalClientProfiles.id,
+      { onDelete: "set null" },
+    ),
+    recipientEmail: varchar("recipient_email", { length: 320 }).notNull(),
+    tokenHash: varchar("token_hash", { length: 128 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+    lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => accounts.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(
+      () => new Date(),
+    ),
+  }),
+  (t) => [
+    index("lts_portal_return_share_org_idx").on(t.orgId),
+    index("lts_portal_return_share_tax_return_idx").on(t.taxReturnId),
+    index("lts_portal_return_share_client_profile_idx").on(t.clientProfileId),
+    uniqueIndex("lts_portal_return_share_token_hash_idx").on(t.tokenHash),
+  ],
+);
+
+// ============================================================================
 // INVOICES - Billing invoices (global admin managed)
 // ============================================================================
 
@@ -941,6 +1013,8 @@ export const organisationsRelations = relations(
     jurisdictionSettings: many(jurisdictionSettings),
     portalMemberships: many(portalMemberships),
     portalInvitations: many(portalInvitations),
+    portalClientProfiles: many(portalClientProfiles),
+    portalReturnShares: many(portalReturnShares),
     invoices: many(invoices),
     taxSyncJobs: many(taxSyncJobs),
   }),
@@ -1024,6 +1098,39 @@ export const portalInvitationsRelations = relations(
   }),
 );
 
+export const portalClientProfilesRelations = relations(
+  portalClientProfiles,
+  ({ one, many }) => ({
+    organisation: one(organisations, {
+      fields: [portalClientProfiles.orgId],
+      references: [organisations.id],
+    }),
+    shares: many(portalReturnShares),
+  }),
+);
+
+export const portalReturnSharesRelations = relations(
+  portalReturnShares,
+  ({ one }) => ({
+    organisation: one(organisations, {
+      fields: [portalReturnShares.orgId],
+      references: [organisations.id],
+    }),
+    taxReturn: one(taxReturns, {
+      fields: [portalReturnShares.taxReturnId],
+      references: [taxReturns.id],
+    }),
+    clientProfile: one(portalClientProfiles, {
+      fields: [portalReturnShares.clientProfileId],
+      references: [portalClientProfiles.id],
+    }),
+    createdByAccount: one(accounts, {
+      fields: [portalReturnShares.createdBy],
+      references: [accounts.id],
+    }),
+  }),
+);
+
 export const invoicesRelations = relations(invoices, ({ one }) => ({
   organisation: one(organisations, {
     fields: [invoices.orgId],
@@ -1053,6 +1160,7 @@ export const taxReturnsRelations = relations(taxReturns, ({ one, many }) => ({
     fields: [taxReturns.id],
     references: [jerseyCompanyReturnForms.taxReturnId],
   }),
+  portalReturnShares: many(portalReturnShares),
 }));
 
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
@@ -1166,6 +1274,12 @@ export type NewPortalMembership = typeof portalMemberships.$inferInsert;
 
 export type PortalInvitation = typeof portalInvitations.$inferSelect;
 export type NewPortalInvitation = typeof portalInvitations.$inferInsert;
+
+export type PortalClientProfile = typeof portalClientProfiles.$inferSelect;
+export type NewPortalClientProfile = typeof portalClientProfiles.$inferInsert;
+
+export type PortalReturnShare = typeof portalReturnShares.$inferSelect;
+export type NewPortalReturnShare = typeof portalReturnShares.$inferInsert;
 
 export type Invoice = typeof invoices.$inferSelect;
 export type NewInvoice = typeof invoices.$inferInsert;

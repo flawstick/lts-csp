@@ -33,6 +33,10 @@
     "./demo-mode": {
       "types": "./src/demo-mode.ts",
       "default": "./src/demo-mode.ts"
+    },
+    "./client-access": {
+      "types": "./src/client-access.ts",
+      "default": "./src/client-access.ts"
     }
   },
   "scripts": {

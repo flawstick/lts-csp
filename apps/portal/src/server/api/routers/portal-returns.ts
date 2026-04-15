@@ -287,7 +287,7 @@ function buildExistingExtractionContext(form: ExtractionContextSource) {
   return `Use this saved form context as prior context when the new files are ambiguous or incomplete:\n${lines.join("\n")}`;
 }
 
-async function findPreviousSubstanceAutofillSource(
+export async function findPreviousSubstanceAutofillSource(
   db: TRPCContext["db"],
   taxReturn: {
     id: string;
@@ -353,7 +353,7 @@ async function findPreviousSubstanceAutofillSource(
   return Object.keys(merged).length > 0 ? merged : null;
 }
 
-function buildInitializedSubstanceFormValues(input: {
+export function buildInitializedSubstanceFormValues(input: {
   taxReturnId: string;
   taxYear: number;
   entityName: string;
@@ -782,7 +782,7 @@ async function getPortalReturnForOrg(ctx: {
   return returnRecord;
 }
 
-function assertGuernseyPortalReturnUnlocked(
+export function assertGuernseyPortalReturnUnlocked(
   returnRecord:
     | {
         status: string;
@@ -803,6 +803,354 @@ function assertGuernseyPortalReturnUnlocked(
         "This Guernsey ESR is locked because the return is already completed in the Guernsey Tax Portal.",
     });
   }
+}
+
+export async function extractSubstanceFormFromFilesInternal(input: {
+  db: TRPCContext["db"];
+  orgId: string;
+  taxReturnId: string;
+  fileUrls: string[];
+  returnRecord: {
+    id: string;
+    orgId: string;
+    jurisdictionId: string;
+    entityName: string;
+    taxYear: number;
+    externalId?: string | null;
+    status: string;
+    returnType: string | null;
+    jurisdiction?: { code: string } | null;
+  };
+  actorAccountId?: string | null;
+}) {
+  assertGuernseyPortalReturnUnlocked(input.returnRecord);
+
+  const apiKey = env.AI_GATEWAY_API_KEY;
+  if (!apiKey) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "AI gateway key is not configured.",
+    });
+  }
+
+  const org = await input.db.query.organisations.findFirst({
+    where: eq(organisations.id, input.orgId),
+  });
+  const preparedByName = org?.accountName ?? org?.name ?? "LTS Tax Limited";
+
+  let form = await input.db.query.substanceForms.findFirst({
+    where: eq(substanceForms.taxReturnId, input.taxReturnId),
+  });
+
+  if (!form) {
+    const previousForm = await findPreviousSubstanceAutofillSource(
+      input.db,
+      input.returnRecord,
+    );
+    const [created] = await input.db
+      .insert(substanceForms)
+      .values(
+        buildInitializedSubstanceFormValues({
+          taxReturnId: input.taxReturnId,
+          taxYear: input.returnRecord.taxYear,
+          entityName: input.returnRecord.entityName,
+          externalId: input.returnRecord.externalId,
+          preparedByName,
+          lastEditedBy: input.actorAccountId ?? undefined,
+          sourceForm: previousForm,
+        }),
+      )
+      .returning();
+
+    form = created ?? undefined;
+  }
+
+  if (!form) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Failed to initialize the Guernsey substance form.",
+    });
+  }
+
+  type FileContent = { type: "file"; data: string; mediaType: string };
+  type TextContent = { type: "text"; text: string };
+
+  const fileContents: FileContent[] = [];
+  const textContents: TextContent[] = [];
+
+  const supportedFileTypes = [
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+  ];
+  const excelTypes = [
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+  ];
+
+  for (const url of input.fileUrls) {
+    const response = await fetch(url);
+    if (!response.ok) {
+      continue;
+    }
+
+    const mediaType =
+      response.headers.get("content-type") ?? "application/octet-stream";
+    const normalizedMedia = mediaType.toLowerCase();
+    const isCsv =
+      normalizedMedia.includes("text/csv") ||
+      url.toLowerCase().endsWith(".csv");
+    const isExcel =
+      excelTypes.some((type) => normalizedMedia.includes(type)) ||
+      normalizedMedia.includes("spreadsheet") ||
+      normalizedMedia.includes("excel");
+
+    if (isCsv) {
+      const csvText = await response.text();
+      if (csvText.trim().length > 0) {
+        textContents.push({
+          type: "text",
+          text: `[CSV File Content]\n${csvText}`,
+        });
+      }
+      continue;
+    }
+
+    const buffer = await response.arrayBuffer();
+
+    if (isExcel) {
+      try {
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const csvParts: string[] = [];
+
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          if (!sheet) {
+            continue;
+          }
+          const csv = XLSX.utils.sheet_to_csv(sheet);
+          csvParts.push(`=== Sheet: ${sheetName} ===\n${csv}`);
+        }
+
+        const allCsv = csvParts.join("\n\n");
+        if (allCsv.trim().length > 0) {
+          textContents.push({
+            type: "text",
+            text: `[Excel File Content]\n${allCsv}`,
+          });
+        }
+      } catch {
+        // Ignore malformed spreadsheets and continue processing valid files.
+      }
+      continue;
+    }
+
+    if (
+      supportedFileTypes.some(
+        (type) =>
+          normalizedMedia === type ||
+          normalizedMedia.startsWith(type.split("/")[0]!),
+      )
+    ) {
+      fileContents.push({
+        type: "file",
+        data: Buffer.from(buffer).toString("base64"),
+        mediaType,
+      });
+    }
+  }
+
+  if (fileContents.length === 0 && textContents.length === 0) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message:
+        "No supported files to extract from. Use PDF, image, CSV, or Excel.",
+    });
+  }
+
+  const gateway = createGateway({
+    apiKey,
+    baseURL: "https://ai-gateway.vercel.sh/v3/ai",
+  });
+  const model = gateway("google/gemini-3-pro-preview");
+
+  const cigaOptionsText = Object.entries(CIGA_BY_ACTIVITY)
+    .map(
+      ([activity, options]) => `${activity}:\n  - ${options.join("\n  - ")}`,
+    )
+    .join("\n\n");
+  const existingContextText = buildExistingExtractionContext(form);
+
+  const prompt = `You are extracting data for a Guernsey Economic Substance Register form.
+
+Read all attached files and return values only when they are explicitly stated or clearly inferable.
+If a value is unknown, leave it empty.
+
+${existingContextText ? `=== EXISTING FORM CONTEXT ===\n${existingContextText}\n` : ""}
+
+Use these strict output rules:
+- Dates: YYYY-MM-DD
+- Yes/No fields: "Yes" or "No"
+- Yes/No/N/A fields: "Yes", "No", or "N/A"
+- relevantActivity: pick exactly one allowed option from the enum.
+- certificateType: always return "${DEFAULT_CERTIFICATE_TYPE}".
+- taxReferenceNumber: preserve the exact source formatting. Do not strip leading letters and do not replace the letter "C" with the number "0".
+- If total profit is negative (a loss), return "0". The portal does not accept negative values.
+- If net book value is negative, return "0".
+- profitAllocation is REQUIRED — always pick "Investment" or "Business".
+- accountingPeriodStart is ALWAYS "${Number(input.returnRecord.taxYear) - 1}-04-06" and accountingPeriodEnd is ALWAYS "${input.returnRecord.taxYear}-04-05". The Guernsey tax year runs 6 April to 5 April. Do NOT extract different dates from the documents.
+- economicClassificationCode is REQUIRED for 2025 returns. It usually looks like a dotted numeric code such as "10.5.4". Look specifically for dot-separated numeric codes near labels like "Economic Classification Code" or "Company Activity Code", and return only the dotted code.
+- isConstituentEntity (CbCR) is REQUIRED for 2025 returns — default to "No" if not stated.
+- accountsPreparerName is the ACCOUNTANT who prepared the financial accounts, NOT "LTS Tax Limited".
+- entityActivity: always try to extract the nature of the entity's activity (e.g., "Property Holdings").
+- relevantActivity is REQUIRED — pick the single most applicable option. Use the saved form context plus the entity activity/business description if the new documents are ambiguous. If the existing saved form already identifies the relevant activity and the new files do not clearly contradict it, keep that activity.
+- allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey are helpful but not required. Extract them when the documents state them, otherwise leave them empty.
+- activityGrossIncome should be the turnover or gross income from the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
+- adequacyExpenditureDetails should be the operating expenditure relating to the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
+- If the entity has no relevant activity ("None of the above"), leave adequacy, CIGA, employees, outsourcing, and beneficial ownership sections empty.
+
+For CIGA, use these activity mappings:
+${cigaOptionsText}
+`;
+
+  const messageContent: Array<TextContent | FileContent> = [
+    { type: "text", text: prompt },
+    ...fileContents,
+    ...textContents,
+  ];
+
+  const MAX_RETRIES = 2;
+  let result: Awaited<
+    ReturnType<typeof generateObject<typeof aiExtractionSchema>>
+  >;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      result = await generateObject({
+        model,
+        output: "object",
+        schema: aiExtractionSchema,
+        schemaName: "PortalGuernseySubstanceForm",
+        schemaDescription:
+          "Guernsey Economic Substance Register form extraction for portal clients",
+        messages: [
+          {
+            role: "user",
+            content: messageContent,
+          },
+        ],
+      });
+      break;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      const isTransient =
+        message.includes("input stream") ||
+        message.includes("ECONNRESET") ||
+        message.includes("socket hang up");
+      if (!isTransient || attempt >= MAX_RETRIES) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+    }
+  }
+
+  const extractedData = result.object;
+  const extractedTextContext = textContents.map((content) => content.text);
+
+  extractedData.accountingPeriodStart = `${Number(input.returnRecord.taxYear) - 1}-04-06`;
+  extractedData.accountingPeriodEnd = `${input.returnRecord.taxYear}-04-05`;
+  extractedData.certificateType = DEFAULT_CERTIFICATE_TYPE;
+  extractedData.taxReferenceNumber = normalizeTaxReferenceNumber({
+    taxReferenceNumber: extractedData.taxReferenceNumber,
+    externalId: input.returnRecord.externalId,
+    taxYear: input.returnRecord.taxYear,
+  });
+
+  if (extractedData.totalProfit) {
+    const num = parseFloat(extractedData.totalProfit.replace(/[^0-9.-]/g, ""));
+    if (!isNaN(num) && num < 0) extractedData.totalProfit = "0";
+  }
+  if (extractedData.netBookValue) {
+    const num = parseFloat(extractedData.netBookValue.replace(/[^0-9.-]/g, ""));
+    if (!isNaN(num) && num < 0) extractedData.netBookValue = "0";
+  }
+
+  extractedData.profitAllocation ??= "Investment";
+  extractedData.isGuernseyFiFatca ??= "No";
+  extractedData.isGuernseyFiCrs ??= "No";
+
+  if (!extractedData.isRegisteredOnIgor) {
+    if (
+      extractedData.isGuernseyFiFatca === "Yes" ||
+      extractedData.isGuernseyFiCrs === "Yes"
+    ) {
+      extractedData.isRegisteredOnIgor = "Yes";
+    } else {
+      extractedData.isRegisteredOnIgor = "No";
+    }
+  }
+
+  extractedData.preparedBy ??= preparedByName;
+  extractedData.isConstituentEntity ??= "No";
+
+  extractedData.economicClassificationCode =
+    normalizeEconomicClassificationCode(
+      extractedData.economicClassificationCode,
+    ) ??
+    findEconomicClassificationCodeFromContext(
+      extractedData.entityActivity,
+      form.entityActivity,
+      ...extractedTextContext,
+    ) ??
+    normalizeEconomicClassificationCode(form.economicClassificationCode);
+
+  const contextualRelevantActivity = inferRelevantActivityFromContext(
+    extractedData.relevantActivity,
+    form.relevantActivity,
+    extractedData.entityActivity,
+    form.entityActivity,
+    extractedData.cigaPerformed,
+    extractedData.cigaDetails,
+    form.cigaPerformed,
+    form.cigaDetails,
+    ...extractedTextContext,
+  );
+
+  if (
+    !extractedData.relevantActivity ||
+    (extractedData.relevantActivity === "None of the above" &&
+      contextualRelevantActivity &&
+      contextualRelevantActivity !== "None of the above")
+  ) {
+    extractedData.relevantActivity = contextualRelevantActivity;
+  }
+
+  const merged = { ...form, ...extractedData } as SubstanceFormData;
+  const missingFields = getMissingFields(merged);
+
+  const [updated] = await input.db
+    .update(substanceForms)
+    .set({
+      ...extractedData,
+      missingFields,
+      isComplete: missingFields.length === 0,
+      aiExtractedAt: new Date(),
+      lastEditedAt: new Date(),
+      lastEditedBy: input.actorAccountId ?? undefined,
+    })
+    .where(eq(substanceForms.taxReturnId, input.taxReturnId))
+    .returning();
+
+  const extractedFields = Object.keys(extractedData).filter(
+    (field) =>
+      extractedData[field as keyof typeof extractedData] !== undefined,
+  );
+
+  return {
+    form: updated ?? null,
+    extractedFields,
+  };
 }
 
 export const portalReturnsRouter = createTRPCRouter({
@@ -1965,345 +2313,14 @@ export const portalReturnsRouter = createTRPCRouter({
           message: "Return not found.",
         });
       }
-
-      // Get org for account name (used as preparedBy default)
-      const org = await ctx.db.query.organisations.findFirst({
-        where: eq(organisations.id, input.orgId),
+      return extractSubstanceFormFromFilesInternal({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
+        fileUrls: input.fileUrls,
+        returnRecord,
+        actorAccountId: account.id,
       });
-      const preparedByName = org?.accountName ?? org?.name ?? "LTS Tax Limited";
-
-      const apiKey = env.AI_GATEWAY_API_KEY;
-      if (!apiKey) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "AI gateway key is not configured.",
-        });
-      }
-
-      let form = await ctx.db.query.substanceForms.findFirst({
-        where: eq(substanceForms.taxReturnId, input.taxReturnId),
-      });
-
-      if (!form) {
-        const previousForm = await findPreviousSubstanceAutofillSource(
-          ctx.db,
-          returnRecord,
-        );
-        const [created] = await ctx.db
-          .insert(substanceForms)
-          .values(
-            buildInitializedSubstanceFormValues({
-              taxReturnId: input.taxReturnId,
-              taxYear: returnRecord.taxYear,
-              entityName: returnRecord.entityName,
-              externalId: returnRecord.externalId,
-              preparedByName,
-              lastEditedBy: account.id,
-              sourceForm: previousForm,
-            }),
-          )
-          .returning();
-
-        form = created ?? undefined;
-      }
-
-      if (!form) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to initialize the Guernsey substance form.",
-        });
-      }
-
-      type FileContent = { type: "file"; data: string; mediaType: string };
-      type TextContent = { type: "text"; text: string };
-
-      const fileContents: FileContent[] = [];
-      const textContents: TextContent[] = [];
-
-      const supportedFileTypes = [
-        "application/pdf",
-        "image/png",
-        "image/jpeg",
-        "image/webp",
-        "image/gif",
-      ];
-      const excelTypes = [
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-excel",
-      ];
-
-      for (const url of input.fileUrls) {
-        const response = await fetch(url);
-        if (!response.ok) {
-          continue;
-        }
-
-        const mediaType =
-          response.headers.get("content-type") ?? "application/octet-stream";
-        const normalizedMedia = mediaType.toLowerCase();
-        const isCsv =
-          normalizedMedia.includes("text/csv") ||
-          url.toLowerCase().endsWith(".csv");
-        const isExcel =
-          excelTypes.some((type) => normalizedMedia.includes(type)) ||
-          normalizedMedia.includes("spreadsheet") ||
-          normalizedMedia.includes("excel");
-
-        if (isCsv) {
-          const csvText = await response.text();
-          if (csvText.trim().length > 0) {
-            textContents.push({
-              type: "text",
-              text: `[CSV File Content]\n${csvText}`,
-            });
-          }
-          continue;
-        }
-
-        const buffer = await response.arrayBuffer();
-
-        if (isExcel) {
-          try {
-            const workbook = XLSX.read(buffer, { type: "array" });
-            const csvParts: string[] = [];
-
-            for (const sheetName of workbook.SheetNames) {
-              const sheet = workbook.Sheets[sheetName];
-              if (!sheet) {
-                continue;
-              }
-              const csv = XLSX.utils.sheet_to_csv(sheet);
-              csvParts.push(`=== Sheet: ${sheetName} ===\n${csv}`);
-            }
-
-            const allCsv = csvParts.join("\n\n");
-            if (allCsv.trim().length > 0) {
-              textContents.push({
-                type: "text",
-                text: `[Excel File Content]\n${allCsv}`,
-              });
-            }
-          } catch {
-            // Ignore malformed spreadsheets and continue processing valid files.
-          }
-          continue;
-        }
-
-        if (
-          supportedFileTypes.some(
-            (type) =>
-              normalizedMedia === type ||
-              normalizedMedia.startsWith(type.split("/")[0]!),
-          )
-        ) {
-          fileContents.push({
-            type: "file",
-            data: Buffer.from(buffer).toString("base64"),
-            mediaType,
-          });
-        }
-      }
-
-      if (fileContents.length === 0 && textContents.length === 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message:
-            "No supported files to extract from. Use PDF, image, CSV, or Excel.",
-        });
-      }
-
-      const gateway = createGateway({
-        apiKey,
-        baseURL: "https://ai-gateway.vercel.sh/v3/ai",
-      });
-      const model = gateway("google/gemini-3-pro-preview");
-
-      const cigaOptionsText = Object.entries(CIGA_BY_ACTIVITY)
-        .map(
-          ([activity, options]) =>
-            `${activity}:\n  - ${options.join("\n  - ")}`,
-        )
-        .join("\n\n");
-      const existingContextText = buildExistingExtractionContext(form);
-
-      const prompt = `You are extracting data for a Guernsey Economic Substance Register form.
-
-Read all attached files and return values only when they are explicitly stated or clearly inferable.
-If a value is unknown, leave it empty.
-
-${existingContextText ? `=== EXISTING FORM CONTEXT ===\n${existingContextText}\n` : ""}
-
-Use these strict output rules:
-- Dates: YYYY-MM-DD
-- Yes/No fields: "Yes" or "No"
-- Yes/No/N/A fields: "Yes", "No", or "N/A"
-- relevantActivity: pick exactly one allowed option from the enum.
-- certificateType: always return "${DEFAULT_CERTIFICATE_TYPE}".
-- taxReferenceNumber: preserve the exact source formatting. Do not strip leading letters and do not replace the letter "C" with the number "0".
-- If total profit is negative (a loss), return "0". The portal does not accept negative values.
-- If net book value is negative, return "0".
-- profitAllocation is REQUIRED — always pick "Investment" or "Business".
-- accountingPeriodStart is ALWAYS "${Number(returnRecord.taxYear) - 1}-04-06" and accountingPeriodEnd is ALWAYS "${returnRecord.taxYear}-04-05". The Guernsey tax year runs 6 April to 5 April. Do NOT extract different dates from the documents.
-- economicClassificationCode is REQUIRED for 2025 returns. It usually looks like a dotted numeric code such as "10.5.4". Look specifically for dot-separated numeric codes near labels like "Economic Classification Code" or "Company Activity Code", and return only the dotted code.
-- isConstituentEntity (CbCR) is REQUIRED for 2025 returns — default to "No" if not stated.
-- accountsPreparerName is the ACCOUNTANT who prepared the financial accounts, NOT "LTS Tax Limited".
-- entityActivity: always try to extract the nature of the entity's activity (e.g., "Property Holdings").
-- relevantActivity is REQUIRED — pick the single most applicable option. Use the saved form context plus the entity activity/business description if the new documents are ambiguous. If the existing saved form already identifies the relevant activity and the new files do not clearly contradict it, keep that activity.
-- allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey are helpful but not required. Extract them when the documents state them, otherwise leave them empty.
-- activityGrossIncome should be the turnover or gross income from the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
-- adequacyExpenditureDetails should be the operating expenditure relating to the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
-- If the entity has no relevant activity ("None of the above"), leave adequacy, CIGA, employees, outsourcing, and beneficial ownership sections empty.
-
-For CIGA, use these activity mappings:
-${cigaOptionsText}
-`;
-
-      const messageContent: Array<TextContent | FileContent> = [
-        { type: "text", text: prompt },
-        ...fileContents,
-        ...textContents,
-      ];
-
-      const MAX_RETRIES = 2;
-      let result: Awaited<ReturnType<typeof generateObject<typeof aiExtractionSchema>>>;
-      for (let attempt = 0; ; attempt++) {
-        try {
-          result = await generateObject({
-            model,
-            output: "object",
-            schema: aiExtractionSchema,
-            schemaName: "PortalGuernseySubstanceForm",
-            schemaDescription:
-              "Guernsey Economic Substance Register form extraction for portal clients",
-            messages: [
-              {
-                role: "user",
-                content: messageContent,
-              },
-            ],
-          });
-          break;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "";
-          const isTransient =
-            msg.includes("input stream") ||
-            msg.includes("ECONNRESET") ||
-            msg.includes("socket hang up");
-          if (!isTransient || attempt >= MAX_RETRIES) throw err;
-          // Brief pause before retry
-          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-        }
-      }
-
-      const extractedData = result.object;
-      const extractedTextContext = textContents.map((content) => content.text);
-
-      // Force correct accounting period (Guernsey tax year: 6 April to 5 April)
-      extractedData.accountingPeriodStart = `${Number(returnRecord.taxYear) - 1}-04-06`;
-      extractedData.accountingPeriodEnd = `${returnRecord.taxYear}-04-05`;
-      extractedData.certificateType = DEFAULT_CERTIFICATE_TYPE;
-      extractedData.taxReferenceNumber = normalizeTaxReferenceNumber({
-        taxReferenceNumber: extractedData.taxReferenceNumber,
-        externalId: returnRecord.externalId,
-        taxYear: returnRecord.taxYear,
-      });
-
-      // Clamp negative financial values to "0"
-      if (extractedData.totalProfit) {
-        const num = parseFloat(
-          extractedData.totalProfit.replace(/[^0-9.-]/g, ""),
-        );
-        if (!isNaN(num) && num < 0) extractedData.totalProfit = "0";
-      }
-      if (extractedData.netBookValue) {
-        const num = parseFloat(
-          extractedData.netBookValue.replace(/[^0-9.-]/g, ""),
-        );
-        if (!isNaN(num) && num < 0) extractedData.netBookValue = "0";
-      }
-
-      // Default profitAllocation to "Investment" if not extracted
-      extractedData.profitAllocation ??= "Investment";
-
-      // FATCA/CRS defaults
-      extractedData.isGuernseyFiFatca ??= "No";
-      extractedData.isGuernseyFiCrs ??= "No";
-
-      // IGOR: "Yes" if FI under FATCA or CRS, "No" otherwise
-      if (!extractedData.isRegisteredOnIgor) {
-        if (
-          extractedData.isGuernseyFiFatca === "Yes" ||
-          extractedData.isGuernseyFiCrs === "Yes"
-        ) {
-          extractedData.isRegisteredOnIgor = "Yes";
-        } else {
-          extractedData.isRegisteredOnIgor = "No";
-        }
-      }
-
-      // Default preparedBy to org account name if not extracted
-      extractedData.preparedBy ??= preparedByName;
-
-      // CbCR default
-      extractedData.isConstituentEntity ??= "No";
-
-      extractedData.economicClassificationCode =
-        normalizeEconomicClassificationCode(
-          extractedData.economicClassificationCode,
-        ) ??
-        findEconomicClassificationCodeFromContext(
-          extractedData.entityActivity,
-          form.entityActivity,
-          ...extractedTextContext,
-        ) ??
-        normalizeEconomicClassificationCode(form.economicClassificationCode);
-
-      const contextualRelevantActivity = inferRelevantActivityFromContext(
-        extractedData.relevantActivity,
-        form.relevantActivity,
-        extractedData.entityActivity,
-        form.entityActivity,
-        extractedData.cigaPerformed,
-        extractedData.cigaDetails,
-        form.cigaPerformed,
-        form.cigaDetails,
-        ...extractedTextContext,
-      );
-
-      if (
-        !extractedData.relevantActivity ||
-        (extractedData.relevantActivity === "None of the above" &&
-          contextualRelevantActivity &&
-          contextualRelevantActivity !== "None of the above")
-      ) {
-        extractedData.relevantActivity = contextualRelevantActivity;
-      }
-
-      const merged = { ...form, ...extractedData } as SubstanceFormData;
-      const missingFields = getMissingFields(merged);
-
-      const [updated] = await ctx.db
-        .update(substanceForms)
-        .set({
-          ...extractedData,
-          missingFields,
-          isComplete: missingFields.length === 0,
-          aiExtractedAt: new Date(),
-          lastEditedAt: new Date(),
-          lastEditedBy: account.id,
-        })
-        .where(eq(substanceForms.taxReturnId, input.taxReturnId))
-        .returning();
-
-      const extractedFields = Object.keys(extractedData).filter(
-        (field) =>
-          extractedData[field as keyof typeof extractedData] !== undefined,
-      );
-
-      return {
-        form: updated ?? null,
-        extractedFields,
-      };
     }),
 
   requestEsrAnalysis: protectedProcedure

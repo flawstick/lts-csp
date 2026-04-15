@@ -4,11 +4,18 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   ChevronRight,
+  Copy,
+  Mail,
   Sparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import Folder from "@/components/Folder";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { api } from "@/trpc/react";
 import { DocumentsBackLink } from "../../_components/documents-back-link";
 import {
   buildFolderPreviewItems,
@@ -32,6 +39,8 @@ export default function ClientDocumentsPage() {
   const { clients, error, isLoading } = useDocumentsTree();
   const [searchValue, setSearchValue] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
+  const [primaryEmail, setPrimaryEmail] = useState("");
+  const [sendingReturnId, setSendingReturnId] = useState<string | null>(null);
 
   const clientSlug = params.clientSlug;
   const client = useMemo(
@@ -68,6 +77,30 @@ export default function ClientDocumentsPage() {
       );
     });
   }, [client, searchValue, yearFilter]);
+
+  const clientProfileQuery = api.portalAccess.getClientProfile.useQuery(
+    client
+      ? {
+          orgId: client.orgId,
+          entityName: client.name,
+        }
+      : {
+          orgId: "",
+          entityName: "",
+        },
+    {
+      enabled: Boolean(client),
+    },
+  );
+
+  const upsertClientProfileMutation =
+    api.portalAccess.upsertClientProfile.useMutation();
+  const sendClientAccessLinkMutation =
+    api.portalAccess.sendClientAccessLink.useMutation();
+
+  useEffect(() => {
+    setPrimaryEmail(clientProfileQuery.data?.primaryEmail ?? "");
+  }, [clientProfileQuery.data?.primaryEmail, client?.id]);
 
   useEffect(() => {
     if (!client || !filteredReturns.length) return;
@@ -118,6 +151,61 @@ export default function ClientDocumentsPage() {
 
       {!isLoading && !error && client ? (
         <section className="portal-card p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="space-y-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                Client access
+              </p>
+              <h2 className="text-base font-semibold">Primary email</h2>
+              <p className="text-sm text-muted-foreground">
+                Access links for this client will use the email stored here by
+                default.
+              </p>
+            </div>
+
+            <div className="flex w-full max-w-xl flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="client-primary-email">Primary email</Label>
+                <Input
+                  id="client-primary-email"
+                  type="email"
+                  value={primaryEmail}
+                  onChange={(event) => setPrimaryEmail(event.target.value)}
+                  placeholder="client@example.com"
+                />
+              </div>
+              <Button
+                disabled={upsertClientProfileMutation.isPending}
+                onClick={async () => {
+                  if (!client) return;
+
+                  try {
+                    await upsertClientProfileMutation.mutateAsync({
+                      orgId: client.orgId,
+                      entityName: client.name,
+                      displayName: client.name,
+                      primaryEmail: primaryEmail.trim() ? primaryEmail.trim() : null,
+                    });
+                    toast.success("Primary email saved.");
+                    void clientProfileQuery.refetch();
+                  } catch (error) {
+                    toast.error(
+                      error instanceof Error
+                        ? error.message
+                        : "Unable to save primary email.",
+                    );
+                  }
+                }}
+              >
+                Save email
+              </Button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {!isLoading && !error && client ? (
+        <section className="portal-card p-4">
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
             <Sparkles className="size-3.5" />
             Company autofill
@@ -161,15 +249,17 @@ export default function ClientDocumentsPage() {
             );
 
             return (
-              <Link
+              <div
                 key={returnFolder.id}
-                href={href}
-                prefetch
-                onMouseEnter={() => router.prefetch(href)}
-                onFocus={() => router.prefetch(href)}
-                className="portal-card group rounded-xl border border-border/60 p-4 transition hover:bg-muted/20"
+                className="portal-card rounded-xl border border-border/60 p-4 transition hover:bg-muted/20"
               >
-                <div className="flex items-start gap-3">
+                <Link
+                  href={href}
+                  prefetch
+                  onMouseEnter={() => router.prefetch(href)}
+                  onFocus={() => router.prefetch(href)}
+                  className="group flex items-start gap-3"
+                >
                   <Folder
                     color={getFolderColor(returnFolder.id)}
                     size={0.54}
@@ -202,8 +292,98 @@ export default function ClientDocumentsPage() {
                       </span>
                     </div>
                   </div>
+                </Link>
+
+                <div className="mt-3 flex flex-wrap gap-2 pl-[72px]">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    disabled={sendingReturnId === returnFolder.id}
+                    onClick={async () => {
+                      const email = primaryEmail.trim();
+                      if (!email) {
+                        toast.error("Set a primary email first.");
+                        return;
+                      }
+
+                      setSendingReturnId(returnFolder.id);
+                      try {
+                        await upsertClientProfileMutation.mutateAsync({
+                          orgId: client.orgId,
+                          entityName: client.name,
+                          displayName: client.name,
+                          primaryEmail: email,
+                        });
+                        const result =
+                          await sendClientAccessLinkMutation.mutateAsync({
+                            taxReturnId: returnFolder.id,
+                            email,
+                            sendEmail: true,
+                          });
+                        await navigator.clipboard.writeText(result.accessUrl);
+                        toast.success("Access link emailed and copied.");
+                      } catch (error) {
+                        toast.error(
+                          error instanceof Error
+                            ? error.message
+                            : "Unable to send access link.",
+                        );
+                      } finally {
+                        setSendingReturnId(null);
+                      }
+                    }}
+                  >
+                    <Mail className="size-3.5" />
+                    Send access link
+                  </Button>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-8"
+                    disabled={sendingReturnId === returnFolder.id}
+                    onClick={async () => {
+                      const email = primaryEmail.trim();
+                      if (!email) {
+                        toast.error("Set a primary email first.");
+                        return;
+                      }
+
+                      setSendingReturnId(returnFolder.id);
+                      try {
+                        await upsertClientProfileMutation.mutateAsync({
+                          orgId: client.orgId,
+                          entityName: client.name,
+                          displayName: client.name,
+                          primaryEmail: email,
+                        });
+                        const result =
+                          await sendClientAccessLinkMutation.mutateAsync({
+                            taxReturnId: returnFolder.id,
+                            email,
+                            sendEmail: false,
+                          });
+                        await navigator.clipboard.writeText(result.accessUrl);
+                        toast.success("Access link copied.");
+                      } catch (error) {
+                        toast.error(
+                          error instanceof Error
+                            ? error.message
+                            : "Unable to create access link.",
+                        );
+                      } finally {
+                        setSendingReturnId(null);
+                      }
+                    }}
+                  >
+                    <Copy className="size-3.5" />
+                    Copy link
+                  </Button>
                 </div>
-              </Link>
+              </div>
             );
           })}
         </section>

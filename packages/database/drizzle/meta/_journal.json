@@ -71,6 +71,13 @@
       "when": 1774853807355,
       "tag": "0009_charming_secret_warriors",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1776246693014,
+      "tag": "0010_confused_killer_shrike",
+      "breakpoints": true
     }
   ]
 }

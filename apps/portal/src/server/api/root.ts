@@ -1,3 +1,4 @@
+import { clientAccessRouter } from "@/server/api/routers/client-access";
 import { portalAccessRouter } from "@/server/api/routers/portal-access";
 import { portalFeedbackRouter } from "@/server/api/routers/portal-feedback";
 import { portalReturnsRouter } from "@/server/api/routers/portal-returns";
@@ -11,6 +12,7 @@ import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
  * All routers added in /api/routers should be manually added here.
  */
 export const appRouter = createTRPCRouter({
+  clientAccess: clientAccessRouter,
   post: postRouter,
   portalAccess: portalAccessRouter,
   portalFeedback: portalFeedbackRouter,
