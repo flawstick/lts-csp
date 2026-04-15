@@ -152,4 +152,76 @@
       0 0 0 4px oklch(1 0 0 / 10%),
       0 12px 24px -18px rgb(0 0 0 / 42%);
   }
+
+  .client-access-page {
+    @apply min-h-screen bg-background text-foreground;
+  }
+
+  .client-access-wrap {
+    @apply mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6 lg:py-8;
+  }
+
+  .client-access-surface {
+    @apply portal-card rounded-[1.75rem] px-5 py-5 sm:px-6 sm:py-6;
+  }
+
+  .client-access-kicker {
+    @apply text-[11px] font-semibold tracking-[0.22em] text-muted-foreground uppercase;
+  }
+
+  .client-access-title {
+    @apply text-2xl font-semibold tracking-tight sm:text-3xl;
+  }
+
+  .client-access-meta {
+    @apply flex flex-wrap items-center gap-2 text-sm text-muted-foreground;
+  }
+
+  .client-access-chip {
+    @apply inline-flex items-center rounded-full border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground;
+  }
+
+  .client-access-nav {
+    @apply inline-flex flex-wrap gap-2 rounded-2xl border border-border bg-card p-2;
+  }
+
+  .client-access-nav-link {
+    @apply inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition;
+  }
+
+  .client-access-card {
+    @apply portal-card rounded-[1.5rem] px-5 py-5;
+  }
+
+  .client-access-stat-grid {
+    @apply grid gap-3 sm:grid-cols-3;
+  }
+
+  .client-access-stat {
+    @apply rounded-2xl border border-border bg-background px-4 py-4;
+  }
+
+  .client-access-stat-label {
+    @apply text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase;
+  }
+
+  .client-access-stat-value {
+    @apply mt-2 text-2xl font-semibold tracking-tight;
+  }
+
+  .client-access-upload {
+    @apply rounded-[1.35rem] border-2 border-dashed border-border bg-background px-5 py-10 text-center transition;
+  }
+
+  .client-access-field-shell {
+    @apply rounded-[1.35rem] border border-border bg-card px-4 py-4;
+  }
+
+  .client-access-section-list {
+    @apply grid gap-2.5;
+  }
+
+  .client-access-section-button {
+    @apply rounded-[1.15rem] border border-border bg-card px-4 py-4 text-left transition;
+  }
 }

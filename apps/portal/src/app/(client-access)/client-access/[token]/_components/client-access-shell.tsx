@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FileText, FolderOpen, Sparkles } from "lucide-react";
+import { Building2, FileText, FolderOpen, Sparkles } from "lucide-react";
 
 import { api } from "@/trpc/react";
 import { cn } from "@/lib/utils";
@@ -21,7 +21,7 @@ function buildTabs(
     },
     {
       href: `/client-access/${token}/workspace`,
-      label: "Return workspace",
+      label: "Workspace",
       icon: FileText,
     },
   ];
@@ -43,6 +43,16 @@ function buildTabs(
   return tabs;
 }
 
+function StatusPill({ status }: { status: string }) {
+  const normalized = status.replace(/_/g, " ");
+
+  return (
+    <span className="inline-flex items-center rounded-full border border-border bg-background px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-foreground">
+      {normalized}
+    </span>
+  );
+}
+
 export function ClientAccessShell({
   token,
   children,
@@ -55,35 +65,40 @@ export function ClientAccessShell({
 
   if (accessQuery.isLoading) {
     return (
-      <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6">
-        <div className="rounded-2xl border bg-card p-5">
-          <Skeleton className="h-4 w-28" />
-          <Skeleton className="mt-3 h-8 w-56" />
-          <Skeleton className="mt-2 h-4 w-80" />
-          <div className="mt-5 flex gap-2">
-            <Skeleton className="h-10 w-32" />
-            <Skeleton className="h-10 w-40" />
-          </div>
+      <div className="client-access-page">
+        <div className="client-access-wrap">
+          <section className="client-access-surface">
+            <Skeleton className="h-3.5 w-28" />
+            <Skeleton className="mt-3 h-9 w-64" />
+            <Skeleton className="mt-2 h-4 w-96 max-w-full" />
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Skeleton className="h-10 w-28 rounded-xl" />
+              <Skeleton className="h-10 w-36 rounded-xl" />
+              <Skeleton className="h-10 w-40 rounded-xl" />
+            </div>
+          </section>
+          <Skeleton className="h-[520px] rounded-[1.75rem]" />
         </div>
-        <Skeleton className="h-[480px] rounded-2xl" />
       </div>
     );
   }
 
   if (accessQuery.error || !accessQuery.data) {
     return (
-      <div className="mx-auto flex min-h-screen w-full max-w-3xl items-center justify-center px-4 py-12 sm:px-6">
-        <div className="w-full rounded-2xl border bg-card p-8 text-center">
-          <p className="text-lg font-semibold">Client access unavailable</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {accessQuery.error?.message ?? "The access link could not be loaded."}
-          </p>
+      <div className="client-access-page">
+        <div className="client-access-wrap">
+          <section className="client-access-surface max-w-3xl">
+            <p className="text-lg font-semibold">Access unavailable</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {accessQuery.error?.message ?? "The access link could not be loaded."}
+            </p>
+          </section>
         </div>
       </div>
     );
   }
 
-  const { organisation, return: returnRecord } = accessQuery.data;
+  const { organisation, clientProfile, return: returnRecord } = accessQuery.data;
   const tabs = buildTabs(
     token,
     returnRecord.jurisdictionCode,
@@ -91,59 +106,67 @@ export function ClientAccessShell({
   );
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6">
-        <section className="rounded-2xl border bg-card p-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+    <div className="client-access-page">
+      <div className="client-access-wrap">
+        <section className="client-access-surface">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div className="space-y-3">
+              <p className="client-access-kicker">
                 {organisation.accountName ?? organisation.name}
               </p>
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight">
-                  {returnRecord.entityName}
-                </h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {returnRecord.jurisdictionName} return for tax year{" "}
-                  {returnRecord.taxYear}
-                </p>
+              <div className="space-y-2">
+                <h1 className="client-access-title">{returnRecord.entityName}</h1>
+                <div className="client-access-meta">
+                  <span>
+                    {returnRecord.jurisdictionName} return for tax year{" "}
+                    {returnRecord.taxYear}
+                  </span>
+                  {returnRecord.externalId ? (
+                    <span className="client-access-chip font-mono text-[11px]">
+                      {returnRecord.externalId}
+                    </span>
+                  ) : null}
+                </div>
               </div>
             </div>
 
-            <div className="rounded-xl border px-3 py-2 text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">
-                {returnRecord.status.replace(/_/g, " ")}
-              </span>
-              {returnRecord.externalId ? (
-                <span className="ml-2 font-mono text-xs">{returnRecord.externalId}</span>
-              ) : null}
+            <div className="flex flex-col items-start gap-3 lg:items-end">
+              <StatusPill status={returnRecord.status} />
+              <div className="client-access-chip gap-2">
+                <Building2 className="size-3.5" />
+                <span>
+                  {clientProfile?.displayName ?? returnRecord.entityName}
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="mt-5 flex flex-wrap gap-2">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive =
-                pathname === tab.href ||
-                (tab.href !== `/client-access/${token}` &&
-                  pathname.startsWith(tab.href));
+          <div className="mt-5">
+            <nav className="client-access-nav" aria-label="Client access sections">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive =
+                  pathname === tab.href ||
+                  (tab.href !== `/client-access/${token}` &&
+                    pathname.startsWith(tab.href));
 
-              return (
-                <Link
-                  key={tab.href}
-                  href={tab.href}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition",
-                    isActive
-                      ? "border-foreground/20 bg-foreground text-background"
-                      : "border-border/70 bg-background hover:bg-muted/40",
-                  )}
-                >
-                  <Icon className="size-4" />
-                  {tab.label}
-                </Link>
-              );
-            })}
+                return (
+                  <Link
+                    key={tab.href}
+                    href={tab.href}
+                    className={cn(
+                      "client-access-nav-link",
+                      isActive
+                        ? "bg-foreground text-background shadow-sm"
+                        : "hover:bg-muted hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="size-4" />
+                    {tab.label}
+                  </Link>
+                );
+              })}
+            </nav>
           </div>
         </section>
 
