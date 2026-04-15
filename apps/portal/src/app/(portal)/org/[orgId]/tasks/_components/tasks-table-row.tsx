@@ -5,12 +5,19 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Clock3,
+  EllipsisVertical,
   FileSpreadsheet,
   FolderOpen,
 } from "lucide-react";
 import { motion } from "motion/react";
 
-import { PortalClientAccessActions } from "@/components/portal-client-access-actions";
+import { PortalClientAccessMenuSection } from "@/components/portal-client-access-actions";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 import {
@@ -67,84 +74,121 @@ export function TasksTableRow({ orgId, row, index }: Props) {
       }}
       className="group"
     >
-      <div className="hover:bg-muted/30 -mx-2 flex flex-col gap-3 rounded-xl px-2 py-3.5 transition-colors">
-        <div className="flex items-start gap-4">
-          <Link
-            href={`/org/${orgId}/returns/${row.id}`}
-            className="flex min-w-0 flex-1 items-start gap-4"
-          >
-            <div className="relative shrink-0">
-              <span
-                className={cn(
-                  "bg-muted/60 text-muted-foreground inline-flex size-10 items-center justify-center rounded-xl border transition-colors",
-                  "group-hover:border-border/80 group-hover:bg-muted/80",
-                )}
-              >
-                <TaskIcon className="size-4.5" />
-              </span>
-              <span
-                className={cn(
-                  "absolute -top-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-white dark:ring-zinc-950",
-                  TASK_DOT_COLOR[taskKind],
-                )}
-              />
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <p className="truncate text-sm font-semibold">{row.entityName}</p>
-                <span className="text-muted-foreground text-xs">{row.taxYear}</span>
-                {row.jurisdictionCode ? (
-                  <span className="inline-flex rounded-md border border-border/60 bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                    {row.jurisdictionCode}
-                  </span>
-                ) : null}
-              </div>
-              <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">
-                {action.title}
-                {action.detail ? ` — ${action.detail}` : ""}
-              </p>
-            </div>
-          </Link>
-
-          <div className="hidden shrink-0 sm:block">
-            <ArrowUpRight className="text-muted-foreground/50 group-hover:text-foreground/70 size-4 transition-colors" />
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-          <PortalClientAccessActions
-            taxReturnId={row.id}
-            entityName={row.entityName}
-            size="sm"
-          />
-
-          <div className="flex flex-wrap items-center gap-2">
-            {files === 0 ? (
-              <span className="inline-flex rounded-md border border-orange-500/20 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-300">
-                No docs
-              </span>
-            ) : null}
-            {!row.isSubstanceComplete ? (
-              <span className="inline-flex rounded-md border border-violet-500/20 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-300">
-                {missingFields > 0 ? `${missingFields} missing` : "ESR pending"}
-              </span>
-            ) : null}
+      <div className="hover:bg-muted/30 -mx-2 flex items-center gap-4 rounded-xl px-2 py-3.5 transition-colors">
+        <Link
+          href={`/org/${orgId}/returns/${row.id}`}
+          className="flex min-w-0 flex-1 items-center gap-4"
+        >
+          <div className="relative shrink-0">
             <span
               className={cn(
-                "inline-flex rounded-md border px-2 py-0.5 text-[11px] font-medium",
-                STATUS_CLASS[status],
+                "bg-muted/60 text-muted-foreground inline-flex size-10 items-center justify-center rounded-xl border transition-colors",
+                "group-hover:border-border/80 group-hover:bg-muted/80",
               )}
             >
-              {STATUS_LABEL[status]}
+              <TaskIcon className="size-4.5" />
             </span>
             <span
-              className="text-muted-foreground text-xs lg:w-16 lg:text-right"
-              title={updatedTitle}
-            >
-              {updatedLabel}
-            </span>
+              className={cn(
+                "absolute -top-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-white dark:ring-zinc-950",
+                TASK_DOT_COLOR[taskKind],
+              )}
+            />
           </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <p className="truncate text-sm font-semibold">{row.entityName}</p>
+              <span className="text-muted-foreground text-xs">{row.taxYear}</span>
+              {row.jurisdictionCode ? (
+                <span className="inline-flex rounded-md border border-border/60 bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {row.jurisdictionCode}
+                </span>
+              ) : null}
+            </div>
+            <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">
+              {action.title}
+              {action.detail ? ` — ${action.detail}` : ""}
+            </p>
+          </div>
+        </Link>
+
+        <div className="hidden shrink-0 items-center gap-2 sm:flex">
+          {files === 0 ? (
+            <span className="inline-flex rounded-md border border-orange-500/20 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-300">
+              No docs
+            </span>
+          ) : null}
+          {!row.isSubstanceComplete ? (
+            <span className="inline-flex rounded-md border border-violet-500/20 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-300">
+              {missingFields > 0 ? `${missingFields} missing` : "ESR pending"}
+            </span>
+          ) : null}
+          <span
+            className={cn(
+              "inline-flex rounded-md border px-2 py-0.5 text-[11px] font-medium",
+              STATUS_CLASS[status],
+            )}
+          >
+            {STATUS_LABEL[status]}
+          </span>
+          <span
+            className="text-muted-foreground w-16 text-right text-xs"
+            title={updatedTitle}
+          >
+            {updatedLabel}
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-8"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <EllipsisVertical className="size-4" />
+                <span className="sr-only">Actions</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-56"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <PortalClientAccessMenuSection
+                taxReturnId={row.id}
+                entityName={row.entityName}
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <ArrowUpRight className="text-muted-foreground/50 group-hover:text-foreground/70 size-4 transition-colors" />
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2 sm:hidden">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-8"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <EllipsisVertical className="size-4" />
+                <span className="sr-only">Actions</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-56"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <PortalClientAccessMenuSection
+                taxReturnId={row.id}
+                entityName={row.entityName}
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <ArrowUpRight className="text-muted-foreground/50 size-3.5" />
         </div>
       </div>
     </motion.div>

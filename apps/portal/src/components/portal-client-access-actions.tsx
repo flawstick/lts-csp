@@ -4,22 +4,21 @@ import { Copy, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import {
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { api } from "@/trpc/react";
 
-type PortalClientAccessActionsProps = {
+type PortalClientAccessMenuSectionProps = {
   taxReturnId: string;
   entityName: string;
-  size?: "default" | "sm";
-  className?: string;
 };
 
-export function PortalClientAccessActions({
+export function PortalClientAccessMenuSection({
   taxReturnId,
   entityName,
-  size = "default",
-  className,
-}: PortalClientAccessActionsProps) {
+}: PortalClientAccessMenuSectionProps) {
   const sendMutation = api.portalAccess.sendClientAccessLink.useMutation();
   const copyMutation = api.portalAccess.sendClientAccessLink.useMutation();
 
@@ -63,14 +62,16 @@ export function PortalClientAccessActions({
   };
 
   return (
-    <div
-      className={cn("flex flex-wrap items-center gap-2", className)}
-      onClick={(event) => event.stopPropagation()}
-    >
+    <>
+      <DropdownMenuLabel>Client access</DropdownMenuLabel>
+      <div
+        className="grid grid-cols-2 gap-2 px-2 pb-1"
+        onClick={(event) => event.stopPropagation()}
+      >
       <Button
         type="button"
         variant="outline"
-        size={size}
+        size="sm"
         disabled={copyMutation.isPending || sendMutation.isPending}
         onClick={() => {
           void handleCopy();
@@ -86,7 +87,7 @@ export function PortalClientAccessActions({
 
       <Button
         type="button"
-        size={size}
+        size="sm"
         disabled={sendMutation.isPending || copyMutation.isPending}
         onClick={() => {
           void handleSend();
@@ -99,6 +100,8 @@ export function PortalClientAccessActions({
         )}
         Send
       </Button>
-    </div>
+      </div>
+      <DropdownMenuSeparator />
+    </>
   );
 }

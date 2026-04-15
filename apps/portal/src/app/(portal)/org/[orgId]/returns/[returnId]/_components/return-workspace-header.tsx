@@ -3,6 +3,7 @@
 import {
   Building2,
   CalendarClock,
+  EllipsisVertical,
   Sparkles,
   XCircle,
   RotateCcw,
@@ -20,9 +21,14 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import Magnet from "@/components/Magnet";
-import { PortalClientAccessActions } from "@/components/portal-client-access-actions";
+import { PortalClientAccessMenuSection } from "@/components/portal-client-access-actions";
 
 import {
   STATUS_CLASS,
@@ -107,10 +113,6 @@ export function ReturnWorkspaceHeader({
         </div>
 
         <div className="flex items-center gap-2">
-          <PortalClientAccessActions
-            taxReturnId={selectedReturn.id}
-            entityName={selectedReturn.entityName}
-          />
           {selectedStatus === "dismissed" && onUndismiss ? (
             <Button variant="outline" onClick={onUndismiss} disabled={isDismissing}>
               <RotateCcw className="size-4" />
@@ -180,6 +182,20 @@ export function ReturnWorkspaceHeader({
             </HoverCardContent>
           </HoverCard>
         </Magnet>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="icon-sm" className="size-9">
+              <EllipsisVertical className="size-4" />
+              <span className="sr-only">Actions</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <PortalClientAccessMenuSection
+              taxReturnId={selectedReturn.id}
+              entityName={selectedReturn.entityName}
+            />
+          </DropdownMenuContent>
+        </DropdownMenu>
         </div>
       </div>
     </div>

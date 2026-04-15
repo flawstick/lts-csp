@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Building2,
   CalendarClock,
+  EllipsisVertical,
   ExternalLink,
   Loader2,
   Plus,
@@ -66,12 +67,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
 import Magnet from "@/components/Magnet";
-import { PortalClientAccessActions } from "@/components/portal-client-access-actions";
+import { PortalClientAccessMenuSection } from "@/components/portal-client-access-actions";
 
 import { ReturnFilesTab } from "./return-files-tab";
 import {
@@ -761,12 +767,6 @@ export function JerseyReturnWorkspace({
             </div>
 
             <div className="flex items-center gap-2">
-              {!isClientAccessMode ? (
-                <PortalClientAccessActions
-                  taxReturnId={selectedReturn.id}
-                  entityName={selectedReturn.entityName}
-                />
-              ) : null}
               {selectedStatus === "dismissed" && onUndismiss ? (
                 <Button
                   variant="outline"
@@ -857,6 +857,22 @@ export function JerseyReturnWorkspace({
                   </HoverCardContent>
                 </HoverCard>
               </Magnet>
+              {!isClientAccessMode ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon-sm" className="size-9">
+                      <EllipsisVertical className="size-4" />
+                      <span className="sr-only">Actions</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <PortalClientAccessMenuSection
+                      taxReturnId={selectedReturn.id}
+                      entityName={selectedReturn.entityName}
+                    />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
             </div>
           </div>
         </div>
