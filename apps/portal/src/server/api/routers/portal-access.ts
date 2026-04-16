@@ -816,7 +816,6 @@ export const portalAccessRouter = createTRPCRouter({
                         Need help?
                       </p>
                       <p style="margin: 0; color: #4b5563; font-size: 14px;">
-                        ${contactInfo.name}<br>
                         <a href="mailto:${contactInfo.email}" style="color: #0f172a;">${contactInfo.email}</a><br>
                         <a href="tel:${contactInfo.phone.replace(/\s+/g, "")}" style="color: #0f172a;">${contactInfo.phone}</a>
                       </p>

@@ -176,9 +176,6 @@ export function ClientAccessShell({
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                   Need help?
                 </p>
-                <p className="mt-1 text-sm font-medium text-foreground">
-                  {contactInfo.name}
-                </p>
               </div>
               <div className="flex flex-col gap-1.5 text-sm sm:items-end">
                 <a

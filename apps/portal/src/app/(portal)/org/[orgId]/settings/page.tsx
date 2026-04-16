@@ -235,7 +235,7 @@ export default function OrgSettingsPage() {
             disabled={!isAdmin}
           />
           <Input
-            placeholder={orgQuery.data?.effectiveContactInfo?.phone ?? "01481 755862"}
+            placeholder={orgQuery.data?.effectiveContactInfo?.phone ?? "+44 1481 755862"}
             value={displayContactPhone}
             onChange={(e) => {
               setContactPhone(e.target.value);
@@ -248,7 +248,7 @@ export default function OrgSettingsPage() {
         <p className="mt-3 text-xs text-muted-foreground">
           Default fallback: {orgQuery.data?.effectiveContactInfo?.name ?? "Jonny Woodgate"} ·{" "}
           {orgQuery.data?.effectiveContactInfo?.email ?? "taxenquiries@lts-tax.com"} ·{" "}
-          {orgQuery.data?.effectiveContactInfo?.phone ?? "01481 755862"}
+          {orgQuery.data?.effectiveContactInfo?.phone ?? "+44 1481 755862"}
         </p>
 
         {isAdmin && hasContactEdited ? (

@@ -13,7 +13,7 @@ export type ResolvedOrgPortalContactInfo = {
 export const DEFAULT_PORTAL_CONTACT_INFO: ResolvedOrgPortalContactInfo = {
   name: "Jonny Woodgate",
   email: "taxenquiries@lts-tax.com",
-  phone: "01481 755862",
+  phone: "+44 1481 755862",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
