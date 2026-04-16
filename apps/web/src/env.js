@@ -47,6 +47,7 @@ export const env = createEnv({
     SUPABASE_SERVICE_ROLE_KEY: z.string(),
     // AI Gateway
     AI_GATEWAY_API_KEY: z.string().optional(),
+    FIRECRAWL_API_KEY: z.string().optional(),
     // Browser Use Cloud
     BROWSER_USE_API_KEY: z.string(),
   },
@@ -107,6 +108,7 @@ export const env = createEnv({
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     // AI Gateway
     AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
+    FIRECRAWL_API_KEY: process.env.FIRECRAWL_API_KEY,
     // Browser Use Cloud
     BROWSER_USE_API_KEY: process.env.BROWSER_USE_API_KEY,
   },
