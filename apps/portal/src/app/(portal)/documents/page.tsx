@@ -1,74 +1,36 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  Building2,
-  ChevronRight,
-  FileText,
-  LayoutGrid,
-  Rows3,
-  Sparkles,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, Search, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   getClientHref,
   getFolderColor,
   useDocumentsTree,
+  type ClientFolder,
 } from "./_components/documents-tree";
-import { DocumentsFilterCard } from "./_components/documents-filter-card";
-import {
-  DocumentsFilterCardSkeleton,
-  DocumentsFolderGridSkeleton,
-} from "./_components/documents-skeletons";
 
-type ClientFilter = "all" | "multi_return" | "with_files";
-type ViewMode = "grid" | "list";
+type ClientFilter = "all" | "multi_return" | "with_files" | "with_autofill";
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 20;
 
 const CLIENT_FILTER_OPTIONS: Array<{ label: string; value: ClientFilter }> = [
   { value: "all", label: "All clients" },
   { value: "multi_return", label: "Multi-return clients" },
   { value: "with_files", label: "With files" },
+  { value: "with_autofill", label: "With autofill" },
 ];
-
-function ClientViewToggle({
-  value,
-  onChange,
-}: {
-  value: ViewMode;
-  onChange: (next: ViewMode) => void;
-}) {
-  return (
-    <div className="inline-flex h-9 items-center rounded-2xl border border-border/60 bg-background/75 p-1">
-      <Button
-        type="button"
-        size="sm"
-        variant={value === "grid" ? "default" : "ghost"}
-        className="h-7 rounded-xl px-3"
-        onClick={() => onChange("grid")}
-      >
-        <LayoutGrid className="size-3.5" />
-        <span className="hidden sm:inline">Cards</span>
-        <span className="sr-only">Card view</span>
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant={value === "list" ? "default" : "ghost"}
-        className="h-7 rounded-xl px-3"
-        onClick={() => onChange("list")}
-      >
-        <Rows3 className="size-3.5" />
-        <span className="hidden sm:inline">List</span>
-        <span className="sr-only">List view</span>
-      </Button>
-    </div>
-  );
-}
 
 function getClientMonogram(name: string) {
   const letters = name
@@ -85,9 +47,9 @@ function ClientMonogram({ name, id }: { name: string; id: string }) {
   const color = getFolderColor(id);
   return (
     <div
-      className="flex size-10 shrink-0 items-center justify-center rounded-xl text-xs font-bold"
+      className="flex size-9 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold"
       style={{
-        backgroundColor: `${color}14`,
+        backgroundColor: `${color}26`,
         color,
       }}
     >
@@ -99,288 +61,295 @@ function ClientMonogram({ name, id }: { name: string; id: string }) {
 export default function DocumentsPage() {
   const router = useRouter();
   const { clients, error, isLoading } = useDocumentsTree();
-  const [searchValue, setSearchValue] = useState("");
+  const [query, setQuery] = useState("");
   const [filterValue, setFilterValue] = useState<ClientFilter>("all");
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const saved = window.localStorage.getItem("portal-clients-view");
-    if (saved === "grid" || saved === "list") {
-      setViewMode(saved);
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem("portal-clients-view", viewMode);
-  }, [viewMode]);
+  const [page, setPage] = useState(1);
 
   const filteredClients = useMemo(() => {
-    const query = searchValue.trim().toLowerCase();
+    const q = query.trim().toLowerCase();
 
     return clients.filter((client) => {
-      if (filterValue === "multi_return" && client.returns.length < 2) {
-        return false;
-      }
-      if (filterValue === "with_files" && client.totalFiles === 0) {
-        return false;
-      }
+      if (filterValue === "multi_return" && client.returns.length < 2) return false;
+      if (filterValue === "with_files" && client.totalFiles === 0) return false;
+      if (filterValue === "with_autofill" && client.autofillFieldCount === 0) return false;
 
-      if (!query) return true;
+      if (!q) return true;
 
       return (
-        client.name.toLowerCase().includes(query) ||
-        client.orgName.toLowerCase().includes(query) ||
+        client.name.toLowerCase().includes(q) ||
+        client.orgName.toLowerCase().includes(q) ||
         client.returns.some(
           (row) =>
-            `${row.taxYear}`.includes(query) ||
-            row.jurisdictionCode.toLowerCase().includes(query),
+            `${row.taxYear}`.includes(q) ||
+            row.jurisdictionCode.toLowerCase().includes(q),
         )
       );
     });
-  }, [clients, filterValue, searchValue]);
+  }, [clients, filterValue, query]);
 
-  // Reset visible count when filters change
   useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [searchValue, filterValue]);
+    setPage(1);
+  }, [query, filterValue]);
 
-  const visibleClients = useMemo(
-    () => filteredClients.slice(0, visibleCount),
-    [filteredClients, visibleCount],
+  const totalCount = filteredClients.length;
+  const pageCount = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageRows = useMemo(
+    () =>
+      filteredClients.slice(
+        (currentPage - 1) * PAGE_SIZE,
+        currentPage * PAGE_SIZE,
+      ),
+    [filteredClients, currentPage],
   );
-  const hasMore = visibleCount < filteredClients.length;
-
-  // Infinite scroll: load more when sentinel enters viewport
-  const loadMore = useCallback(() => {
-    setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, filteredClients.length));
-  }, [filteredClients.length]);
 
   useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el || !hasMore) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) loadMore();
-      },
-      { rootMargin: "200px" },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasMore, loadMore]);
-
-  useEffect(() => {
-    visibleClients.slice(0, 8).forEach((client) => {
+    pageRows.slice(0, 8).forEach((client) => {
       router.prefetch(getClientHref(client.slug));
     });
-  }, [visibleClients, router]);
+  }, [pageRows, router]);
+
+  const totalReturns = clients.reduce((acc, c) => acc + c.returns.length, 0);
+  const withAutofill = clients.filter((c) => c.autofillFieldCount > 0).length;
 
   return (
-    <main className="mx-auto max-w-6xl space-y-3 pb-10">
-      <section className="portal-card p-5">
-        <div className="flex items-center gap-3">
-          <span className="inline-flex size-10 items-center justify-center rounded-lg border border-border/70 bg-muted/60 text-foreground">
-            <Building2 className="size-4.5" />
-          </span>
+    <main className="mx-auto max-w-[1280px] space-y-4">
+      <section className="portal-card overflow-hidden rounded-xl">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b p-4">
           <div>
-            <h1 className="text-lg font-semibold">Clients</h1>
-            <p className="text-sm text-muted-foreground">
+            <h1 className="text-xl font-semibold">Clients</h1>
+            <p className="text-muted-foreground mt-1 text-sm">
               Browse client returns, files, and autofill availability.
             </p>
           </div>
+
+          <div className="flex items-center gap-2 text-xs">
+            <span className="bg-muted/40 text-muted-foreground rounded-lg border px-2.5 py-1.5">
+              {isLoading ? (
+                <Skeleton className="h-4 w-16" />
+              ) : (
+                `${clients.length} clients`
+              )}
+            </span>
+            <span className="bg-muted/40 text-muted-foreground rounded-lg border px-2.5 py-1.5">
+              {isLoading ? (
+                <Skeleton className="h-4 w-16" />
+              ) : (
+                `${totalReturns} returns`
+              )}
+            </span>
+            <span className="rounded-lg border border-blue-500/40 bg-blue-500/10 px-2.5 py-1.5 text-blue-700 dark:text-blue-300">
+              {isLoading ? (
+                <Skeleton className="h-4 w-20" />
+              ) : (
+                <span className="inline-flex items-center gap-1">
+                  <Sparkles className="size-3" />
+                  {withAutofill} autofill
+                </span>
+              )}
+            </span>
+          </div>
         </div>
-      </section>
 
-      {!isLoading && !error ? (
-        <DocumentsFilterCard
-          searchValue={searchValue}
-          onSearchChange={setSearchValue}
-          searchPlaceholder="Search client, organisation, year, or jurisdiction"
-          filterLabel="Filter"
-          filterValue={filterValue}
-          onFilterChange={(value) => setFilterValue(value as ClientFilter)}
-          filterOptions={CLIENT_FILTER_OPTIONS}
-          resultLabel={`${filteredClients.length}/${clients.length} clients`}
-          actions={<ClientViewToggle value={viewMode} onChange={setViewMode} />}
-        />
-      ) : null}
+        <div className="bg-muted/20 flex flex-wrap items-center gap-2 border-b p-4">
+          <div className="relative w-full max-w-sm">
+            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search client, organisation, year, or jurisdiction"
+              className="bg-background h-9 pl-9"
+            />
+          </div>
 
-      {isLoading ? <DocumentsFilterCardSkeleton /> : null}
-      {isLoading ? <DocumentsFolderGridSkeleton /> : null}
-      {error ? <p className="px-1 text-sm text-red-600">{error.message}</p> : null}
-
-      {!isLoading && !error && clients.length === 0 ? (
-        <section className="portal-card border-dashed p-10 text-center text-sm text-muted-foreground">
-          No clients or return files are available yet.
-        </section>
-      ) : null}
-
-      {!isLoading && !error && filteredClients.length > 0 ? (
-        viewMode === "grid" ? (
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {visibleClients.map((client) => {
-              const href = getClientHref(client.slug);
-              const years = Array.from(
-                new Set(client.returns.map((r) => r.taxYear)),
-              )
-                .sort((a, b) => b - a)
-                .slice(0, 4);
-
-              return (
-                <Link
-                  key={client.id}
-                  href={href}
-                  prefetch
-                  onMouseEnter={() => router.prefetch(href)}
-                  onFocus={() => router.prefetch(href)}
-                  className="portal-card group flex flex-col rounded-xl border border-border/60 p-4 transition hover:border-border hover:bg-muted/30"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <ClientMonogram name={client.name} id={client.id} />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold leading-snug">
-                          {client.name}
-                        </p>
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                          {client.orgName}
-                        </p>
-                      </div>
-                    </div>
-                    <ChevronRight className="mt-2.5 size-4 shrink-0 text-muted-foreground/50 transition group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
-                  </div>
-
-                  <div className="mt-auto pt-4">
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1">
-                        <FileText className="size-3" />
-                        {client.returns.length} return{client.returns.length !== 1 ? "s" : ""}
-                      </span>
-                      <span className="text-border/80">|</span>
-                      <span>{client.totalFiles} file{client.totalFiles !== 1 ? "s" : ""}</span>
-                      {client.autofillFieldCount > 0 ? (
-                        <>
-                          <span className="text-border/80">|</span>
-                          <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                            <Sparkles className="size-3" />
-                            {client.autofillFieldCount} autofill
-                          </span>
-                        </>
-                      ) : null}
-                    </div>
-
-                    {years.length > 0 ? (
-                      <div className="mt-2.5 flex flex-wrap gap-1.5">
-                        {years.map((year) => (
-                          <span
-                            key={year}
-                            className="rounded-md bg-muted/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                          >
-                            {year}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </Link>
-              );
-            })}
-          </section>
-        ) : (
-          <section className="portal-card overflow-hidden rounded-xl border border-border/60 p-0">
-            <div className="hidden border-b border-border/60 bg-muted/30 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground sm:grid sm:grid-cols-[minmax(0,1.5fr)_8rem_10rem_minmax(0,1fr)_1.25rem] sm:gap-4">
-              <span>Client</span>
-              <span>Years</span>
-              <span>Coverage</span>
-              <span>Autofill</span>
-              <span />
-            </div>
-            <div className="divide-y divide-border/50">
-              {visibleClients.map((client) => {
-                const href = getClientHref(client.slug);
-                const years = Array.from(
-                  new Set(client.returns.map((r) => r.taxYear)),
-                )
-                  .sort((a, b) => b - a)
-                  .slice(0, 4);
-
-                return (
-                  <Link
-                    key={client.id}
-                    href={href}
-                    prefetch
-                    onMouseEnter={() => router.prefetch(href)}
-                    onFocus={() => router.prefetch(href)}
-                    className="group flex flex-col gap-2 px-4 py-3.5 transition hover:bg-muted/20 sm:grid sm:grid-cols-[minmax(0,1.5fr)_8rem_10rem_minmax(0,1fr)_1.25rem] sm:items-center sm:gap-4"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <ClientMonogram name={client.name} id={client.id} />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{client.name}</p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {client.orgName}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1.5 pl-[3.25rem] sm:pl-0">
-                      {years.map((year) => (
-                        <span
-                          key={year}
-                          className="rounded-md bg-muted/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                        >
-                          {year}
-                        </span>
-                      ))}
-                    </div>
-
-                    <p className="pl-[3.25rem] text-sm text-muted-foreground sm:pl-0">
-                      {client.returns.length} return{client.returns.length !== 1 ? "s" : ""}
-                      <span className="mx-1.5 text-border">·</span>
-                      {client.totalFiles} file{client.totalFiles !== 1 ? "s" : ""}
-                    </p>
-
-                    <div className="min-w-0 pl-[3.25rem] sm:pl-0">
-                      {client.autofillFieldCount > 0 ? (
-                        <p className="truncate text-sm text-blue-600 dark:text-blue-400">
-                          {client.autofillFieldCount} field{client.autofillFieldCount !== 1 ? "s" : ""}
-                        </p>
-                      ) : (
-                        <p className="truncate text-sm text-muted-foreground/60">
-                          None
-                        </p>
-                      )}
-                    </div>
-
-                    <ChevronRight className="hidden size-4 shrink-0 text-muted-foreground/40 transition group-hover:translate-x-0.5 group-hover:text-muted-foreground sm:block" />
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
-        )
-      ) : null}
-
-      {hasMore ? (
-        <div ref={sentinelRef} className="flex justify-center py-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 px-6"
-            onClick={loadMore}
+          <Select
+            value={filterValue}
+            onValueChange={(value) => setFilterValue(value as ClientFilter)}
           >
-            Show more ({filteredClients.length - visibleCount} remaining)
-          </Button>
-        </div>
-      ) : null}
+            <SelectTrigger
+              aria-label="Filter clients"
+              className="bg-background h-9 w-[200px]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              {CLIENT_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-      {!isLoading && !error && clients.length > 0 && filteredClients.length === 0 ? (
-        <section className="portal-card border-dashed p-8 text-center text-sm text-muted-foreground">
-          No clients match your search/filter.
-        </section>
-      ) : null}
+          <span className="text-muted-foreground ml-auto text-xs">
+            {isLoading ? (
+              <Skeleton className="h-4 w-24" />
+            ) : (
+              `${totalCount}/${clients.length} shown`
+            )}
+          </span>
+        </div>
+
+        {error ? (
+          <p className="p-6 text-sm text-red-600">{error.message}</p>
+        ) : null}
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[880px] text-sm">
+            <thead>
+              <tr className="text-muted-foreground border-b text-left">
+                <th className="px-4 py-3 font-medium">Client</th>
+                <th className="px-4 py-3 font-medium">Organisation</th>
+                <th className="px-4 py-3 font-medium">Years</th>
+                <th className="px-4 py-3 font-medium">Returns</th>
+                <th className="px-4 py-3 font-medium">Files</th>
+                <th className="px-4 py-3 font-medium">Autofill</th>
+                <th className="w-10 px-4 py-3 text-right font-medium">
+                  <span className="sr-only">Open</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading
+                ? Array.from({ length: 8 }).map((_, index) => (
+                    <tr key={index} className="border-b last:border-b-0">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <Skeleton className="size-9 rounded-lg" />
+                          <Skeleton className="h-4 w-40" />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3"><Skeleton className="h-4 w-32" /></td>
+                      <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
+                      <td className="px-4 py-3"><Skeleton className="h-4 w-10" /></td>
+                      <td className="px-4 py-3"><Skeleton className="h-4 w-10" /></td>
+                      <td className="px-4 py-3"><Skeleton className="h-4 w-16" /></td>
+                      <td className="px-4 py-3"><Skeleton className="ml-auto size-4" /></td>
+                    </tr>
+                  ))
+                : pageRows.map((client) => (
+                    <ClientRow
+                      key={client.id}
+                      client={client}
+                      onHover={() => router.prefetch(getClientHref(client.slug))}
+                      onOpen={() => router.push(getClientHref(client.slug))}
+                    />
+                  ))}
+
+              {!isLoading && !error && pageRows.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="text-muted-foreground px-4 py-10 text-center"
+                  >
+                    {clients.length === 0
+                      ? "No clients or return files are available yet."
+                      : "No clients match your search/filter."}
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+
+        {!isLoading && !error && totalCount > 0 ? (
+          <div className="flex items-center justify-between border-t p-4 text-sm">
+            <p className="text-muted-foreground">
+              Showing {(currentPage - 1) * PAGE_SIZE + 1}-
+              {Math.min(currentPage * PAGE_SIZE, totalCount)} of {totalCount}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Prev
+              </Button>
+              <span className="text-muted-foreground text-xs">
+                {currentPage} / {pageCount}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage >= pageCount}
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </section>
     </main>
+  );
+}
+
+function ClientRow({
+  client,
+  onHover,
+  onOpen,
+}: {
+  client: ClientFolder;
+  onHover: () => void;
+  onOpen: () => void;
+}) {
+  const years = useMemo(
+    () =>
+      Array.from(new Set(client.returns.map((r) => r.taxYear)))
+        .sort((a, b) => b - a)
+        .slice(0, 4),
+    [client.returns],
+  );
+
+  return (
+    <tr
+      className="hover:bg-muted/25 cursor-pointer border-b transition last:border-b-0"
+      onMouseEnter={onHover}
+      onFocus={onHover}
+      onClick={onOpen}
+    >
+      <td className="px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <ClientMonogram name={client.name} id={client.id} />
+          <p className="truncate font-medium">{client.name}</p>
+        </div>
+      </td>
+      <td className="text-muted-foreground max-w-[220px] px-4 py-3">
+        <p className="truncate">{client.orgName}</p>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex flex-wrap gap-1">
+          {years.length === 0 ? (
+            <span className="text-muted-foreground text-xs">—</span>
+          ) : (
+            years.map((year) => (
+              <span
+                key={year}
+                className="bg-muted/70 text-muted-foreground rounded-md px-1.5 py-0.5 text-[11px] font-medium"
+              >
+                {year}
+              </span>
+            ))
+          )}
+        </div>
+      </td>
+      <td className="text-muted-foreground px-4 py-3">{client.returns.length}</td>
+      <td className="text-muted-foreground px-4 py-3">{client.totalFiles}</td>
+      <td className="px-4 py-3">
+        {client.autofillFieldCount > 0 ? (
+          <span className="inline-flex items-center gap-1 rounded-md border border-blue-500/35 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300">
+            <Sparkles className="size-3" />
+            {client.autofillFieldCount}
+          </span>
+        ) : (
+          <span className="text-muted-foreground/60 text-xs">None</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-right">
+        <ChevronRight className="text-muted-foreground/60 ml-auto size-4" />
+      </td>
+    </tr>
   );
 }

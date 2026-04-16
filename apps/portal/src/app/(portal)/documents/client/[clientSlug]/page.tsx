@@ -5,16 +5,36 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ChevronRight,
   Copy,
+  Loader2,
   Mail,
+  Search,
   Sparkles,
+  Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import Folder from "@/components/Folder";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/trpc/react";
 import { DocumentsBackLink } from "../../_components/documents-back-link";
@@ -25,14 +45,6 @@ import {
   getReturnHref,
   useDocumentsTree,
 } from "../../_components/documents-tree";
-import {
-  DocumentsFilterCard,
-  type FilterOption,
-} from "../../_components/documents-filter-card";
-import {
-  DocumentsFilterCardSkeleton,
-  DocumentsFolderGridSkeleton,
-} from "../../_components/documents-skeletons";
 
 export default function ClientDocumentsPage() {
   const params = useParams<{ clientSlug: string }>();
@@ -43,56 +55,46 @@ export default function ClientDocumentsPage() {
   const [primaryEmail, setPrimaryEmail] = useState("");
   const [secondaryEmails, setSecondaryEmails] = useState("");
   const [sendingReturnId, setSendingReturnId] = useState<string | null>(null);
+  const [recipientsOpen, setRecipientsOpen] = useState(false);
 
   const clientSlug = params.clientSlug;
   const client = useMemo(
     () => clients.find((entry) => entry.slug === clientSlug) ?? null,
     [clientSlug, clients],
   );
-  const yearOptions = useMemo<FilterOption[]>(() => {
-    if (!client) return [{ label: "All years", value: "all" }];
 
-    const years = Array.from(new Set(client.returns.map((item) => item.taxYear))).sort(
+  const yearOptions = useMemo(() => {
+    if (!client) return [{ label: "All years", value: "all" }];
+    const years = Array.from(new Set(client.returns.map((r) => r.taxYear))).sort(
       (a, b) => b - a,
     );
     return [
       { label: "All years", value: "all" },
-      ...years.map((year) => ({ label: `${year}`, value: `${year}` })),
+      ...years.map((y) => ({ label: `${y}`, value: `${y}` })),
     ];
   }, [client]);
+
   const filteredReturns = useMemo(() => {
     if (!client) return [];
-    const query = searchValue.trim().toLowerCase();
+    const q = searchValue.trim().toLowerCase();
 
-    return client.returns.filter((returnFolder) => {
-      if (yearFilter !== "all" && `${returnFolder.taxYear}` !== yearFilter) {
-        return false;
-      }
-
-      if (!query) return true;
-
+    return client.returns.filter((rf) => {
+      if (yearFilter !== "all" && `${rf.taxYear}` !== yearFilter) return false;
+      if (!q) return true;
       return (
-        returnFolder.name.toLowerCase().includes(query) ||
-        returnFolder.jurisdictionCode.toLowerCase().includes(query) ||
-        returnFolder.jurisdictionName.toLowerCase().includes(query) ||
-        `${returnFolder.taxYear}`.includes(query)
+        rf.name.toLowerCase().includes(q) ||
+        rf.jurisdictionCode.toLowerCase().includes(q) ||
+        rf.jurisdictionName.toLowerCase().includes(q) ||
+        `${rf.taxYear}`.includes(q)
       );
     });
   }, [client, searchValue, yearFilter]);
 
   const clientProfileQuery = api.portalAccess.getClientProfile.useQuery(
     client
-      ? {
-          orgId: client.orgId,
-          entityName: client.name,
-        }
-      : {
-          orgId: "",
-          entityName: "",
-        },
-    {
-      enabled: Boolean(client),
-    },
+      ? { orgId: client.orgId, entityName: client.name }
+      : { orgId: "", entityName: "" },
+    { enabled: Boolean(client) },
   );
 
   const upsertClientProfileMutation =
@@ -102,7 +104,9 @@ export default function ClientDocumentsPage() {
 
   useEffect(() => {
     setPrimaryEmail(clientProfileQuery.data?.primaryEmail ?? "");
-    setSecondaryEmails((clientProfileQuery.data?.secondaryEmails ?? []).join("\n"));
+    setSecondaryEmails(
+      (clientProfileQuery.data?.secondaryEmails ?? []).join("\n"),
+    );
   }, [
     clientProfileQuery.data?.primaryEmail,
     clientProfileQuery.data?.secondaryEmails,
@@ -111,319 +115,410 @@ export default function ClientDocumentsPage() {
 
   useEffect(() => {
     if (!client || !filteredReturns.length) return;
-
-    filteredReturns.slice(0, 10).forEach((returnFolder) => {
-      router.prefetch(getReturnHref(client.slug, returnFolder.id));
+    filteredReturns.slice(0, 10).forEach((rf) => {
+      router.prefetch(getReturnHref(client.slug, rf.id));
     });
   }, [client, filteredReturns, router]);
 
+  const secondaryCount = useMemo(
+    () =>
+      secondaryEmails.split(/[\n,]+/).map((e) => e.trim()).filter(Boolean)
+        .length,
+    [secondaryEmails],
+  );
+  const recipientsSummary =
+    !primaryEmail && secondaryCount === 0
+      ? "No recipients"
+      : `${primaryEmail ? "Primary set" : "No primary"}${
+          secondaryCount > 0
+            ? ` · +${secondaryCount} secondary`
+            : ""
+        }`;
+
+  async function persistEmailsIfNeeded() {
+    if (!client) return;
+    await upsertClientProfileMutation.mutateAsync({
+      orgId: client.orgId,
+      entityName: client.name,
+      displayName: client.name,
+      primaryEmail: primaryEmail.trim() ? primaryEmail.trim() : null,
+      secondaryEmails: secondaryEmails
+        .split(/[\n,]+/)
+        .map((e) => e.trim())
+        .filter(Boolean),
+    });
+  }
+
   return (
-    <main className="mx-auto max-w-6xl space-y-3 pb-10">
-      <section className="portal-card p-5">
-        <div className="space-y-2">
-          <DocumentsBackLink href="/documents" label="Back to clients" />
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight [overflow-wrap:anywhere]">
-              {client ? client.name : "Clients"}
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Open a return to review files and available autofill from prior Guernsey filings.
-            </p>
+    <main className="mx-auto max-w-[1280px] space-y-4">
+      <section className="portal-card overflow-hidden rounded-xl">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
+          <div className="space-y-2 min-w-0">
+            <DocumentsBackLink href="/documents" label="Back to clients" />
+            <div className="min-w-0">
+              <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">
+                {isLoading ? (
+                  <Skeleton className="h-6 w-56" />
+                ) : client ? (
+                  client.name
+                ) : (
+                  "Client not found"
+                )}
+              </h1>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {client
+                  ? client.orgName
+                  : "Open a return to review files and available autofill."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {client ? (
+              <>
+                <span className="bg-muted/40 text-muted-foreground rounded-lg border px-2.5 py-1.5">
+                  {client.returns.length} returns
+                </span>
+                <span className="bg-muted/40 text-muted-foreground rounded-lg border px-2.5 py-1.5">
+                  {client.totalFiles} files
+                </span>
+                {client.autofillFieldCount > 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded-lg border border-blue-500/40 bg-blue-500/10 px-2.5 py-1.5 text-blue-700 dark:text-blue-300">
+                    <Sparkles className="size-3" />
+                    {client.autofillFieldCount} autofill
+                  </span>
+                ) : null}
+                <Dialog open={recipientsOpen} onOpenChange={setRecipientsOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" variant="outline" className="h-8 gap-1.5">
+                      <Users className="size-3.5" />
+                      <span>Recipients</span>
+                      <span className="text-muted-foreground hidden sm:inline">
+                        · {recipientsSummary}
+                      </span>
+                    </Button>
+                  </DialogTrigger>
+                  <RecipientsDialogContent
+                    primaryEmail={primaryEmail}
+                    setPrimaryEmail={setPrimaryEmail}
+                    secondaryEmails={secondaryEmails}
+                    setSecondaryEmails={setSecondaryEmails}
+                    saving={upsertClientProfileMutation.isPending}
+                    onSave={async () => {
+                      try {
+                        await persistEmailsIfNeeded();
+                        toast.success("Client recipient emails saved.");
+                        void clientProfileQuery.refetch();
+                        setRecipientsOpen(false);
+                      } catch (err) {
+                        toast.error(
+                          err instanceof Error
+                            ? err.message
+                            : "Unable to save client emails.",
+                        );
+                      }
+                    }}
+                  />
+                </Dialog>
+              </>
+            ) : null}
           </div>
         </div>
-      </section>
 
-      {!isLoading && !error && client ? (
-        <DocumentsFilterCard
-          searchValue={searchValue}
-          onSearchChange={setSearchValue}
-          searchPlaceholder="Search return, jurisdiction, or year"
-          filterLabel="Year"
-          filterValue={yearFilter}
-          onFilterChange={setYearFilter}
-          filterOptions={yearOptions}
-          resultLabel={`${filteredReturns.length}/${client.returns.length} returns`}
-        />
-      ) : null}
-
-      {isLoading ? <DocumentsFilterCardSkeleton /> : null}
-      {isLoading ? <DocumentsFolderGridSkeleton /> : null}
-      {error ? <p className="px-1 text-sm text-red-600">{error.message}</p> : null}
-
-      {!isLoading && !error && !client ? (
-        <section className="portal-card p-10 text-center text-sm text-muted-foreground">
-          Client not found.
-        </section>
-      ) : null}
-
-      {!isLoading && !error && client ? (
-        <section className="portal-card p-4">
-          <div className="max-w-2xl space-y-4">
-            <div className="space-y-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                Client access
-              </p>
-              <h2 className="text-base font-semibold">Recipient emails</h2>
-              <p className="text-sm text-muted-foreground">
-                Access links for this client use the primary email by default and can optionally include secondary recipients.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="client-primary-email">Primary email</Label>
-                <Input
-                  id="client-primary-email"
-                  type="email"
-                  value={primaryEmail}
-                  onChange={(event) => setPrimaryEmail(event.target.value)}
-                  placeholder="client@example.com"
-                />
-              </div>
-
-              <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
-                <div className="space-y-2">
-                  <Label htmlFor="client-secondary-emails">Secondary emails</Label>
-                  <Textarea
-                    id="client-secondary-emails"
-                    value={secondaryEmails}
-                    onChange={(event) => setSecondaryEmails(event.target.value)}
-                    placeholder={"finance@example.com\nops@example.com"}
-                    className="min-h-28 bg-background"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    One email per line. Access links will be sent to the primary email and all secondary emails.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex justify-start">
-                <Button
-                  disabled={upsertClientProfileMutation.isPending}
-                  onClick={async () => {
-                    if (!client) return;
-
-                    try {
-                      await upsertClientProfileMutation.mutateAsync({
-                        orgId: client.orgId,
-                        entityName: client.name,
-                        displayName: client.name,
-                        primaryEmail: primaryEmail.trim() ? primaryEmail.trim() : null,
-                        secondaryEmails: secondaryEmails
-                          .split(/[\n,]+/)
-                          .map((email) => email.trim())
-                          .filter(Boolean),
-                      });
-                      toast.success("Client recipient emails saved.");
-                      void clientProfileQuery.refetch();
-                    } catch (error) {
-                      toast.error(
-                        error instanceof Error
-                          ? error.message
-                          : "Unable to save client emails.",
-                      );
-                    }
-                  }}
-                >
-                  Save emails
-                </Button>
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {!isLoading && !error && client ? (
-        <section className="portal-card p-4">
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-            <Sparkles className="size-3.5" />
-            Company autofill
-          </div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Autofill is combined across this company’s prior returns, with later
-            tax years taking priority for each field.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {client.autofillFields.length > 0 ? (
-              <>
-                {client.autofillFields.slice(0, 8).map((field) => (
+        {client && client.autofillFields.length > 0 ? (
+          <div className="bg-blue-500/[0.04] border-b p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-muted-foreground inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.18em]">
+                <Sparkles className="size-3.5 text-blue-500" />
+                Company autofill
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {client.autofillFields.slice(0, 10).map((field) => (
                   <span
                     key={field.key}
-                    className="inline-flex rounded-full border border-blue-500/20 bg-blue-500/[0.06] px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:text-blue-300"
+                    className="rounded-full border border-blue-500/25 bg-blue-500/[0.06] px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300"
                   >
                     {field.label}
                   </span>
                 ))}
-                {client.autofillFields.length > 8 ? (
-                  <span className="inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                    +{client.autofillFields.length - 8} more
+                {client.autofillFields.length > 10 ? (
+                  <span className="text-muted-foreground rounded-full border px-2 py-0.5 text-[11px] font-medium">
+                    +{client.autofillFields.length - 10} more
                   </span>
                 ) : null}
-              </>
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                No prior-return autofill is available for this company yet.
-              </span>
-            )}
+              </div>
+            </div>
           </div>
-        </section>
-      ) : null}
+        ) : null}
 
-      {!isLoading && !error && client && filteredReturns.length > 0 ? (
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {filteredReturns.map((returnFolder) => {
-            const href = getReturnHref(client.slug, returnFolder.id);
-            const folderItems = buildFolderPreviewItems(
-              returnFolder.files.map((file) => file.name),
-            );
+        {client ? (
+          <div className="bg-muted/20 flex flex-wrap items-center gap-2 border-b p-4">
+            <div className="relative w-full max-w-sm">
+              <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+              <Input
+                value={searchValue}
+                onChange={(e) => setSearchValue(e.target.value)}
+                placeholder="Search return, jurisdiction, or year"
+                className="bg-background h-9 pl-9"
+              />
+            </div>
 
-            return (
-              <div
-                key={returnFolder.id}
-                className="portal-card rounded-xl border border-border/60 p-4 transition hover:bg-muted/20"
+            <Select value={yearFilter} onValueChange={setYearFilter}>
+              <SelectTrigger
+                aria-label="Filter by year"
+                className="bg-background h-9 w-[160px]"
               >
-                <Link
-                  href={href}
-                  prefetch
-                  onMouseEnter={() => router.prefetch(href)}
-                  onFocus={() => router.prefetch(href)}
-                  className="group flex items-start gap-3"
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {yearOptions.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <span className="text-muted-foreground ml-auto text-xs">
+              {filteredReturns.length}/{client.returns.length} returns
+            </span>
+          </div>
+        ) : null}
+
+        {error ? (
+          <p className="p-6 text-sm text-red-600">{error.message}</p>
+        ) : null}
+
+        {isLoading ? (
+          <div className="divide-y">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 p-4">
+                <Skeleton className="size-12 rounded-md" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-48" />
+                </div>
+                <Skeleton className="h-8 w-28" />
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {!isLoading && !error && client && filteredReturns.length > 0 ? (
+          <ul className="divide-y">
+            {filteredReturns.map((returnFolder) => {
+              const href = getReturnHref(client.slug, returnFolder.id);
+              const folderItems = buildFolderPreviewItems(
+                returnFolder.files.map((f) => f.name),
+              );
+              const isSending = sendingReturnId === returnFolder.id;
+
+              return (
+                <li
+                  key={returnFolder.id}
+                  className="hover:bg-muted/15 group flex flex-wrap items-center gap-4 px-4 py-3 transition"
                 >
-                  <Folder
-                    color={getFolderColor(returnFolder.id)}
-                    size={0.54}
-                    items={folderItems}
-                    className="shrink-0"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-lg font-semibold leading-none">
+                  <Link
+                    href={href}
+                    prefetch
+                    onMouseEnter={() => router.prefetch(href)}
+                    onFocus={() => router.prefetch(href)}
+                    className="flex min-w-0 flex-1 items-center gap-3"
+                  >
+                    <Folder
+                      color={getFolderColor(returnFolder.id)}
+                      size={0.36}
+                      items={folderItems}
+                      className="shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2">
+                        <p className="text-base font-semibold leading-none">
                           {returnFolder.taxYear}
                         </p>
-                        <p className="mt-1 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                        <span className="text-muted-foreground text-[11px] font-medium uppercase tracking-[0.15em]">
                           {returnFolder.jurisdictionCode}
-                        </p>
+                        </span>
                       </div>
-                      <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5" />
+                      <p className="text-muted-foreground mt-1 truncate text-xs">
+                        {returnFolder.jurisdictionName} ·{" "}
+                        {returnFolder.files.length} file
+                        {returnFolder.files.length === 1 ? "" : "s"} · Updated{" "}
+                        {formatDateTime(returnFolder.updatedAt)}
+                      </p>
                     </div>
+                  </Link>
 
-                    <p className="mt-2 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-                      {returnFolder.jurisdictionName}
-                    </p>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      disabled={isSending}
+                      onClick={async () => {
+                        setSendingReturnId(returnFolder.id);
+                        try {
+                          await persistEmailsIfNeeded();
+                          const result =
+                            await sendClientAccessLinkMutation.mutateAsync({
+                              taxReturnId: returnFolder.id,
+                              sendEmail: true,
+                            });
+                          if (result.accessUrl) {
+                            await navigator.clipboard.writeText(result.accessUrl);
+                          }
+                          toast.success(
+                            `Access link emailed to ${result.recipientEmails.length} recipient(s).`,
+                          );
+                        } catch (err) {
+                          toast.error(
+                            err instanceof Error
+                              ? err.message
+                              : "Unable to send access link.",
+                          );
+                        } finally {
+                          setSendingReturnId(null);
+                        }
+                      }}
+                    >
+                      {isSending ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Mail className="size-3.5" />
+                      )}
+                      Send link
+                    </Button>
 
-                    <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                      <span className="rounded-full border border-border/60 px-2 py-1 text-muted-foreground">
-                        {returnFolder.files.length} file{returnFolder.files.length === 1 ? "" : "s"}
-                      </span>
-                      <span className="rounded-full border border-border/60 px-2 py-1 text-muted-foreground">
-                        Updated {formatDateTime(returnFolder.updatedAt)}
-                      </span>
-                    </div>
-                  </div>
-                </Link>
-
-                <div className="mt-3 flex flex-wrap gap-2 pl-[72px]">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-8"
-                    disabled={sendingReturnId === returnFolder.id}
-                    onClick={async () => {
-                      setSendingReturnId(returnFolder.id);
-                      try {
-                        await upsertClientProfileMutation.mutateAsync({
-                          orgId: client.orgId,
-                          entityName: client.name,
-                          displayName: client.name,
-                          primaryEmail: primaryEmail.trim() ? primaryEmail.trim() : null,
-                          secondaryEmails: secondaryEmails
-                            .split(/[\n,]+/)
-                            .map((email) => email.trim())
-                            .filter(Boolean),
-                        });
-                        const result =
-                          await sendClientAccessLinkMutation.mutateAsync({
-                            taxReturnId: returnFolder.id,
-                            sendEmail: true,
-                          });
-                        if (result.accessUrl) {
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="Copy access link"
+                      className="h-8 w-8"
+                      disabled={isSending}
+                      onClick={async () => {
+                        setSendingReturnId(returnFolder.id);
+                        try {
+                          await persistEmailsIfNeeded();
+                          const result =
+                            await sendClientAccessLinkMutation.mutateAsync({
+                              taxReturnId: returnFolder.id,
+                              sendEmail: false,
+                            });
+                          if (!result.accessUrl) {
+                            throw new Error("No access URL could be generated.");
+                          }
                           await navigator.clipboard.writeText(result.accessUrl);
+                          toast.success("Access link copied.");
+                        } catch (err) {
+                          toast.error(
+                            err instanceof Error
+                              ? err.message
+                              : "Unable to create access link.",
+                          );
+                        } finally {
+                          setSendingReturnId(null);
                         }
-                        toast.success(
-                          `Access link emailed to ${result.recipientEmails.length} recipient(s).`,
-                        );
-                      } catch (error) {
-                        toast.error(
-                          error instanceof Error
-                            ? error.message
-                            : "Unable to send access link.",
-                        );
-                      } finally {
-                        setSendingReturnId(null);
-                      }
-                    }}
-                  >
-                    <Mail className="size-3.5" />
-                    Send access link
-                  </Button>
+                      }}
+                    >
+                      <Copy className="size-3.5" />
+                    </Button>
 
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-8"
-                    disabled={sendingReturnId === returnFolder.id}
-                    onClick={async () => {
-                      setSendingReturnId(returnFolder.id);
-                      try {
-                        await upsertClientProfileMutation.mutateAsync({
-                          orgId: client.orgId,
-                          entityName: client.name,
-                          displayName: client.name,
-                          primaryEmail: primaryEmail.trim() ? primaryEmail.trim() : null,
-                          secondaryEmails: secondaryEmails
-                            .split(/[\n,]+/)
-                            .map((email) => email.trim())
-                            .filter(Boolean),
-                        });
-                        const result =
-                          await sendClientAccessLinkMutation.mutateAsync({
-                            taxReturnId: returnFolder.id,
-                            sendEmail: false,
-                          });
-                        if (!result.accessUrl) {
-                          throw new Error("No access URL could be generated.");
-                        }
-                        await navigator.clipboard.writeText(result.accessUrl);
-                        toast.success("Access link copied.");
-                      } catch (error) {
-                        toast.error(
-                          error instanceof Error
-                            ? error.message
-                            : "Unable to create access link.",
-                        );
-                      } finally {
-                        setSendingReturnId(null);
-                      }
-                    }}
-                  >
-                    <Copy className="size-3.5" />
-                    Copy link
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </section>
-      ) : null}
+                    <Button
+                      asChild
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="Open return"
+                      className="h-8 w-8"
+                    >
+                      <Link href={href} prefetch>
+                        <ChevronRight className="size-4" />
+                      </Link>
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
 
-      {!isLoading && !error && client && filteredReturns.length === 0 ? (
-        <section className="portal-card border-dashed p-8 text-center text-sm text-muted-foreground">
-          No returns match your search/filter.
-        </section>
-      ) : null}
+        {!isLoading && !error && client && filteredReturns.length === 0 ? (
+          <p className="text-muted-foreground p-10 text-center text-sm">
+            No returns match your search/filter.
+          </p>
+        ) : null}
+
+        {!isLoading && !error && !client ? (
+          <p className="text-muted-foreground p-10 text-center text-sm">
+            Client not found.
+          </p>
+        ) : null}
+      </section>
     </main>
+  );
+}
+
+function RecipientsDialogContent({
+  primaryEmail,
+  setPrimaryEmail,
+  secondaryEmails,
+  setSecondaryEmails,
+  saving,
+  onSave,
+}: {
+  primaryEmail: string;
+  setPrimaryEmail: (v: string) => void;
+  secondaryEmails: string;
+  setSecondaryEmails: (v: string) => void;
+  saving: boolean;
+  onSave: () => void;
+}) {
+  return (
+    <DialogContent className="sm:max-w-lg">
+      <DialogHeader>
+        <DialogTitle>Recipient emails</DialogTitle>
+        <DialogDescription>
+          Access links use the primary email by default and can optionally
+          include secondary recipients.
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="space-y-4 py-2">
+        <div className="space-y-2">
+          <Label htmlFor="client-primary-email">Primary email</Label>
+          <Input
+            id="client-primary-email"
+            type="email"
+            value={primaryEmail}
+            onChange={(e) => setPrimaryEmail(e.target.value)}
+            placeholder="client@example.com"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="client-secondary-emails">Secondary emails</Label>
+          <Textarea
+            id="client-secondary-emails"
+            value={secondaryEmails}
+            onChange={(e) => setSecondaryEmails(e.target.value)}
+            placeholder={"finance@example.com\nops@example.com"}
+            className="min-h-24"
+          />
+          <p className="text-muted-foreground text-xs">
+            One email per line. Access links will be sent to the primary email
+            and all secondary emails.
+          </p>
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button disabled={saving} onClick={onSave}>
+          {saving ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          Save emails
+        </Button>
+      </DialogFooter>
+    </DialogContent>
   );
 }
