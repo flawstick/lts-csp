@@ -456,69 +456,69 @@ export function buildInitializedSubstanceFormValues(input: {
 }
 
 const aiExtractionSchema = z.object({
-  entityName: z.string().optional(),
-  entityType: z.enum(["Company", "Partnership"]).optional(),
-  accountingPeriodStart: z.string().optional(),
-  accountingPeriodEnd: z.string().optional(),
-  isCollectiveInvestmentVehicle: z.enum(["Yes", "No"]).optional(),
-  companyNumber: z.string().optional(),
+  entityName: z.string().nullable(),
+  entityType: z.enum(["Company", "Partnership"]).nullable(),
+  accountingPeriodStart: z.string().nullable(),
+  accountingPeriodEnd: z.string().nullable(),
+  isCollectiveInvestmentVehicle: z.enum(["Yes", "No"]).nullable(),
+  companyNumber: z.string().nullable(),
   taxReferenceNumber: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Tax reference number - preserve the exact alphanumeric format, including any leading letters such as C",
     ),
-  registeredAddress: z.string().optional(),
-  principalPlaceOfBusiness: z.string().optional(),
-  isIncorporatedInGuernsey: z.enum(["Yes", "No"]).optional(),
+  registeredAddress: z.string().nullable(),
+  principalPlaceOfBusiness: z.string().nullable(),
+  isIncorporatedInGuernsey: z.enum(["Yes", "No"]).nullable(),
   economicClassificationCode: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       'REQUIRED for 2025 returns — Company Activity Code dropdown. It usually looks like a dotted numeric code such as "10.5.4". Return only the dotted code.',
     ),
   certificateType: z
     .string()
-    .optional()
+    .nullable()
     .describe('Certificate type - always return exactly "Certificate 3"'),
   entityActivity: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Nature of the entity's business activity (e.g., 'Property Holdings') — extract from Directors Report",
     ),
-  partnershipName: z.string().optional(),
-  partnershipNumber: z.string().optional(),
-  areFinancialStatementsConsolidated: z.enum(["Yes", "No"]).optional(),
+  partnershipName: z.string().nullable(),
+  partnershipNumber: z.string().nullable(),
+  areFinancialStatementsConsolidated: z.enum(["Yes", "No"]).nullable(),
   accountsPreparerName: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Name of the ACCOUNTANT/AUDITOR who prepared the financial accounts, NOT the ESR form preparer",
     ),
   accountsPreparerQualification: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Qualification of the accounts preparer/auditor (ACCA, ICAEW, etc.)",
     ),
   netBookValue: z
     .string()
-    .optional()
+    .nullable()
     .describe("Net book value from Balance Sheet — if negative, return '0'"),
   totalProfit: z
     .string()
-    .optional()
+    .nullable()
     .describe("Total profit from P&L — if negative (a loss), return '0'"),
   profitAllocation: z
     .enum(["Investment", "Business"])
-    .optional()
+    .nullable()
     .describe("Profit before tax allocation — REQUIRED, always pick one"),
-  isGuernseyFiFatca: z.enum(["Yes", "No"]).optional(),
-  isGuernseyFiCrs: z.enum(["Yes", "No"]).optional(),
+  isGuernseyFiFatca: z.enum(["Yes", "No"]).nullable(),
+  isGuernseyFiCrs: z.enum(["Yes", "No"]).nullable(),
   isRegisteredOnIgor: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Is registered on IGOR — must be Yes if FATCA is Yes"),
   relevantActivity: z
     .enum([
@@ -534,122 +534,156 @@ const aiExtractionSchema = z.object({
       "Pure Equity Holding Company",
       "None of the above",
     ])
-    .optional()
+    .nullable()
     .describe(
       "Primary relevant activity from the dropdown options. Use existing form context and the entity activity/business description if the documents are ambiguous.",
     ),
-  hasMultipleRelevantActivities: z.enum(["Yes", "No"]).optional(),
-  hasIntellectualPropertyHolding: z.enum(["Yes", "No"]).optional(),
-  isHighRiskIpEntity: z.enum(["Yes", "No"]).optional(),
-  wantsToRebutHighRiskStatus: z.enum(["Yes", "No"]).optional(),
-  highRiskRebuttalNarrative: z.string().optional(),
-  ipIncomeType: z.string().optional(),
+  hasMultipleRelevantActivities: z.enum(["Yes", "No"]).nullable(),
+  hasIntellectualPropertyHolding: z.enum(["Yes", "No"]).nullable(),
+  isHighRiskIpEntity: z.enum(["Yes", "No"]).nullable(),
+  wantsToRebutHighRiskStatus: z.enum(["Yes", "No"]).nullable(),
+  highRiskRebuttalNarrative: z.string().nullable(),
+  ipIncomeType: z.string().nullable(),
   activityGrossIncome: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Turnover or gross income generated from the relevant activity. Return the numeric amount only when clearly stated.",
     ),
-  hasAdequatePhysicalPresence: z.enum(["Yes", "No", "N/A"]).optional(),
+  hasAdequatePhysicalPresence: z.enum(["Yes", "No", "N/A"]).nullable(),
   adequacyExpenditureDetails: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Operating expenditure relating to the relevant activity. Return the numeric amount only when clearly stated.",
     ),
-  adequacyPhysicalPresenceDetails: z.string().optional(),
-  cigaPerformed: z.string().optional(),
-  cigaDetails: z.string().optional(),
+  adequacyPhysicalPresenceDetails: z.string().nullable(),
+  cigaPerformed: z.string().nullable(),
+  cigaDetails: z.string().nullable(),
   employees: z
     .array(
       z.object({
-        name: z.string().optional(),
-        qualifiedForReporting: z.boolean().optional(),
-        unitsOnCompany: z.number().optional(),
-        totalUnits: z.number().optional(),
-        fteFraction: z.number().optional(),
-        qualifiedFteFraction: z.number().optional(),
+        name: z.string().nullable(),
+        qualifiedForReporting: z.boolean().nullable(),
+        unitsOnCompany: z.number().nullable(),
+        totalUnits: z.number().nullable(),
+        fteFraction: z.number().nullable(),
+        qualifiedFteFraction: z.number().nullable(),
       }),
     )
-    .optional(),
-  totalFte: z.number().optional(),
-  totalQualifiedFte: z.number().optional(),
-  hasCigaOutsourcing: z.enum(["Yes", "No", "N/A"]).optional(),
-  outsourcingDetails: z.string().optional(),
+    .nullable(),
+  totalFte: z.number().nullable(),
+  totalQualifiedFte: z.number().nullable(),
+  hasCigaOutsourcing: z.enum(["Yes", "No", "N/A"]).nullable(),
+  outsourcingDetails: z.string().nullable(),
   immediateParents: z
     .array(
       z.object({
-        name: z.string().optional(),
-        countryOfTaxResidence: z.string().optional(),
-        tin: z.string().optional(),
-        tinCountry: z.string().optional(),
-        registeredAddress: z.string().optional(),
+        name: z.string().nullable(),
+        countryOfTaxResidence: z.string().nullable(),
+        tin: z.string().nullable(),
+        tinCountry: z.string().nullable(),
+        registeredAddress: z.string().nullable(),
       }),
     )
-    .optional(),
+    .nullable(),
   ultimateParents: z
     .array(
       z.object({
-        name: z.string().optional(),
-        countryOfTaxResidence: z.string().optional(),
-        tin: z.string().optional(),
-        tinCountry: z.string().optional(),
-        registeredAddress: z.string().optional(),
+        name: z.string().nullable(),
+        countryOfTaxResidence: z.string().nullable(),
+        tin: z.string().nullable(),
+        tinCountry: z.string().nullable(),
+        registeredAddress: z.string().nullable(),
       }),
     )
-    .optional(),
+    .nullable(),
   ultimateBeneficialOwners: z
     .array(
       z.object({
-        name: z.string().optional(),
-        dateOfBirth: z.string().optional(),
-        placeOfBirth: z.string().optional(),
-        nationality: z.string().optional(),
-        countryOfTaxResidence: z.string().optional(),
-        tin: z.string().optional(),
-        tinCountry: z.string().optional(),
-        address: z.string().optional(),
+        name: z.string().nullable(),
+        dateOfBirth: z.string().nullable(),
+        placeOfBirth: z.string().nullable(),
+        nationality: z.string().nullable(),
+        countryOfTaxResidence: z.string().nullable(),
+        tin: z.string().nullable(),
+        tinCountry: z.string().nullable(),
+        address: z.string().nullable(),
       }),
     )
-    .optional(),
-  allBoardMeetingsInGuernsey: z.enum(["Yes", "No"]).optional(),
-  totalBoardMeetings: z.number().optional(),
-  boardMeetingsInGuernsey: z.number().optional(),
-  adequateMeetingFrequency: z.enum(["Yes", "No", "N/A"]).optional(),
-  enoughDirectorsPresent: z.enum(["Yes", "No", "N/A"]).optional(),
-  directorsHaveExpertise: z.enum(["Yes", "No", "N/A"]).optional(),
-  strategicDecisionsMadeInGuernsey: z.enum(["Yes", "No", "N/A"]).optional(),
-  recordsMaintainedInGuernsey: z.enum(["Yes", "No", "N/A"]).optional(),
-  boardMeetingLocation: z.string().optional(),
+    .nullable(),
+  allBoardMeetingsInGuernsey: z.enum(["Yes", "No"]).nullable(),
+  totalBoardMeetings: z.number().nullable(),
+  boardMeetingsInGuernsey: z.number().nullable(),
+  adequateMeetingFrequency: z.enum(["Yes", "No", "N/A"]).nullable(),
+  enoughDirectorsPresent: z.enum(["Yes", "No", "N/A"]).nullable(),
+  directorsHaveExpertise: z.enum(["Yes", "No", "N/A"]).nullable(),
+  strategicDecisionsMadeInGuernsey: z.enum(["Yes", "No", "N/A"]).nullable(),
+  recordsMaintainedInGuernsey: z.enum(["Yes", "No", "N/A"]).nullable(),
+  boardMeetingLocation: z.string().nullable(),
   directors: z
     .array(
       z.object({
-        name: z.string().optional(),
-        initials: z.string().optional(),
+        name: z.string().nullable(),
+        initials: z.string().nullable(),
       }),
     )
-    .optional(),
+    .nullable(),
   boardMeetings: z
     .array(
       z.object({
-        date: z.string().optional(),
-        attendees: z.string().optional(),
-        allPresentInGuernsey: z.boolean().optional(),
-        agendaPoints: z.string().optional(),
+        date: z.string().nullable(),
+        attendees: z.string().nullable(),
+        allPresentInGuernsey: z.boolean().nullable(),
+        agendaPoints: z.string().nullable(),
       }),
     )
-    .optional(),
-  preparedBy: z.string().optional(),
-  preparedDate: z.string().optional(),
-  managerSignOff: z.string().optional(),
-  managerSignOffDate: z.string().optional(),
-  isConstituentEntity: z.enum(["Yes", "No"]).optional(),
-  hasPostBalanceSheetEvent: z.enum(["Yes", "No"]).optional(),
-  postBalanceSheetEventDetails: z.string().optional(),
-  hasC42Association: z.enum(["Yes", "No"]).optional(),
-  c42AssociatedCompanies: z.string().optional(),
-  contractInformation: z.string().optional(),
+    .nullable(),
+  preparedBy: z.string().nullable(),
+  preparedDate: z.string().nullable(),
+  managerSignOff: z.string().nullable(),
+  managerSignOffDate: z.string().nullable(),
+  isConstituentEntity: z.enum(["Yes", "No"]).nullable(),
+  hasPostBalanceSheetEvent: z.enum(["Yes", "No"]).nullable(),
+  postBalanceSheetEventDetails: z.string().nullable(),
+  hasC42Association: z.enum(["Yes", "No"]).nullable(),
+  c42AssociatedCompanies: z.string().nullable(),
+  contractInformation: z.string().nullable(),
 });
+
+function stripNullishStructuredValue(value: unknown): unknown {
+  if (value === null) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    const normalizedItems: unknown[] = [];
+
+    for (const item of value) {
+      const normalizedItem = stripNullishStructuredValue(item);
+      if (normalizedItem !== undefined) {
+        normalizedItems.push(normalizedItem);
+      }
+    }
+
+    return normalizedItems;
+  }
+
+  if (typeof value === "object" && value !== null) {
+    const normalizedEntries: Array<[string, unknown]> = [];
+
+    for (const [key, entry] of Object.entries(value)) {
+      const normalizedEntry = stripNullishStructuredValue(entry);
+      if (normalizedEntry !== undefined) {
+        normalizedEntries.push([key, normalizedEntry]);
+      }
+    }
+
+    return Object.fromEntries(normalizedEntries);
+  }
+
+  return value;
+}
 
 type RecentReturnMeta = {
   id: string;
@@ -1132,7 +1166,9 @@ ${cigaOptionsText}
     }
   }
 
-  const extractedData = result.object;
+  const extractedData = stripNullishStructuredValue(
+    result.object,
+  ) as Partial<SubstanceFormData>;
   const extractedTextContext = textContents.map((content) => content.text);
 
   extractedData.accountingPeriodStart = `${Number(input.returnRecord.taxYear) - 1}-04-06`;

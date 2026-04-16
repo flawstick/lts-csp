@@ -419,57 +419,57 @@ function buildInitializedSubstanceFormValues(input: {
 // AI Extraction Schema - Uses inline enums to avoid Zod v4 JSON schema conversion issues
 const aiExtractionSchema = z.object({
   // SECTION 1: BACKGROUND
-  entityName: z.string().optional().describe("Name of the entity/company"),
+  entityName: z.string().nullable().describe("Name of the entity/company"),
   entityType: z
     .enum(["Company", "Partnership"])
-    .optional()
+    .nullable()
     .describe("Company or Partnership"),
   accountingPeriodStart: z
     .string()
-    .optional()
+    .nullable()
     .describe("Start date of accounting period (YYYY-MM-DD)"),
   accountingPeriodEnd: z
     .string()
-    .optional()
+    .nullable()
     .describe("End date of accounting period (YYYY-MM-DD)"),
   isCollectiveInvestmentVehicle: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Is this entity a Collective Investment Vehicle?"),
 
   // SECTION 2: COMPANY INFORMATION
-  companyNumber: z.string().optional().describe("Company registration number"),
+  companyNumber: z.string().nullable().describe("Company registration number"),
   taxReferenceNumber: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Tax reference number - preserve the exact alphanumeric format, including any leading letters such as C",
     ),
   registeredAddress: z
     .string()
-    .optional()
+    .nullable()
     .describe("Registered office address"),
   principalPlaceOfBusiness: z
     .string()
-    .optional()
+    .nullable()
     .describe("Principal place of business address"),
   isIncorporatedInGuernsey: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Is the entity incorporated in Guernsey?"),
   economicClassificationCode: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       'Economic classification code / Company Activity Code — REQUIRED for 2025 returns. It usually looks like a dotted numeric code such as "10.5.4". Return only the dotted code.',
     ),
   certificateType: z
     .string()
-    .optional()
+    .nullable()
     .describe('Certificate type - always return exactly "Certificate 3"'),
   entityActivity: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Nature of the entity's business activity (e.g., 'Property Holdings', 'Investment Holding') — extract from Directors Report or company description",
     ),
@@ -477,57 +477,57 @@ const aiExtractionSchema = z.object({
   // SECTION 3: PARTNERSHIP INFORMATION
   partnershipName: z
     .string()
-    .optional()
+    .nullable()
     .describe("Partnership name if applicable"),
   partnershipNumber: z
     .string()
-    .optional()
+    .nullable()
     .describe("Partnership registration number"),
 
   // SECTION 4: FINANCIAL STATEMENTS
   areFinancialStatementsConsolidated: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Are financial statements consolidated?"),
   accountsPreparerName: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Name of the firm/person who prepared the FINANCIAL ACCOUNTS (the accountant/auditor, NOT the ESR form preparer — do NOT use 'LTS Tax Limited' here)",
     ),
   accountsPreparerQualification: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Qualification of the accounts preparer/auditor (ACCA, ICAEW, etc.) — this is the accountant's qualification, not LTS",
     ),
   netBookValue: z
     .string()
-    .optional()
+    .nullable()
     .describe("Net book value from Balance Sheet — if negative, return '0'"),
   totalProfit: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Total profit from Profit & Loss Account — if negative (a loss), return '0'",
     ),
   profitAllocation: z
     .enum(["Investment", "Business"])
-    .optional()
+    .nullable()
     .describe("Profit before tax allocation - Investment or Business"),
 
   // SECTION 5: FINANCIAL INSTITUTIONS (FATCA/CRS)
   isGuernseyFiFatca: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Is Guernsey Financial Institution under FATCA?"),
   isGuernseyFiCrs: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Is Financial Institution under CRS?"),
   isRegisteredOnIgor: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe(
       "Is registered on IGOR (Information Gateway Online Reporter) for FATCA/CRS reporting?",
     ),
@@ -547,255 +547,289 @@ const aiExtractionSchema = z.object({
       "Pure Equity Holding Company",
       "None of the above",
     ])
-    .optional()
+    .nullable()
     .describe(
       "Primary relevant activity from the dropdown options. Use existing form context and the entity activity/business description if the documents are ambiguous.",
     ),
   hasMultipleRelevantActivities: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Does entity have multiple relevant activities?"),
   hasIntellectualPropertyHolding: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Does the entity have any intellectual property holding?"),
 
   // SECTION 6A: INTELLECTUAL PROPERTY
   isHighRiskIpEntity: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Is the entity a High Risk IP Entity as defined in legislation?"),
   wantsToRebutHighRiskStatus: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Does the entity want to rebut High Risk IP status?"),
   highRiskRebuttalNarrative: z
     .string()
-    .optional()
+    .nullable()
     .describe("Narrative explaining the rebuttal of high risk status"),
-  ipIncomeType: z.string().optional().describe("Type of IP income received"),
+  ipIncomeType: z.string().nullable().describe("Type of IP income received"),
 
   // SECTION 6B: ADEQUACY ASSESSMENT
   activityGrossIncome: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Turnover or gross income generated from the relevant activity. Return the numeric amount only when clearly stated.",
     ),
   hasAdequatePhysicalPresence: z
     .enum(["Yes", "No", "N/A"])
-    .optional()
+    .nullable()
     .describe("Does the entity have adequate physical presence?"),
   adequacyExpenditureDetails: z
     .string()
-    .optional()
+    .nullable()
     .describe(
       "Operating expenditure relating to the relevant activity. Return the numeric amount only when clearly stated.",
     ),
   adequacyPhysicalPresenceDetails: z
     .string()
-    .optional()
+    .nullable()
     .describe("Details about adequacy of physical presence"),
 
   // SECTION 7: CIGA
   cigaPerformed: z
     .string()
-    .optional()
+    .nullable()
     .describe("Description of Core Income Generating Activities performed"),
   cigaDetails: z
     .string()
-    .optional()
+    .nullable()
     .describe("Additional CIGA details from board minutes or other sources"),
 
   // SECTION 8: EMPLOYEES (FTE Calculation)
   employees: z
     .array(
       z.object({
-        name: z.string().optional(),
+        name: z.string().nullable(),
         qualifiedForReporting: z
           .boolean()
-          .optional()
+          .nullable()
           .describe("Is this employee qualified for reporting purposes?"),
         unitsOnCompany: z
           .number()
-          .optional()
+          .nullable()
           .describe("Chargeable units spent on this company"),
-        totalUnits: z.number().optional().describe("Total chargeable units"),
+        totalUnits: z.number().nullable().describe("Total chargeable units"),
         fteFraction: z
           .number()
-          .optional()
+          .nullable()
           .describe("FTE fraction (unitsOnCompany / totalUnits)"),
         qualifiedFteFraction: z
           .number()
-          .optional()
+          .nullable()
           .describe("Qualified FTE fraction if qualified"),
       }),
     )
-    .optional(),
+    .nullable(),
   totalFte: z
     .number()
-    .optional()
+    .nullable()
     .describe("Total Full-Time Equivalent employees"),
-  totalQualifiedFte: z.number().optional().describe("Total Qualified FTE"),
+  totalQualifiedFte: z.number().nullable().describe("Total Qualified FTE"),
 
   // SECTION 9: OUTSOURCING
   hasCigaOutsourcing: z
     .enum(["Yes", "No", "N/A"])
-    .optional()
+    .nullable()
     .describe("Are any CIGA activities outsourced?"),
   outsourcingDetails: z
     .string()
-    .optional()
+    .nullable()
     .describe("Details of outsourcing arrangements"),
 
   // SECTION 10: BENEFICIAL OWNERSHIP
   immediateParents: z
     .array(
       z.object({
-        name: z.string().optional(),
-        countryOfTaxResidence: z.string().optional(),
-        tin: z.string().optional().describe("Tax Identification Number"),
+        name: z.string().nullable(),
+        countryOfTaxResidence: z.string().nullable(),
+        tin: z.string().nullable().describe("Tax Identification Number"),
         tinCountry: z
           .string()
-          .optional()
+          .nullable()
           .describe("Country that issued the TIN"),
-        registeredAddress: z.string().optional(),
+        registeredAddress: z.string().nullable(),
       }),
     )
-    .optional(),
+    .nullable(),
   ultimateParents: z
     .array(
       z.object({
-        name: z.string().optional(),
-        countryOfTaxResidence: z.string().optional(),
-        tin: z.string().optional(),
-        tinCountry: z.string().optional(),
-        registeredAddress: z.string().optional(),
+        name: z.string().nullable(),
+        countryOfTaxResidence: z.string().nullable(),
+        tin: z.string().nullable(),
+        tinCountry: z.string().nullable(),
+        registeredAddress: z.string().nullable(),
       }),
     )
-    .optional(),
+    .nullable(),
   ultimateBeneficialOwners: z
     .array(
       z.object({
-        name: z.string().optional(),
+        name: z.string().nullable(),
         dateOfBirth: z
           .string()
-          .optional()
+          .nullable()
           .describe("Date of birth (YYYY-MM-DD)"),
-        placeOfBirth: z.string().optional(),
-        nationality: z.string().optional(),
-        countryOfTaxResidence: z.string().optional(),
-        tin: z.string().optional(),
-        tinCountry: z.string().optional(),
-        address: z.string().optional(),
+        placeOfBirth: z.string().nullable(),
+        nationality: z.string().nullable(),
+        countryOfTaxResidence: z.string().nullable(),
+        tin: z.string().nullable(),
+        tinCountry: z.string().nullable(),
+        address: z.string().nullable(),
       }),
     )
-    .optional(),
+    .nullable(),
 
   // SECTION 11: DIRECTED AND MANAGED IN GUERNSEY
   allBoardMeetingsInGuernsey: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Were all board meetings held in Guernsey?"),
   totalBoardMeetings: z
     .number()
-    .optional()
+    .nullable()
     .describe("Total number of board meetings in the period"),
   boardMeetingsInGuernsey: z
     .number()
-    .optional()
+    .nullable()
     .describe("Number of board meetings held in Guernsey"),
   adequateMeetingFrequency: z
     .enum(["Yes", "No", "N/A"])
-    .optional()
+    .nullable()
     .describe("Is the meeting frequency adequate?"),
   enoughDirectorsPresent: z
     .enum(["Yes", "No", "N/A"])
-    .optional()
+    .nullable()
     .describe("Were enough directors present at meetings?"),
   directorsHaveExpertise: z
     .enum(["Yes", "No", "N/A"])
-    .optional()
+    .nullable()
     .describe("Do directors have necessary expertise?"),
   strategicDecisionsMadeInGuernsey: z
     .enum(["Yes", "No", "N/A"])
-    .optional()
+    .nullable()
     .describe("Were strategic decisions made in Guernsey?"),
   recordsMaintainedInGuernsey: z
     .enum(["Yes", "No", "N/A"])
-    .optional()
+    .nullable()
     .describe("Are records maintained in Guernsey?"),
   boardMeetingLocation: z
     .string()
-    .optional()
+    .nullable()
     .describe("Location where board meetings are held"),
   directors: z
     .array(
       z.object({
-        name: z.string().optional(),
-        initials: z.string().optional(),
+        name: z.string().nullable(),
+        initials: z.string().nullable(),
       }),
     )
-    .optional(),
+    .nullable(),
   boardMeetings: z
     .array(
       z.object({
-        date: z.string().optional().describe("Meeting date (YYYY-MM-DD)"),
+        date: z.string().nullable().describe("Meeting date (YYYY-MM-DD)"),
         attendees: z
           .string()
-          .optional()
+          .nullable()
           .describe("Names/initials of attendees"),
-        allPresentInGuernsey: z.boolean().optional(),
+        allPresentInGuernsey: z.boolean().nullable(),
         agendaPoints: z
           .string()
-          .optional()
+          .nullable()
           .describe("Key agenda points discussed"),
       }),
     )
-    .optional(),
+    .nullable(),
 
   // SECTION 12: DECLARATION
   preparedBy: z
     .string()
-    .optional()
+    .nullable()
     .describe("Name of person who prepared the form"),
-  preparedDate: z.string().optional().describe("Date prepared (YYYY-MM-DD)"),
-  managerSignOff: z.string().optional().describe("Manager who signed off"),
+  preparedDate: z.string().nullable().describe("Date prepared (YYYY-MM-DD)"),
+  managerSignOff: z.string().nullable().describe("Manager who signed off"),
   managerSignOffDate: z
     .string()
-    .optional()
+    .nullable()
     .describe("Sign off date (YYYY-MM-DD)"),
 
   // SECTION 13: COUNTRY BY COUNTRY REPORTING
   isConstituentEntity: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Is the entity a Constituent Entity for CbCR purposes?"),
 
   // SECTION 14: ADDITIONAL INFORMATION
   hasPostBalanceSheetEvent: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe("Has there been a post balance sheet event?"),
   postBalanceSheetEventDetails: z
     .string()
-    .optional()
+    .nullable()
     .describe("Details of post balance sheet event"),
   hasC42Association: z
     .enum(["Yes", "No"])
-    .optional()
+    .nullable()
     .describe(
       "Does the entity have a C42 association (Statement of Practice C42)?",
     ),
   c42AssociatedCompanies: z
     .string()
-    .optional()
+    .nullable()
     .describe("Names of C42 associated companies"),
   contractInformation: z
     .string()
-    .optional()
+    .nullable()
     .describe("Contract information (CSP standard)"),
 });
+
+function stripNullishStructuredValue(value: unknown): unknown {
+  if (value === null) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    const normalizedItems: unknown[] = [];
+
+    for (const item of value) {
+      const normalizedItem = stripNullishStructuredValue(item);
+      if (normalizedItem !== undefined) {
+        normalizedItems.push(normalizedItem);
+      }
+    }
+
+    return normalizedItems;
+  }
+
+  if (typeof value === "object" && value !== null) {
+    const normalizedEntries: Array<[string, unknown]> = [];
+
+    for (const [key, entry] of Object.entries(value)) {
+      const normalizedEntry = stripNullishStructuredValue(entry);
+      if (normalizedEntry !== undefined) {
+        normalizedEntries.push([key, normalizedEntry]);
+      }
+    }
+
+    return Object.fromEntries(normalizedEntries);
+  }
+
+  return value;
+}
 
 export const substanceFormRouter = createTRPCRouter({
   // Get form for a tax return
@@ -1256,7 +1290,9 @@ IMPORTANT RULES:
         "[AI Extraction] Success! Extracted fields:",
         Object.keys(result.object).length,
       );
-      const extractedData = result.object;
+      const extractedData = stripNullishStructuredValue(
+        result.object,
+      ) as Partial<SubstanceFormData>;
       const extractedTextContext = textContents.map((content) => content.text);
 
       // Apply defaults for fields that should have default values
