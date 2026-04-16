@@ -23,12 +23,25 @@ export default function OrgSettingsPage() {
   const [demoEnabled, setDemoEnabled] = useState(false);
   const [demoClientSearch, setDemoClientSearch] = useState("");
   const [visibleClientNames, setVisibleClientNames] = useState<string[]>([]);
+  const [contactName, setContactName] = useState<string | null>(null);
+  const [contactEmail, setContactEmail] = useState<string | null>(null);
+  const [contactPhone, setContactPhone] = useState<string | null>(null);
   const [hasEdited, setHasEdited] = useState(false);
   const [hasDemoEdited, setHasDemoEdited] = useState(false);
+  const [hasContactEdited, setHasContactEdited] = useState(false);
 
   const displayValue = hasEdited
     ? (accountName ?? "")
     : (orgQuery.data?.accountName ?? "");
+  const displayContactName = hasContactEdited
+    ? (contactName ?? "")
+    : (orgQuery.data?.contactInfo?.name ?? "");
+  const displayContactEmail = hasContactEdited
+    ? (contactEmail ?? "")
+    : (orgQuery.data?.contactInfo?.email ?? "");
+  const displayContactPhone = hasContactEdited
+    ? (contactPhone ?? "")
+    : (orgQuery.data?.contactInfo?.phone ?? "");
 
   const availableDemoClients = orgQuery.data?.availableDemoClients ?? [];
   const filteredDemoClients = useMemo(() => {
@@ -50,6 +63,10 @@ export default function OrgSettingsPage() {
     setDemoEnabled(orgQuery.data.demoMode?.enabled === true);
     setVisibleClientNames(orgQuery.data.demoMode?.visibleClientNames ?? []);
     setHasDemoEdited(false);
+    setContactName(orgQuery.data.contactInfo?.name ?? null);
+    setContactEmail(orgQuery.data.contactInfo?.email ?? null);
+    setContactPhone(orgQuery.data.contactInfo?.phone ?? null);
+    setHasContactEdited(false);
   }, [orgQuery.data]);
 
   const updateAccountName = api.portalAccess.updateAccountName.useMutation({
@@ -65,6 +82,15 @@ export default function OrgSettingsPage() {
     onSuccess: () => {
       toast.success("Demo mode updated");
       setHasDemoEdited(false);
+      void utils.portalAccess.getOrg.invalidate({ orgId });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const updateContactInfo = api.portalAccess.updateContactInfo.useMutation({
+    onSuccess: () => {
+      toast.success("Contact information updated");
+      setHasContactEdited(false);
       void utils.portalAccess.getOrg.invalidate({ orgId });
     },
     onError: (err) => toast.error(err.message),
@@ -106,6 +132,13 @@ export default function OrgSettingsPage() {
           <Skeleton className="mt-1.5 h-3 w-56" />
           <Skeleton className="mt-4 h-9 w-full" />
           <Skeleton className="mt-4 h-40 w-full" />
+        </div>
+        <div className="rounded-xl border border-border/70 bg-card p-5 shadow-xs">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="mt-1.5 h-3 w-72" />
+          <Skeleton className="mt-4 h-9 w-full" />
+          <Skeleton className="mt-3 h-9 w-full" />
+          <Skeleton className="mt-3 h-9 w-full" />
         </div>
       </div>
     );
@@ -164,6 +197,83 @@ export default function OrgSettingsPage() {
             </Button>
           ) : null}
         </div>
+
+        {!isAdmin ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Only admins can change this setting.
+          </p>
+        ) : null}
+      </div>
+
+      <div className="rounded-xl border border-border/70 bg-card p-5 shadow-xs">
+        <p className="text-sm font-semibold">Client portal contact information</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Shown to external clients in their access link and emails. Leave any field blank to fall back to the default LTS contact information.
+        </p>
+
+        <div className="mt-4 grid gap-3 max-w-xl">
+          <Input
+            placeholder={orgQuery.data?.effectiveContactInfo?.name ?? "Jonny Woodgate"}
+            value={displayContactName}
+            onChange={(e) => {
+              setContactName(e.target.value);
+              setHasContactEdited(true);
+            }}
+            disabled={!isAdmin}
+          />
+          <Input
+            placeholder={
+              orgQuery.data?.effectiveContactInfo?.email ??
+              "taxenquiries@lts-tax.com"
+            }
+            type="email"
+            value={displayContactEmail}
+            onChange={(e) => {
+              setContactEmail(e.target.value);
+              setHasContactEdited(true);
+            }}
+            disabled={!isAdmin}
+          />
+          <Input
+            placeholder={orgQuery.data?.effectiveContactInfo?.phone ?? "01481 755862"}
+            value={displayContactPhone}
+            onChange={(e) => {
+              setContactPhone(e.target.value);
+              setHasContactEdited(true);
+            }}
+            disabled={!isAdmin}
+          />
+        </div>
+
+        <p className="mt-3 text-xs text-muted-foreground">
+          Default fallback: {orgQuery.data?.effectiveContactInfo?.name ?? "Jonny Woodgate"} ·{" "}
+          {orgQuery.data?.effectiveContactInfo?.email ?? "taxenquiries@lts-tax.com"} ·{" "}
+          {orgQuery.data?.effectiveContactInfo?.phone ?? "01481 755862"}
+        </p>
+
+        {isAdmin && hasContactEdited ? (
+          <div className="mt-4 flex justify-end">
+            <Button
+              size="sm"
+              disabled={updateContactInfo.isPending}
+              onClick={() =>
+                updateContactInfo.mutate({
+                  orgId,
+                  name: contactName?.trim() ? contactName.trim() : null,
+                  email: contactEmail?.trim() ? contactEmail.trim() : null,
+                  phone: contactPhone?.trim() ? contactPhone.trim() : null,
+                })
+              }
+            >
+              {updateContactInfo.isPending ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Check className="size-3.5" />
+              )}
+              Save contact information
+            </Button>
+          </div>
+        ) : null}
 
         {!isAdmin ? (
           <p className="mt-2 text-xs text-muted-foreground">

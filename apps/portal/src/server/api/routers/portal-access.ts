@@ -7,13 +7,16 @@ import { z } from "zod";
 
 import {
   accounts,
+  mergeOrgPortalContactInfoSettings,
   mergeOrgDemoModeSettings,
   orgSettings,
   organisations,
+  parseOrgPortalContactInfoSettings,
   parseOrgDemoModeSettings,
   portalReturnShares,
   portalInvitations,
   portalMemberships,
+  resolveOrgPortalContactInfo,
   taxReturns,
 } from "@repo/database";
 import {
@@ -424,6 +427,8 @@ export const portalAccessRouter = createTRPCRouter({
         logoUrl: org.logoUrl,
         role: membership.role,
         demoMode: parseOrgDemoModeSettings(org.settings?.settings),
+        contactInfo: parseOrgPortalContactInfoSettings(org.settings?.settings),
+        effectiveContactInfo: resolveOrgPortalContactInfo(org.settings?.settings),
         availableDemoClients,
       };
     }),
@@ -515,6 +520,67 @@ export const portalAccessRouter = createTRPCRouter({
 
       return {
         demoMode: parseOrgDemoModeSettings(nextSettings),
+      };
+    }),
+
+  updateContactInfo: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        name: z.string().max(256).nullable(),
+        email: z.string().email().nullable(),
+        phone: z.string().max(64).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+
+      const membership = await ctx.db.query.portalMemberships.findFirst({
+        where: and(
+          eq(portalMemberships.accountId, account.id),
+          eq(portalMemberships.orgId, input.orgId),
+          eq(portalMemberships.status, "active"),
+        ),
+      });
+
+      if (membership?.role !== "admin") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only admins can update settings",
+        });
+      }
+
+      const existingSettings = await ctx.db.query.orgSettings.findFirst({
+        where: eq(orgSettings.orgId, input.orgId),
+      });
+
+      const nextSettings = mergeOrgPortalContactInfoSettings(
+        existingSettings?.settings,
+        {
+          name: input.name,
+          email: input.email,
+          phone: input.phone,
+        },
+      );
+
+      if (existingSettings) {
+        await ctx.db
+          .update(orgSettings)
+          .set({
+            settings: nextSettings,
+            updatedAt: new Date(),
+          })
+          .where(eq(orgSettings.orgId, input.orgId));
+      } else {
+        await ctx.db.insert(orgSettings).values({
+          orgId: input.orgId,
+          settings: nextSettings,
+        });
+      }
+
+      return {
+        contactInfo: parseOrgPortalContactInfoSettings(nextSettings),
+        effectiveContactInfo: resolveOrgPortalContactInfo(nextSettings),
       };
     }),
 
@@ -685,6 +751,16 @@ export const portalAccessRouter = createTRPCRouter({
       }
 
       const accessUrl = accessUrls[0] ?? null;
+      const contactInfo = resolveOrgPortalContactInfo(
+        (
+          await ctx.db.query.orgSettings.findFirst({
+            where: eq(orgSettings.orgId, taxReturn.orgId),
+            columns: {
+              settings: true,
+            },
+          })
+        )?.settings,
+      );
 
       if (input.sendEmail) {
         if (!resend) {
@@ -734,6 +810,16 @@ export const portalAccessRouter = createTRPCRouter({
                       <a href="${recipientAccessUrl}" style="background: #0f172a; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; display: inline-block;">
                         Open return
                       </a>
+                    </div>
+                    <div style="border-top: 1px solid #e5e7eb; margin-top: 24px; padding-top: 20px;">
+                      <p style="margin: 0 0 8px; color: #111827; font-size: 14px; font-weight: 600;">
+                        Need help?
+                      </p>
+                      <p style="margin: 0; color: #4b5563; font-size: 14px;">
+                        ${contactInfo.name}<br>
+                        <a href="mailto:${contactInfo.email}" style="color: #0f172a;">${contactInfo.email}</a><br>
+                        <a href="tel:${contactInfo.phone.replace(/\s+/g, "")}" style="color: #0f172a;">${contactInfo.phone}</a>
+                      </p>
                     </div>
                   </div>
                 </body>

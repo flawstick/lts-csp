@@ -34,6 +34,10 @@
       "types": "./src/demo-mode.ts",
       "default": "./src/demo-mode.ts"
     },
+    "./portal-contact": {
+      "types": "./src/portal-contact.ts",
+      "default": "./src/portal-contact.ts"
+    },
     "./client-access": {
       "types": "./src/client-access.ts",
       "default": "./src/client-access.ts"

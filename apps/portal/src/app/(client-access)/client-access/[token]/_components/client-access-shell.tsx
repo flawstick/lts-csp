@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, FileText, FolderOpen, Sparkles } from "lucide-react";
+import { Building2, FileText, FolderOpen, Mail, Phone, Sparkles } from "lucide-react";
 
 import { api } from "@/trpc/react";
 import { cn } from "@/lib/utils";
@@ -99,6 +99,7 @@ export function ClientAccessShell({
   }
 
   const { organisation, clientProfile, return: returnRecord } = accessQuery.data;
+  const contactInfo = accessQuery.data.contactInfo;
   const tabs = buildTabs(
     token,
     returnRecord.jurisdictionCode,
@@ -167,6 +168,35 @@ export function ClientAccessShell({
                 );
               })}
             </nav>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-border bg-background px-4 py-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Need help?
+                </p>
+                <p className="mt-1 text-sm font-medium text-foreground">
+                  {contactInfo.name}
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5 text-sm sm:items-end">
+                <a
+                  href={`mailto:${contactInfo.email}`}
+                  className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground"
+                >
+                  <Mail className="size-4" />
+                  {contactInfo.email}
+                </a>
+                <a
+                  href={`tel:${contactInfo.phone.replace(/\s+/g, "")}`}
+                  className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground"
+                >
+                  <Phone className="size-4" />
+                  {contactInfo.phone}
+                </a>
+              </div>
+            </div>
           </div>
         </section>
 

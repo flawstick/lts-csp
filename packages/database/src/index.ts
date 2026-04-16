@@ -9,6 +9,7 @@ export * from "./jersey-company-return";
 export * from "./queries";
 export * from "./substance-autofill";
 export * from "./demo-mode";
+export * from "./portal-contact";
 export { schema };
 export { eq, and, or, desc, asc, sql };
 

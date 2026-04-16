@@ -7,6 +7,8 @@ import {
   getJerseyCompanyReturnMissingFields,
   isJerseyCompanyReturnComplete,
   jerseyCompanyReturnForms,
+  orgSettings,
+  resolveOrgPortalContactInfo,
   substanceForms,
   taxReturnFileCategories,
   taxReturnFileRoles,
@@ -83,6 +85,12 @@ function serializeSharedReturn(
 export const clientAccessRouter = createTRPCRouter({
   getAccess: publicProcedure.input(tokenInput).query(async ({ ctx, input }) => {
     const share = await getResolvedShare(ctx.db, input.token);
+    const orgSettingsRow = await ctx.db.query.orgSettings.findFirst({
+      where: eq(orgSettings.orgId, share.organisation.id),
+      columns: {
+        settings: true,
+      },
+    });
 
     return {
       share: {
@@ -99,6 +107,7 @@ export const clientAccessRouter = createTRPCRouter({
         accountName: share.organisation.accountName,
         logoUrl: share.organisation.logoUrl,
       },
+      contactInfo: resolveOrgPortalContactInfo(orgSettingsRow?.settings),
       clientProfile: share.clientProfile
         ? {
             id: share.clientProfile.id,
