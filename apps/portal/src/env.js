@@ -13,6 +13,7 @@ export const env = createEnv({
       .enum(["development", "test", "production"])
       .default("development"),
     AI_GATEWAY_API_KEY: z.string(),
+    FIRECRAWL_API_KEY: z.string().optional(),
   },
 
   /**
@@ -36,6 +37,7 @@ export const env = createEnv({
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     NODE_ENV: process.env.NODE_ENV,
     AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
+    FIRECRAWL_API_KEY: process.env.FIRECRAWL_API_KEY,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

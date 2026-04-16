@@ -78,6 +78,69 @@ type ExtractionContextSource =
 const ECONOMIC_CLASSIFICATION_CODE_PATTERN = /\b\d{1,3}(?:\.\d{1,3})+\b/;
 const ECONOMIC_CLASSIFICATION_CODE_CONTEXT_PATTERN =
   /\b\d{1,3}(?:\.\d{1,3}){2,}\b/;
+const FIRECRAWL_PDF_MAX_PAGES = 50;
+const FIRECRAWL_PDF_MAX_CHARS = 120_000;
+
+function truncateFirecrawlMarkdown(markdown: string) {
+  if (markdown.length <= FIRECRAWL_PDF_MAX_CHARS) {
+    return markdown;
+  }
+
+  return `${markdown.slice(0, FIRECRAWL_PDF_MAX_CHARS)}\n\n[Truncated after ${FIRECRAWL_PDF_MAX_CHARS.toLocaleString()} characters]`;
+}
+
+async function scrapePdfMarkdownWithFirecrawl(url: string) {
+  const apiKey = env.FIRECRAWL_API_KEY;
+  if (!apiKey) {
+    return null;
+  }
+
+  try {
+    const response = await fetch("https://api.firecrawl.dev/v2/scrape", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        url,
+        formats: ["markdown"],
+        parsers: [
+          {
+            type: "pdf",
+            mode: "auto",
+            maxPages: FIRECRAWL_PDF_MAX_PAGES,
+          },
+        ],
+        timeout: 30_000,
+        maxAge: 0,
+      }),
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as
+      | {
+          success?: boolean;
+          data?: {
+            markdown?: string | null;
+          };
+          markdown?: string | null;
+        }
+      | undefined;
+
+    const markdown = payload?.data?.markdown ?? payload?.markdown ?? null;
+    if (!markdown || markdown.trim().length === 0) {
+      return null;
+    }
+
+    return truncateFirecrawlMarkdown(markdown);
+  } catch {
+    return null;
+  }
+}
 
 function normalizeTaxReferenceNumber(input: {
   taxReferenceNumber?: string | null;
@@ -954,6 +1017,19 @@ export async function extractSubstanceFormFromFilesInternal(input: {
           normalizedMedia.startsWith(type.split("/")[0]!),
       )
     ) {
+      if (
+        normalizedMedia.includes("application/pdf") ||
+        url.toLowerCase().endsWith(".pdf")
+      ) {
+        const firecrawlMarkdown = await scrapePdfMarkdownWithFirecrawl(url);
+        if (firecrawlMarkdown) {
+          textContents.push({
+            type: "text",
+            text: `[Firecrawl PDF Parse]\n${firecrawlMarkdown}`,
+          });
+        }
+      }
+
       fileContents.push({
         type: "file",
         data: Buffer.from(buffer).toString("base64"),
@@ -974,7 +1050,7 @@ export async function extractSubstanceFormFromFilesInternal(input: {
     apiKey,
     baseURL: "https://ai-gateway.vercel.sh/v3/ai",
   });
-  const model = gateway("google/gemini-3-pro-preview");
+  const model = gateway("openai/gpt-5.4");
 
   const cigaOptionsText = Object.entries(CIGA_BY_ACTIVITY)
     .map(
@@ -987,6 +1063,7 @@ export async function extractSubstanceFormFromFilesInternal(input: {
 
 Read all attached files and return values only when they are explicitly stated or clearly inferable.
 If a value is unknown, leave it empty.
+Some attached PDFs may also include a Firecrawl OCR/text parse. Use that parsed text as additional extraction support, but prioritize the source documents when they are clearer.
 
 ${existingContextText ? `=== EXISTING FORM CONTEXT ===\n${existingContextText}\n` : ""}
 
