@@ -76,7 +76,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
-import Magnet from "@/components/Magnet";
 import { PortalClientAccessMenuSection } from "@/components/portal-client-access-actions";
 
 import { ReturnFilesTab } from "./return-files-tab";
@@ -815,49 +814,47 @@ export function JerseyReturnWorkspace({
                   </a>
                 </Button>
               ) : null}
-              <Magnet padding={60} magnetStrength={3} wrapperClassName="cursor-pointer" innerClassName="cursor-pointer">
-                <HoverCard openDelay={300} closeDelay={100}>
-                  <HoverCardTrigger asChild>
-                    <Button
-                      className="cursor-pointer px-5"
-                      onClick={() => {
-                        if (onNavigateToGuidedFinish) {
-                          onNavigateToGuidedFinish();
-                          return;
-                        }
+              <HoverCard openDelay={300} closeDelay={100}>
+                <HoverCardTrigger asChild>
+                  <Button
+                    className="cursor-pointer px-5"
+                    onClick={() => {
+                      if (onNavigateToGuidedFinish) {
+                        onNavigateToGuidedFinish();
+                        return;
+                      }
 
-                        navigate(
-                          `/org/${orgId}/returns/${selectedReturn.id}/jersey-guided-finish`,
-                          "nav-forward",
-                        );
-                      }}
-                    >
-                      <Sparkles className="size-4" />
-                      Guided finish
-                    </Button>
-                  </HoverCardTrigger>
-                  <HoverCardContent align="end" side="bottom" className="w-72 space-y-2 p-4">
-                    <p className="text-sm font-semibold">Guided Finish Flow</p>
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      Walk through every section step by step, fill in remaining fields, upload your financial statements, and review everything before marking the return as complete.
-                    </p>
-                    <ol className="space-y-1 text-[11px] text-muted-foreground">
-                      <li className="flex items-start gap-2">
-                        <span className="mt-px font-semibold text-foreground">1.</span>
-                        Complete each return section
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="mt-px font-semibold text-foreground">2.</span>
-                        Upload financial statements PDF
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="mt-px font-semibold text-foreground">3.</span>
-                        Review and finalize the return
-                      </li>
-                    </ol>
-                  </HoverCardContent>
-                </HoverCard>
-              </Magnet>
+                      navigate(
+                        `/org/${orgId}/returns/${selectedReturn.id}/jersey-guided-finish`,
+                        "nav-forward",
+                      );
+                    }}
+                  >
+                    <Sparkles className="size-4" />
+                    Guided finish
+                  </Button>
+                </HoverCardTrigger>
+                <HoverCardContent align="end" side="bottom" className="w-72 space-y-2 p-4">
+                  <p className="text-sm font-semibold">Guided Finish Flow</p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Walk through every section step by step, fill in remaining fields, upload your financial statements, and review everything before marking the return as complete.
+                  </p>
+                  <ol className="space-y-1 text-[11px] text-muted-foreground">
+                    <li className="flex items-start gap-2">
+                      <span className="mt-px font-semibold text-foreground">1.</span>
+                      Complete each return section
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-px font-semibold text-foreground">2.</span>
+                      Upload financial statements PDF
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-px font-semibold text-foreground">3.</span>
+                      Review and finalize the return
+                    </li>
+                  </ol>
+                </HoverCardContent>
+              </HoverCard>
               {!isClientAccessMode ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
