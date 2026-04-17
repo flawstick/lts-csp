@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { SharedElement } from "@/components/view-transitions";
+import { DirectionalTransition, SharedElement } from "@/components/view-transitions";
 import { DocumentsBackLink } from "../../../../_components/documents-back-link";
 import { formatBytes, formatDateTime, getClientHref, useDocumentsTree } from "../../../../_components/documents-tree";
 import { DocumentsFilterCard, type FilterOption } from "../../../../_components/documents-filter-card";
@@ -109,6 +109,7 @@ export default function ReturnDocumentsPage() {
   }, [returnFolder, searchValue, typeFilter]);
 
   return (
+    <DirectionalTransition>
     <main className="mx-auto max-w-6xl space-y-3 pb-10">
       <section className="portal-card p-5">
         <div className="space-y-2">
@@ -118,16 +119,16 @@ export default function ReturnDocumentsPage() {
           />
           <div>
             {returnFolder ? (
-              <SharedElement name={`doc-return-${returnFolder.id}`}>
-                <div>
+              <div>
+                <SharedElement name={`doc-return-${returnFolder.id}`}>
                   <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">
                     {returnFolder.name}
                   </h1>
-                  <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
-                    {returnFolder.jurisdictionName} ({returnFolder.jurisdictionCode}) • {returnFolder.taxYear}
-                  </p>
-                </div>
-              </SharedElement>
+                </SharedElement>
+                <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                  {returnFolder.jurisdictionName} ({returnFolder.jurisdictionCode}) • {returnFolder.taxYear}
+                </p>
+              </div>
             ) : (
               <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">
                 Return files
@@ -224,5 +225,6 @@ export default function ReturnDocumentsPage() {
         </section>
       ) : null}
     </main>
+    </DirectionalTransition>
   );
 }

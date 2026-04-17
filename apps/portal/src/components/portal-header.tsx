@@ -7,6 +7,7 @@ import { ChevronRight, Sparkles, Users } from "lucide-react";
 
 import { AskAiDialog } from "@/components/ask-ai-dialog";
 import { PORTAL_ASK_AI_OPEN_EVENT } from "@/lib/portal-command";
+import { useNavigateWithTransition } from "@/lib/navigate-with-transition";
 
 import {
   buildPortalNavigationModel,
@@ -57,6 +58,7 @@ function memberAvatarSrc(member: {
 
 export function PortalHeader() {
   const pathname = usePathname();
+  const navigate = useNavigateWithTransition();
   const { state: sidebarState } = useSidebar();
   const [mounted, setMounted] = useState(false);
   const [askAiOpen, setAskAiOpen] = useState(false);
@@ -142,7 +144,10 @@ export function PortalHeader() {
   const CurrentIcon = navigation.currentIcon;
 
   return (
-    <header className="bg-container sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b px-4">
+    <header
+      className="bg-container sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b px-4"
+      style={{ viewTransitionName: "portal-header" }}
+    >
       <div className="flex min-w-0 items-center gap-3">
         {mounted && sidebarState === "collapsed" && (
           <>
@@ -193,7 +198,25 @@ export function PortalHeader() {
                     <ChevronRight className="text-muted-foreground/70 size-3 shrink-0" />
                   ) : null}
                   {crumb.href ? (
-                    <Link href={crumb.href} className="min-w-0">
+                    <Link
+                      href={crumb.href}
+                      className="min-w-0"
+                      onClick={(event) => {
+                        if (
+                          event.defaultPrevented ||
+                          event.metaKey ||
+                          event.ctrlKey ||
+                          event.shiftKey ||
+                          event.altKey ||
+                          event.button !== 0
+                        ) {
+                          return;
+                        }
+                        event.preventDefault();
+                        // Breadcrumbs always navigate up to a parent route.
+                        navigate(crumb.href!, "nav-back");
+                      }}
+                    >
                       {content}
                     </Link>
                   ) : (

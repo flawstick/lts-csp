@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigateWithTransition } from "@/lib/navigate-with-transition";
 import {
   Building2,
   CalendarClock,
@@ -204,7 +204,7 @@ export function JerseyReturnWorkspace({
   accessToken,
   onNavigateToGuidedFinish,
 }: JerseyReturnWorkspaceProps) {
-  const router = useRouter();
+  const navigate = useNavigateWithTransition();
   const utils = api.useUtils();
   const isClientAccessMode = Boolean(accessToken);
 
@@ -826,8 +826,9 @@ export function JerseyReturnWorkspace({
                           return;
                         }
 
-                        router.push(
+                        navigate(
                           `/org/${orgId}/returns/${selectedReturn.id}/jersey-guided-finish`,
+                          "nav-forward",
                         );
                       }}
                     >

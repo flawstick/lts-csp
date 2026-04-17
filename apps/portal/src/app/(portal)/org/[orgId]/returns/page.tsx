@@ -35,7 +35,8 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { SharedElement } from "@/components/view-transitions";
+import { DirectionalTransition, SharedElement } from "@/components/view-transitions";
+import { useNavigateWithTransition } from "@/lib/navigate-with-transition";
 import { api } from "@/trpc/react";
 
 type ReturnStatusTone =
@@ -114,6 +115,7 @@ export default function OrgReturnsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const utils = api.useUtils();
+  const navigate = useNavigateWithTransition();
 
   const dismissMutation = api.portalReturns.dismissReturn.useMutation({
     onSuccess: () => {
@@ -281,7 +283,8 @@ export default function OrgReturnsPage() {
   };
 
   return (
-    <main className="mx-auto max-w-[1280px] space-y-4">
+    <DirectionalTransition>
+      <main className="mx-auto max-w-[1280px] space-y-4">
       <section className="portal-card overflow-hidden rounded-xl">
         <div className="flex flex-wrap items-end justify-between gap-3 border-b p-4">
           <div>
@@ -533,21 +536,21 @@ export default function OrgReturnsPage() {
                       <tr
                         key={row.id}
                         className="border-b/60 hover:bg-muted/25 cursor-pointer transition"
-                        onClick={() => router.push(returnHref)}
+                        onClick={() => navigate(returnHref, "nav-forward")}
                       >
                         <td className="px-4 py-3">
-                          <SharedElement name={`return-${row.id}`}>
-                            <div className="min-w-0">
+                          <div className="min-w-0">
+                            <SharedElement name={`return-${row.id}`}>
                               <p className="truncate font-medium">
                                 {row.entityName}
                               </p>
-                              <p className="text-muted-foreground truncate text-xs">
-                                {row.externalId
-                                  ? `External ID: ${row.externalId}`
-                                  : `${fileCount(row.files)} file(s)`}
-                              </p>
-                            </div>
-                          </SharedElement>
+                            </SharedElement>
+                            <p className="text-muted-foreground truncate text-xs">
+                              {row.externalId
+                                ? `External ID: ${row.externalId}`
+                                : `${fileCount(row.files)} file(s)`}
+                            </p>
+                          </div>
                         </td>
                         <td className="text-muted-foreground px-4 py-3">
                           {row.jurisdictionName} ({row.jurisdictionCode})
@@ -604,7 +607,7 @@ export default function OrgReturnsPage() {
                                 />
                                 <DropdownMenuItem
                                   className="cursor-pointer gap-2"
-                                  onClick={() => router.push(returnHref)}
+                                  onClick={() => navigate(returnHref, "nav-forward")}
                                 >
                                   <ExternalLink className="size-3.5" />
                                   Open
@@ -704,6 +707,7 @@ export default function OrgReturnsPage() {
           </>
         ) : null}
       </section>
-    </main>
+      </main>
+    </DirectionalTransition>
   );
 }

@@ -65,6 +65,8 @@ import Link from "next/link"
 import { api } from "@/trpc/react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SyncJobsDialog } from "@/components/sync-jobs-dialog"
+import { DirectionalTransition } from "@/components/view-transition"
+import { useNavigateWithTransition } from "@/lib/navigate-with-transition"
 
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | "dismissed" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
@@ -138,12 +140,9 @@ function createColumns(
       accessorKey: "entityName",
       header: "Entity",
       cell: ({ row }) => (
-        <Link
-          href={`/org/${orgId}/returns/${row.original.id}`}
-          className="font-medium hover:underline hover:text-primary transition-colors"
-        >
+        <span className="font-medium group-hover/row:text-primary group-hover/row:underline">
           {row.original.entityName}
-        </Link>
+        </span>
       ),
       enableHiding: false,
     },
@@ -279,6 +278,7 @@ function createColumns(
 export default function ReturnsPage() {
   const params = useParams()
   const router = useRouter()
+  const navigateWithTransition = useNavigateWithTransition()
   const orgId = params?.orgId as string
   const searchParams = useSearchParams()
   const initialStatus = searchParams.get("status") as StatusFilter
@@ -474,7 +474,7 @@ export default function ReturnsPage() {
     activeJob?.status === "pending" || activeJob?.status === "running"
 
   return (
-    <>
+    <DirectionalTransition>
       <PageHeader>
           <Breadcrumb>
             <BreadcrumbList>
@@ -775,8 +775,8 @@ export default function ReturnsPage() {
                       <TableRow
                         key={row.id}
                         data-state={row.getIsSelected() && "selected"}
-                        className="cursor-pointer"
-                        onClick={() => router.push(`/org/${orgId}/returns/${row.original.id}`)}
+                        className="group/row cursor-pointer"
+                        onClick={() => navigateWithTransition(`/org/${orgId}/returns/${row.original.id}`, "nav-forward")}
                       >
                         {row.getVisibleCells().map((cell) => (
                           <TableCell key={cell.id}>
@@ -884,6 +884,6 @@ export default function ReturnsPage() {
           onOpenChange={handleSyncJobsDialogChange}
           initialJobId={selectedSyncJobId}
         />
-    </>
+    </DirectionalTransition>
   )
 }

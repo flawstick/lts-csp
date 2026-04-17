@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 
 import { uploadPortalFile } from "@/lib/portal-upload";
+import { DirectionalTransition } from "@/components/view-transitions";
+import { useNavigateWithTransition } from "@/lib/navigate-with-transition";
 import {
   FORM_SECTIONS,
   getMissingFields,
@@ -35,7 +37,7 @@ export default function GuidedFinishPage() {
   const params = useParams<{ orgId: string; returnId: string }>();
   const orgId = params.orgId;
   const returnId = params.returnId;
-  const router = useRouter();
+  const navigate = useNavigateWithTransition();
 
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
@@ -332,7 +334,7 @@ export default function GuidedFinishPage() {
         });
       }
 
-      router.push(`/org/${orgId}/returns/${returnId}`);
+      navigate(`/org/${orgId}/returns/${returnId}`, "nav-back");
     } catch (error) {
       showMessage(
         error instanceof Error
@@ -345,6 +347,7 @@ export default function GuidedFinishPage() {
 
   if (returnsQuery.isLoading) {
     return (
+      <DirectionalTransition>
       <div className="-m-4 sm:-m-6 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden">
         <div className="relative grid h-full min-h-0 lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_20rem]">
           {/* Content skeleton */}
@@ -403,11 +406,13 @@ export default function GuidedFinishPage() {
           </div>
         </div>
       </div>
+      </DirectionalTransition>
     );
   }
 
   if (!selectedReturn) {
     return (
+      <DirectionalTransition>
       <div className="flex h-[50vh] items-center justify-center">
         <div className="text-center">
           <p className="text-sm text-muted-foreground">
@@ -417,19 +422,21 @@ export default function GuidedFinishPage() {
             className="mt-4"
             variant="outline"
             size="sm"
-            onClick={() => router.push(`/org/${orgId}/returns`)}
+            onClick={() => navigate(`/org/${orgId}/returns`, "nav-back")}
           >
             <ArrowLeft className="size-3.5" />
             Back to returns
           </Button>
         </div>
       </div>
+      </DirectionalTransition>
     );
   }
 
   const isLastStep = activeStepIndex === totalSteps - 1;
 
   return (
+    <DirectionalTransition>
     <div className="-m-4 sm:-m-6 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden">
       <div className="relative grid h-full min-h-0 lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-h-0 flex-col">
@@ -563,5 +570,6 @@ export default function GuidedFinishPage() {
         />
       </div>
     </div>
+    </DirectionalTransition>
   );
 }

@@ -9,7 +9,6 @@ import {
   FileSpreadsheet,
   FolderOpen,
 } from "lucide-react";
-import { motion } from "motion/react";
 
 import { PortalClientAccessMenuSection } from "@/components/portal-client-access-actions";
 import { Button } from "@/components/ui/button";
@@ -19,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { SharedElement } from "@/components/view-transitions";
+import { useNavigateWithTransition } from "@/lib/navigate-with-transition";
 
 import {
   STATUS_CLASS,
@@ -54,7 +53,9 @@ type Props = {
   index: number;
 };
 
-export function TasksTableRow({ orgId, row, index }: Props) {
+// Entry animation intentionally removed — it re-fired on every mount
+// (including every navigation to /tasks) and read like a page transition.
+export function TasksTableRow({ orgId, row, index: _index }: Props) {
   const status = normalizeStatus(row.status);
   const taskKind = classifyTaskKind(row);
   const files = fileCount(row.files);
@@ -63,21 +64,29 @@ export function TasksTableRow({ orgId, row, index }: Props) {
   const updatedLabel = formatRelativeTime(row.updatedAt);
   const updatedTitle = formatDateTime(row.updatedAt);
   const TaskIcon = TASK_ICON[taskKind];
+  const navigate = useNavigateWithTransition();
+  const href = `/org/${orgId}/returns/${row.id}`;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{
-        duration: 0.2,
-        delay: index < 12 ? index * 0.02 : 0,
-        ease: "easeOut",
-      }}
-      className="group"
-    >
+    <div className="group">
       <div className="hover:bg-muted/30 -mx-2 flex items-center gap-4 rounded-xl px-2 py-3.5 transition-colors">
         <Link
-          href={`/org/${orgId}/returns/${row.id}`}
+          href={href}
+          onClick={(event) => {
+            // Let modifier-clicks (cmd, ctrl, middle-click) open in new tab
+            if (
+              event.defaultPrevented ||
+              event.metaKey ||
+              event.ctrlKey ||
+              event.shiftKey ||
+              event.altKey ||
+              event.button !== 0
+            ) {
+              return;
+            }
+            event.preventDefault();
+            navigate(href, "nav-forward");
+          }}
           className="flex min-w-0 flex-1 items-center gap-4"
         >
           <div className="relative shrink-0">
@@ -97,10 +106,9 @@ export function TasksTableRow({ orgId, row, index }: Props) {
             />
           </div>
 
-          <SharedElement name={`return-${row.id}`}>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <p className="truncate text-sm font-semibold">{row.entityName}</p>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <p className="truncate text-sm font-semibold">{row.entityName}</p>
               <span className="text-muted-foreground text-xs">{row.taxYear}</span>
               {row.jurisdictionCode ? (
                 <span className="inline-flex rounded-md border border-border/60 bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -108,12 +116,11 @@ export function TasksTableRow({ orgId, row, index }: Props) {
                 </span>
               ) : null}
             </div>
-              <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">
-                {action.title}
-                {action.detail ? ` — ${action.detail}` : ""}
-              </p>
-            </div>
-          </SharedElement>
+            <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">
+              {action.title}
+              {action.detail ? ` — ${action.detail}` : ""}
+            </p>
+          </div>
         </Link>
 
         <div className="hidden shrink-0 items-center gap-2 sm:flex">
@@ -194,6 +201,6 @@ export function TasksTableRow({ orgId, row, index }: Props) {
           <ArrowUpRight className="text-muted-foreground/50 size-3.5" />
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

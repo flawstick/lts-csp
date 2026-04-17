@@ -14,7 +14,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ClientSharedElement } from "@/components/view-transitions";
+import { ClientSharedElement, DirectionalTransition } from "@/components/view-transitions";
+import { useNavigateWithTransition } from "@/lib/navigate-with-transition";
 import {
   getClientHref,
   getFolderColor,
@@ -61,6 +62,7 @@ function ClientMonogram({ name, id }: { name: string; id: string }) {
 
 export default function DocumentsPage() {
   const router = useRouter();
+  const navigate = useNavigateWithTransition();
   const { clients, error, isLoading } = useDocumentsTree();
   const [query, setQuery] = useState("");
   const [filterValue, setFilterValue] = useState<ClientFilter>("all");
@@ -114,7 +116,8 @@ export default function DocumentsPage() {
   const withAutofill = clients.filter((c) => c.autofillFieldCount > 0).length;
 
   return (
-    <main className="mx-auto max-w-[1280px] space-y-4">
+    <DirectionalTransition>
+      <main className="mx-auto max-w-[1280px] space-y-4">
       <section className="portal-card overflow-hidden rounded-xl">
         <div className="flex flex-wrap items-end justify-between gap-3 border-b p-4">
           <div>
@@ -233,7 +236,7 @@ export default function DocumentsPage() {
                       key={client.id}
                       client={client}
                       onHover={() => router.prefetch(getClientHref(client.slug))}
-                      onOpen={() => router.push(getClientHref(client.slug))}
+                      onOpen={() => navigate(getClientHref(client.slug), "nav-forward")}
                     />
                   ))}
 
@@ -283,7 +286,8 @@ export default function DocumentsPage() {
           </div>
         ) : null}
       </section>
-    </main>
+      </main>
+    </DirectionalTransition>
   );
 }
 
@@ -312,12 +316,12 @@ function ClientRow({
       onClick={onOpen}
     >
       <td className="px-4 py-3">
-        <ClientSharedElement slug={client.slug}>
-          <div className="flex min-w-0 items-center gap-3">
-            <ClientMonogram name={client.name} id={client.id} />
+        <div className="flex min-w-0 items-center gap-3">
+          <ClientMonogram name={client.name} id={client.id} />
+          <ClientSharedElement slug={client.slug}>
             <p className="truncate font-medium">{client.name}</p>
-          </div>
-        </ClientSharedElement>
+          </ClientSharedElement>
+        </div>
       </td>
       <td className="text-muted-foreground max-w-[220px] px-4 py-3">
         <p className="truncate">{client.orgName}</p>

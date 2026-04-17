@@ -133,9 +133,6 @@
     @apply bg-background text-foreground;
     transition: color 0.3s ease, background-color 0.3s ease;
   }
-  * {
-    transition: color 0.3s ease, background-color 0.3s ease, border-color 0.3s ease;
-  }
 }
 
 @layer components {
@@ -241,36 +238,111 @@
   }
 }
 
-/* ---------- View Transitions ---------- */
+/* =========================================================
+   View Transitions — recipes from
+   .claude/skills/vercel-react-view-transitions/references/css-recipes.md
+   Each rule below maps to a ViewTransition `enter` / `exit` / `share`
+   class prop. Keep in sync with components/view-transitions.tsx.
+   ========================================================= */
+
 :root {
-  --vt-duration: 380ms;
-  --vt-ease: cubic-bezier(0.32, 0.72, 0.24, 1);
+  --duration-exit: 150ms;
+  --duration-enter: 210ms;
+  --duration-move: 400ms;
 }
 
-/* No cross-fade on root navigations — only named shared elements animate.
-   Sidebar clicks (e.g. → /tasks, → /returns) snap instantly; row clicks
-   that pair a SharedElement name across pages morph via .client-morph. */
-::view-transition-old(root),
-::view-transition-new(root) {
+/* Shared keyframes */
+@keyframes fade {
+  from { filter: blur(3px); opacity: 0; }
+  to { filter: blur(0); opacity: 1; }
+}
+@keyframes slide {
+  from { translate: var(--slide-offset); }
+  to { translate: 0; }
+}
+
+/* ----- Persistent chrome isolation -----
+   Sidebar + header are tagged with `view-transition-name` in JSX so they
+   get their own pseudo-group. `animation: none` keeps them static while
+   the page content slides underneath. */
+::view-transition-group(portal-sidebar),
+::view-transition-group(portal-header) {
+  animation: none;
+  z-index: 100;
+}
+/* Hide the "old" snapshot entirely so backdrop-blur doesn't flash during the
+   swap (per the skill's backdrop-blur workaround). */
+::view-transition-old(portal-sidebar),
+::view-transition-old(portal-header) {
+  display: none;
+}
+::view-transition-new(portal-sidebar),
+::view-transition-new(portal-header) {
   animation: none;
 }
 
-/* Shared element: client row morphing into the detail header.
-   The browser interpolates the bounding box of the named element, so a small
-   table row expands smoothly into the full-width header card. */
-::view-transition-group(.client-morph) {
-  animation-duration: var(--vt-duration);
-  animation-timing-function: var(--vt-ease);
+/* ----- Directional page transitions (nav-forward / nav-back) -----
+   Tagged via `addTransitionType` inside useNavigateWithTransition. */
+::view-transition-old(.nav-forward) {
+  --slide-offset: -60px;
+  animation:
+    var(--duration-exit) ease-in both fade reverse,
+    var(--duration-move) ease-in-out both slide reverse;
 }
-::view-transition-image-pair(.client-morph) {
-  animation-name: vt-client-blur;
-  animation-duration: var(--vt-duration);
+::view-transition-new(.nav-forward) {
+  --slide-offset: 60px;
+  animation:
+    var(--duration-enter) ease-out var(--duration-exit) both fade,
+    var(--duration-move) ease-in-out both slide;
 }
-@keyframes vt-client-blur {
-  30% { filter: blur(2px); }
+::view-transition-old(.nav-back) {
+  --slide-offset: 60px;
+  animation:
+    var(--duration-exit) ease-in both fade reverse,
+    var(--duration-move) ease-in-out both slide reverse;
+}
+::view-transition-new(.nav-back) {
+  --slide-offset: -60px;
+  animation:
+    var(--duration-enter) ease-out var(--duration-exit) both fade,
+    var(--duration-move) ease-in-out both slide;
 }
 
-/* Reduced motion */
+/* ----- Shared element morph (mixed content: icon + text) ----- */
+::view-transition-group(.morph) {
+  animation-duration: var(--duration-move);
+}
+::view-transition-image-pair(.morph) {
+  animation-name: via-blur;
+}
+@keyframes via-blur {
+  30% { filter: blur(3px); }
+}
+
+/* ----- Text morph (pure text) -----
+   Raster snapshots of text distort when scaled (e.g. list row → detail h1),
+   producing a visible ghost. text-morph hides the old snapshot and lets the
+   new text render at full resolution in its final position.
+   `opacity: 1 !important` overrides the UA fade-in keyframe so the name
+   doesn't fade during the morph — only position/size animates. */
+::view-transition-group(.text-morph) {
+  animation-duration: var(--duration-move);
+}
+::view-transition-image-pair(.text-morph) {
+  animation: none;
+}
+::view-transition-old(.text-morph) {
+  display: none;
+}
+::view-transition-new(.text-morph) {
+  animation: none;
+  opacity: 1 !important;
+  mix-blend-mode: normal;
+  object-fit: none;
+  object-position: left top;
+}
+
+/* ----- Reduced motion ----- */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(*),
   ::view-transition-new(*),

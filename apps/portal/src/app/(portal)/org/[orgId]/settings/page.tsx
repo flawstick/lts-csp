@@ -23,7 +23,6 @@ export default function OrgSettingsPage() {
   const [demoEnabled, setDemoEnabled] = useState(false);
   const [demoClientSearch, setDemoClientSearch] = useState("");
   const [visibleClientNames, setVisibleClientNames] = useState<string[]>([]);
-  const [contactName, setContactName] = useState<string | null>(null);
   const [contactEmail, setContactEmail] = useState<string | null>(null);
   const [contactPhone, setContactPhone] = useState<string | null>(null);
   const [hasEdited, setHasEdited] = useState(false);
@@ -33,9 +32,6 @@ export default function OrgSettingsPage() {
   const displayValue = hasEdited
     ? (accountName ?? "")
     : (orgQuery.data?.accountName ?? "");
-  const displayContactName = hasContactEdited
-    ? (contactName ?? "")
-    : (orgQuery.data?.contactInfo?.name ?? "");
   const displayContactEmail = hasContactEdited
     ? (contactEmail ?? "")
     : (orgQuery.data?.contactInfo?.email ?? "");
@@ -63,7 +59,6 @@ export default function OrgSettingsPage() {
     setDemoEnabled(orgQuery.data.demoMode?.enabled === true);
     setVisibleClientNames(orgQuery.data.demoMode?.visibleClientNames ?? []);
     setHasDemoEdited(false);
-    setContactName(orgQuery.data.contactInfo?.name ?? null);
     setContactEmail(orgQuery.data.contactInfo?.email ?? null);
     setContactPhone(orgQuery.data.contactInfo?.phone ?? null);
     setHasContactEdited(false);
@@ -79,10 +74,10 @@ export default function OrgSettingsPage() {
   });
 
   const updateDemoMode = api.portalAccess.updateDemoMode.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success("Demo mode updated");
       setHasDemoEdited(false);
-      void utils.portalAccess.getOrg.invalidate({ orgId });
+      await utils.portalAccess.getOrg.refetch({ orgId });
     },
     onError: (err) => toast.error(err.message),
   });
@@ -213,15 +208,6 @@ export default function OrgSettingsPage() {
 
         <div className="mt-4 grid gap-3 max-w-xl">
           <Input
-            placeholder={orgQuery.data?.effectiveContactInfo?.name ?? "Jonny Woodgate"}
-            value={displayContactName}
-            onChange={(e) => {
-              setContactName(e.target.value);
-              setHasContactEdited(true);
-            }}
-            disabled={!isAdmin}
-          />
-          <Input
             placeholder={
               orgQuery.data?.effectiveContactInfo?.email ??
               "taxenquiries@lts-tax.com"
@@ -246,8 +232,7 @@ export default function OrgSettingsPage() {
         </div>
 
         <p className="mt-3 text-xs text-muted-foreground">
-          Default fallback: {orgQuery.data?.effectiveContactInfo?.name ?? "Jonny Woodgate"} ·{" "}
-          {orgQuery.data?.effectiveContactInfo?.email ?? "taxenquiries@lts-tax.com"} ·{" "}
+          Default fallback: {orgQuery.data?.effectiveContactInfo?.email ?? "taxenquiries@lts-tax.com"} ·{" "}
           {orgQuery.data?.effectiveContactInfo?.phone ?? "+44 1481 755862"}
         </p>
 
@@ -259,7 +244,7 @@ export default function OrgSettingsPage() {
               onClick={() =>
                 updateContactInfo.mutate({
                   orgId,
-                  name: contactName?.trim() ? contactName.trim() : null,
+                  name: null,
                   email: contactEmail?.trim() ? contactEmail.trim() : null,
                   phone: contactPhone?.trim() ? contactPhone.trim() : null,
                 })

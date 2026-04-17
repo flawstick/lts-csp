@@ -18,6 +18,7 @@ import { StepsTimeline } from "./_components/steps-timeline";
 import { AgentPanel } from "./_components/agent-panel";
 import { TaskLoading } from "./_components/task-loading";
 import { TaskNotFound } from "./_components/task-not-found";
+import { DirectionalTransition } from "@/components/view-transition";
 
 function normalizeOptionalString(value: unknown) {
   return typeof value === "string" ? value : undefined;
@@ -772,13 +773,21 @@ export default function TaskDetailPage() {
   // ── Loading ────────────────────────────────────────────────────
 
   if (isLoading) {
-    return <TaskLoading />;
+    return (
+      <DirectionalTransition>
+        <TaskLoading />
+      </DirectionalTransition>
+    );
   }
 
   // ── Not found ──────────────────────────────────────────────────
 
   if (!task) {
-    return <TaskNotFound orgId={orgId} />;
+    return (
+      <DirectionalTransition>
+        <TaskNotFound orgId={orgId} />
+      </DirectionalTransition>
+    );
   }
 
   // ── Helpers ────────────────────────────────────────────────────
@@ -791,8 +800,9 @@ export default function TaskDetailPage() {
   // ── Main render ────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full max-h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
-      <TaskHeader
+    <DirectionalTransition>
+      <div className="flex h-full max-h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
+        <TaskHeader
         orgId={orgId}
         taskName={task.name}
         taskStatus={browserStatus ?? task.status}
@@ -885,6 +895,7 @@ export default function TaskDetailPage() {
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
-    </div>
+      </div>
+    </DirectionalTransition>
   );
 }

@@ -221,6 +221,7 @@ export function PortalSidebar(props: ComponentProps<typeof Sidebar>) {
     <Sidebar
       collapsible="icon"
       className="border-sidebar-border/70 bg-sidebar border-r"
+      style={{ viewTransitionName: "portal-sidebar" }}
       {...props}
     >
       <SidebarHeader className="relative h-14 shrink-0 border-b p-0 group-data-[collapsible=icon]:border-b-0 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2">

@@ -38,6 +38,8 @@ import {
 } from "@/lib/schemas/substance-form";
 import { JerseyCompanyReturnWorkspace } from "@/components/jersey-company-return-workspace";
 import { SubstanceFormEditor } from "@/components/substance-form-editor";
+import { DirectionalTransition } from "@/components/view-transition";
+import { useNavigateWithTransition } from "@/lib/navigate-with-transition";
 import Link from "next/link";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -74,6 +76,7 @@ function isManagedFiledReturnPdf(file: FileInfo): boolean {
 export default function ReturnDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const navigateWithTransition = useNavigateWithTransition();
   const orgId = params?.orgId as string;
   const id = params.id as string;
 
@@ -262,25 +265,29 @@ export default function ReturnDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="text-muted-foreground h-8 w-8 animate-spin" />
-      </div>
+      <DirectionalTransition>
+        <div className="flex min-h-screen items-center justify-center">
+          <Loader2 className="text-muted-foreground h-8 w-8 animate-spin" />
+        </div>
+      </DirectionalTransition>
     );
   }
 
   if (error || !taxReturn) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4">
-        <AlertCircle className="text-destructive h-12 w-12" />
-        <h2 className="text-xl font-semibold">Tax Return Not Found</h2>
-        <Button
-          variant="outline"
-          onClick={() => router.push(`/org/${orgId}/returns`)}
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Returns
-        </Button>
-      </div>
+      <DirectionalTransition>
+        <div className="flex min-h-screen flex-col items-center justify-center gap-4">
+          <AlertCircle className="text-destructive h-12 w-12" />
+          <h2 className="text-xl font-semibold">Tax Return Not Found</h2>
+          <Button
+            variant="outline"
+            onClick={() => navigateWithTransition(`/org/${orgId}/returns`, "nav-back")}
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Returns
+          </Button>
+        </div>
+      </DirectionalTransition>
     );
   }
 
@@ -288,7 +295,11 @@ export default function ReturnDetailPage() {
     taxReturn.jurisdiction?.code === "JE" &&
     taxReturn.returnType === "company"
   ) {
-    return <JerseyCompanyReturnWorkspace orgId={orgId} taxReturn={taxReturn} />;
+    return (
+      <DirectionalTransition>
+        <JerseyCompanyReturnWorkspace orgId={orgId} taxReturn={taxReturn} />
+      </DirectionalTransition>
+    );
   }
 
   const files = (taxReturn.files ?? []) as FileInfo[];
@@ -318,7 +329,7 @@ export default function ReturnDetailPage() {
   };
 
   return (
-    <>
+    <DirectionalTransition>
       <PageHeader>
         <Breadcrumb>
           <BreadcrumbList>
@@ -341,7 +352,7 @@ export default function ReturnDetailPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => router.back()}
+            onClick={() => navigateWithTransition(`/org/${orgId}/returns`, "nav-back")}
             className="w-fit"
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -966,6 +977,6 @@ export default function ReturnDetailPage() {
           isSaving={updateFormMutation.isPending}
         />
       )}
-    </>
+    </DirectionalTransition>
   );
 }

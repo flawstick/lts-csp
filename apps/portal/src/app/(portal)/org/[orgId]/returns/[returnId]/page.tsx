@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
@@ -16,6 +16,8 @@ import { api } from "@/trpc/react";
 import { ReturnWorkspacePageSkeleton } from "@/components/return-workspace-skeleton";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DirectionalTransition } from "@/components/view-transitions";
+import { useNavigateWithTransition } from "@/lib/navigate-with-transition";
 import { cn } from "@/lib/utils";
 
 import { ReturnFilesTab } from "./_components/return-files-tab";
@@ -35,7 +37,7 @@ export default function ReturnWorkspacePage() {
   const params = useParams<{ orgId: string; returnId: string }>();
   const orgId = params.orgId;
   const returnId = params.returnId;
-  const router = useRouter();
+  const navigate = useNavigateWithTransition();
 
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("form");
   const [activeSectionId, setActiveSectionId] = useState<SectionId>(
@@ -483,33 +485,43 @@ export default function ReturnWorkspacePage() {
   };
 
   if (returnsQuery.isLoading) {
-    return <ReturnWorkspacePageSkeleton />;
+    return (
+      <DirectionalTransition>
+        <ReturnWorkspacePageSkeleton />
+      </DirectionalTransition>
+    );
   }
 
   if (returnsQuery.error) {
-    return <p className="text-sm text-red-600">{returnsQuery.error.message}</p>;
+    return (
+      <DirectionalTransition>
+        <p className="text-sm text-red-600">{returnsQuery.error.message}</p>
+      </DirectionalTransition>
+    );
   }
 
   if (!selectedReturn) {
     return (
-      <main className="mx-auto max-w-3xl space-y-4">
-        <section className="portal-card rounded-[1.8rem] px-8 py-10 text-center">
-          <p className="text-lg font-semibold">
-            Return not found in this organization.
-          </p>
-          <p className="text-muted-foreground mt-2 text-sm">
-            It may have been removed or you may not have access.
-          </p>
-          <Button
-            className="mt-5"
-            variant="outline"
-            onClick={() => router.push(`/org/${orgId}/returns`)}
-          >
-            <ArrowLeft className="size-4" />
-            Back to returns
-          </Button>
-        </section>
-      </main>
+      <DirectionalTransition>
+        <main className="mx-auto max-w-3xl space-y-4">
+          <section className="portal-card rounded-[1.8rem] px-8 py-10 text-center">
+            <p className="text-lg font-semibold">
+              Return not found in this organization.
+            </p>
+            <p className="text-muted-foreground mt-2 text-sm">
+              It may have been removed or you may not have access.
+            </p>
+            <Button
+              className="mt-5"
+              variant="outline"
+              onClick={() => navigate(`/org/${orgId}/returns`, "nav-back")}
+            >
+              <ArrowLeft className="size-4" />
+              Back to returns
+            </Button>
+          </section>
+        </main>
+      </DirectionalTransition>
     );
   }
 
@@ -518,30 +530,36 @@ export default function ReturnWorkspacePage() {
     selectedReturn.returnType === "company"
   ) {
     return (
-      <JerseyReturnWorkspace
-        orgId={orgId}
-        selectedReturn={selectedReturn}
-        selectedStatus={selectedStatus}
-        onDismiss={() =>
-          dismissMutation.mutate({ orgId, taxReturnId: selectedReturn.id })
-        }
-        onUndismiss={() =>
-          undismissMutation.mutate({ orgId, taxReturnId: selectedReturn.id })
-        }
-        isDismissing={dismissMutation.isPending || undismissMutation.isPending}
-      />
+      <DirectionalTransition>
+        <JerseyReturnWorkspace
+          orgId={orgId}
+          selectedReturn={selectedReturn}
+          selectedStatus={selectedStatus}
+          onDismiss={() =>
+            dismissMutation.mutate({ orgId, taxReturnId: selectedReturn.id })
+          }
+          onUndismiss={() =>
+            undismissMutation.mutate({ orgId, taxReturnId: selectedReturn.id })
+          }
+          isDismissing={dismissMutation.isPending || undismissMutation.isPending}
+        />
+      </DirectionalTransition>
     );
   }
 
   return (
-    <main className="mx-auto max-w-6xl space-y-5 pb-8">
+    <DirectionalTransition>
+      <main className="mx-auto max-w-6xl space-y-5 pb-8">
       <div className="portal-card overflow-hidden rounded-[1.95rem]">
         <ReturnWorkspaceHeader
           activeSectionTitle={activeSection?.title ?? null}
           selectedReturn={selectedReturn}
           selectedStatus={selectedStatus}
           onOpenFinishSheet={() => {
-            router.push(`/org/${orgId}/returns/${returnId}/guided-finish`);
+            navigate(
+              `/org/${orgId}/returns/${returnId}/guided-finish`,
+              "nav-forward",
+            );
           }}
           isReadOnly={isGuernseyEsrLocked}
           readOnlyMessage={guernseyLockMessage}
@@ -663,6 +681,7 @@ export default function ReturnWorkspacePage() {
           </Tabs>
         </div>
       </div>
-    </main>
+      </main>
+    </DirectionalTransition>
   );
 }

@@ -82,7 +82,9 @@ import {
 } from "@tanstack/react-table"
 import Link from "next/link"
 import { api } from "@/trpc/react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams } from "next/navigation"
+import { DirectionalTransition } from "@/components/view-transition"
+import { useNavigateWithTransition } from "@/lib/navigate-with-transition"
 
 type StatusFilter = "pending" | "in_progress" | "completed" | "failed" | "cancelled" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
@@ -224,7 +226,7 @@ const createColumns = (orgId: string): ColumnDef<TaskRow>[] => [
 
 export default function TasksPage() {
   const params = useParams()
-  const router = useRouter()
+  const navigateWithTransition = useNavigateWithTransition()
   const orgId = params?.orgId as string
 
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(undefined)
@@ -330,7 +332,7 @@ export default function TasksPage() {
   const selectedCount = table.getSelectedRowModel().rows.length
 
   return (
-    <>
+    <DirectionalTransition>
       <PageHeader>
           <Breadcrumb>
             <BreadcrumbList>
@@ -548,8 +550,8 @@ export default function TasksPage() {
                           <TableRow
                             key={row.id}
                             data-state={row.getIsSelected() && "selected"}
-                            className="cursor-pointer"
-                            onClick={() => router.push(`/org/${orgId}/tasks/${task.id}`)}
+                            className="group/row cursor-pointer"
+                            onClick={() => navigateWithTransition(`/org/${orgId}/tasks/${task.id}`, "nav-forward")}
                           >
                             {row.getVisibleCells().map((cell) => {
                               // Render the actions column with Dialog support
@@ -857,6 +859,6 @@ export default function TasksPage() {
             )}
           </DialogContent>
         </Dialog>
-    </>
+    </DirectionalTransition>
   )
 }
