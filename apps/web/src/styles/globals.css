@@ -150,56 +150,51 @@
   }
 }
 
-/* =========================================================================
-   View Transitions — list ↔ detail navigation
-   ========================================================================= */
+/* =========================================================
+   View Transitions — recipes from
+   .claude/skills/vercel-react-view-transitions/references/css-recipes.md
+   Each rule below maps to a ViewTransition `enter` / `exit` / `share`
+   class prop. Keep in sync with components/view-transition.tsx.
+   ========================================================= */
 
 :root {
-  --vt-duration-exit: 150ms;
-  --vt-duration-enter: 210ms;
-  --vt-duration-move: 360ms;
+  --duration-exit: 150ms;
+  --duration-enter: 210ms;
+  --duration-move: 400ms;
 }
 
-@keyframes vt-fade {
+/* Shared keyframes */
+@keyframes fade {
   from { filter: blur(3px); opacity: 0; }
   to { filter: blur(0); opacity: 1; }
 }
-
-@keyframes vt-slide {
-  from { translate: var(--vt-slide-offset); }
+@keyframes slide {
+  from { translate: var(--slide-offset); }
   to { translate: 0; }
 }
 
-/* Directional navigation — slide horizontally */
-::view-transition-old(.nav-forward) {
-  --vt-slide-offset: -60px;
-  animation:
-    var(--vt-duration-exit) ease-in both vt-fade reverse,
-    var(--vt-duration-move) ease-in-out both vt-slide reverse;
+/* ----- Persistent chrome isolation -----
+   Sidebar + header are tagged with `view-transition-name` in JSX so they
+   get their own pseudo-group. `animation: none` keeps them static while
+   the page content slides underneath. */
+::view-transition-group(web-sidebar),
+::view-transition-group(web-header) {
+  animation: none;
+  z-index: 100;
 }
-::view-transition-new(.nav-forward) {
-  --vt-slide-offset: 60px;
-  animation:
-    var(--vt-duration-enter) ease-out var(--vt-duration-exit) both vt-fade,
-    var(--vt-duration-move) ease-in-out both vt-slide;
+/* Hide the "old" snapshot entirely so backdrop-blur doesn't flash during the
+   swap (per the skill's backdrop-blur workaround). */
+::view-transition-old(web-sidebar),
+::view-transition-old(web-header) {
+  display: none;
 }
-
-::view-transition-old(.nav-back) {
-  --vt-slide-offset: 60px;
-  animation:
-    var(--vt-duration-exit) ease-in both vt-fade reverse,
-    var(--vt-duration-move) ease-in-out both vt-slide reverse;
-}
-::view-transition-new(.nav-back) {
-  --vt-slide-offset: -60px;
-  animation:
-    var(--vt-duration-enter) ease-out var(--vt-duration-exit) both vt-fade,
-    var(--vt-duration-move) ease-in-out both vt-slide;
+::view-transition-new(web-sidebar),
+::view-transition-new(web-header) {
+  animation: none;
 }
 
-/* Kill the default root cross-fade so the sidebar, header, and other
-   persistent chrome stay completely static during navigation. Only elements
-   explicitly wrapped in `<ViewTransition>` animate. */
+/* Kill the default root cross-fade so unrelated transitions (Suspense,
+   background revalidations, lateral sidebar nav) stay instant. */
 ::view-transition-group(root),
 ::view-transition-old(root),
 ::view-transition-new(root) {
@@ -207,7 +202,68 @@
   mix-blend-mode: normal;
 }
 
-/* Respect the user's motion preference */
+/* ----- Directional page transitions (nav-forward / nav-back) -----
+   Tagged via `addTransitionType` inside useNavigateWithTransition. */
+::view-transition-old(.nav-forward) {
+  --slide-offset: -60px;
+  animation:
+    var(--duration-exit) ease-in both fade reverse,
+    var(--duration-move) ease-in-out both slide reverse;
+}
+::view-transition-new(.nav-forward) {
+  --slide-offset: 60px;
+  animation:
+    var(--duration-enter) ease-out var(--duration-exit) both fade,
+    var(--duration-move) ease-in-out both slide;
+}
+::view-transition-old(.nav-back) {
+  --slide-offset: 60px;
+  animation:
+    var(--duration-exit) ease-in both fade reverse,
+    var(--duration-move) ease-in-out both slide reverse;
+}
+::view-transition-new(.nav-back) {
+  --slide-offset: -60px;
+  animation:
+    var(--duration-enter) ease-out var(--duration-exit) both fade,
+    var(--duration-move) ease-in-out both slide;
+}
+
+/* ----- Shared element morph (mixed content: icon + text) ----- */
+::view-transition-group(.morph) {
+  animation-duration: var(--duration-move);
+}
+::view-transition-image-pair(.morph) {
+  animation-name: via-blur;
+}
+@keyframes via-blur {
+  30% { filter: blur(3px); }
+}
+
+/* ----- Text morph (pure text) -----
+   Raster snapshots of text distort when scaled (e.g. list row → detail h1),
+   producing a visible ghost. text-morph hides the old snapshot and lets the
+   new text render at full resolution in its final position.
+   `opacity: 1 !important` overrides the UA fade-in keyframe so the name
+   doesn't fade during the morph — only position/size animates. */
+::view-transition-group(.text-morph) {
+  animation-duration: var(--duration-move);
+}
+::view-transition-image-pair(.text-morph) {
+  animation: none;
+}
+::view-transition-old(.text-morph) {
+  display: none;
+}
+::view-transition-new(.text-morph) {
+  animation: none;
+  opacity: 1 !important;
+  mix-blend-mode: normal;
+  object-fit: none;
+  object-position: left top;
+}
+
+/* ----- Reduced motion ----- */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(*),
   ::view-transition-new(*),

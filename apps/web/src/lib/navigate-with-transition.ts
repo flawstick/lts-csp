@@ -3,25 +3,36 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
-// `addTransitionType` is available on the React namespace in React 19 but
+// `addTransitionType` is available on the React namespace in React 19.2 but
 // isn't typed yet. Pull it off dynamically.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const addTransitionType = (React as any).unstable_addTransitionType ??
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (React as any).addTransitionType as ((type: string) => void) | undefined;
+const addTransitionType =
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+  (((React as any).unstable_addTransitionType ?? (React as any).addTransitionType) as
+    | ((type: string) => void)
+    | undefined);
 
-type TransitionType = "nav-forward" | "nav-back";
+export type TransitionType = "nav-forward" | "nav-back";
 
 /**
- * Returns a navigator that tags the navigation with a transition type
- * (`nav-forward` for going into a detail view, `nav-back` for coming out).
+ * Returns a navigator that tags the navigation with a transition type:
+ *   - `nav-forward` — entering a detail view (list → detail)
+ *   - `nav-back`    — leaving a detail view back to the list
  *
- * The `<DirectionalTransition>` wrapper on each page picks up the type via
- * its `enter`/`exit` class maps and runs the matching CSS animation.
+ * `<DirectionalTransition>` wrappers on each page read the type via their
+ * `enter`/`exit` class maps and run the matching CSS animation.
+ *
+ * Sibling/sidebar nav should use a plain `<Link>` / `router.push` (no type),
+ * which hits `default: "none"` and snaps instantly.
+ *
+ * Browser back/forward buttons (popstate) cannot trigger view transitions —
+ * popstate is synchronous and incompatible with `startViewTransition`. Users
+ * who want the slide-back animation should click the in-app back chevron /
+ * breadcrumb rather than the browser back button. This limitation is
+ * documented in the React view-transitions skill.
  *
  * Usage:
  *   const navigate = useNavigateWithTransition();
- *   navigate("/org/123/returns/abc", "nav-forward");
+ *   navigate(`/org/${orgId}/returns/${returnId}`, "nav-forward");
  */
 export function useNavigateWithTransition() {
   const router = useRouter();
