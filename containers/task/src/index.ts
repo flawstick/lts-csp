@@ -78,6 +78,25 @@ const REQUIRES_ATTENTION_KEYWORDS = [
   "need to login",
 ];
 
+const PREPARE_ONLY_READY_MARKERS = [
+  "ready_for_manual_submission",
+  "ready for manual submission",
+];
+
+const PREPARE_ONLY_SUBMISSION_MARKERS = [
+  "submitted successfully",
+  "successfully submitted",
+  "submission complete",
+  "submission completed",
+  "filing complete",
+  "filing completed",
+  "post-submission confirmation",
+  "confirmation page",
+  "downloaded completion pdf",
+  "downloaded the pdf",
+  "downloaded the receipt",
+];
+
 const DETACHED_BROWSER_RECOVERY_PATTERNS = [
   "cdp still not connected",
   "target may have detached",
@@ -410,6 +429,20 @@ function normalizeBrowserUseOutput(output: unknown): string {
   } catch {
     return String(output);
   }
+}
+
+function isPrepareOnlyReadyOutput(output: string): boolean {
+  const normalized = output.toLowerCase();
+  return PREPARE_ONLY_READY_MARKERS.some((marker) =>
+    normalized.includes(marker),
+  );
+}
+
+function isPrepareOnlyLikelySubmittedOutput(output: string): boolean {
+  const normalized = output.toLowerCase();
+  return PREPARE_ONLY_SUBMISSION_MARKERS.some((marker) =>
+    normalized.includes(marker),
+  );
 }
 
 function isDetachedBrowserRecoveryError(message: {
@@ -1742,12 +1775,27 @@ ${prompt}
         const output = normalizeBrowserUseOutput(
           runResult?.output ?? browserSession.output,
         );
-        const success =
+        let success =
           browserSession.status === "idle" &&
           !output.toLowerCase().includes("cancelled") &&
           (runResult?.isTaskSuccessful ??
             browserSession.isTaskSuccessful ??
             true);
+
+        const prepareOnlyReady =
+          submissionMode === "prepare_only" &&
+          isPrepareOnlyReadyOutput(output);
+        const prepareOnlyLikelySubmitted =
+          submissionMode === "prepare_only" &&
+          isPrepareOnlyLikelySubmittedOutput(output);
+
+        if (prepareOnlyLikelySubmitted) {
+          success = false;
+          await log("Prepare-only run appears to have submitted anyway", {
+            phase: "guardrail",
+            output,
+          });
+        }
 
         const needsAttention =
           !success &&
@@ -1852,6 +1900,8 @@ ${prompt}
             output,
             isSuccess: success,
             sessionStatus: browserSession.status,
+            prepareOnlyReady,
+            prepareOnlyLikelySubmitted,
           },
         );
 
@@ -1910,13 +1960,18 @@ ${prompt}
           columns: { status: true },
         });
         if (preUpdateJob?.status !== "cancelled") {
+          const successTaxReturnStatus =
+            submissionMode === "prepare_only" ? "in_progress" : "completed";
+          const successTaskStatus =
+            submissionMode === "prepare_only" ? "in_progress" : "completed";
+
           await db
             .update(taxReturns)
-            .set({ status: success ? "completed" : "failed" })
+            .set({ status: success ? successTaxReturnStatus : "failed" })
             .where(eq(taxReturns.id, runtime.taxReturnId));
           await db
             .update(tasks)
-            .set({ status: success ? "completed" : "failed" })
+            .set({ status: success ? successTaskStatus : "failed" })
             .where(eq(tasks.id, runtime.taskId));
           await updateActiveJobRecord({
             set: {
@@ -1929,6 +1984,10 @@ ${prompt}
               liveUrl: session.liveUrl,
               workspaceId,
               completionPdf,
+              prepareOnlyReadyAt:
+                success && prepareOnlyReady ? Date.now() : undefined,
+              prepareOnlyLikelySubmitted:
+                prepareOnlyLikelySubmitted || undefined,
             },
           });
         }

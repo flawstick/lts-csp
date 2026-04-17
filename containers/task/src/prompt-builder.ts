@@ -167,6 +167,12 @@ If prompted for CSP or secret credentials:
 
 **IF STUCK:** If you cannot complete a field or encounter an error you cannot resolve, pause the task and report the issue for user intervention.
 
+**PREPARE-ONLY SAFETY:** ${
+  submissionMode === "submit_and_capture_pdf"
+    ? "This run is allowed to fully submit once every section has been validated in this run."
+    : 'This run is **PREPARE ONLY**. You are **NOT** allowed to legally file the return in this mode. Reaching the final review/submit page with the submit button visible is success. Clicking **Submit**, **Confirm**, **Print**, **Download**, or any final filing action is a task failure.'
+}
+
 **SUMMARY PAGE SAFETY:** ${
   submissionMode === "submit_and_capture_pdf"
     ? "If the portal lands on a page ending in **reviewAndSubmit/summary** before every section has been checked in this run, treat it as an incomplete draft summary. Use the summary page's **Change** or **Edit** links to re-enter the filing sections and continue the return. Only once the filing is fully validated should you use the final submit path, wait for confirmation, and download the portal-generated completion PDF."
@@ -313,9 +319,11 @@ ${
 7. Do not finish the task until the PDF download has completed, or you have explicitly reported that no downloadable completion PDF exists
 8. If there are validation errors or the portal blocks submission, report them exactly as shown`
     : `3. **STOP BEFORE CLICKING SUBMIT** - Do NOT click the final submit button
-4. You should be exactly ONE CLICK away from submission - the submit button should be visible and ready
-5. Report that the form is ready for manual submission and describe what button/action remains
-6. If there are validation errors, report them exactly as shown`
+4. Leave the portal on the final review/submit page with the submit button visible and ready
+5. Your final output MUST start with exactly: **READY_FOR_MANUAL_SUBMISSION:**
+6. Then state that the return is ready for manual submission and name the exact remaining button/action
+7. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action under any circumstances
+8. If there are validation errors, report them exactly as shown`
 }
 `);
 
