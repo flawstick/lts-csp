@@ -26,6 +26,7 @@ export function TeamSwitcher() {
   const { orgs, currentOrg, isLoading } = useOrgFromUrl()
   const router = useRouter()
   const pathname = usePathname()
+  const hasLoadedOrgContext = Boolean(currentOrg) || orgs.length > 0
 
   const getOrgDestination = React.useCallback((orgId: string) => {
     if (pathname.startsWith("/org/")) {
@@ -41,7 +42,7 @@ export function TeamSwitcher() {
     }
   }, [getOrgDestination, orgs, router])
 
-  if (isLoading) {
+  if (isLoading && !hasLoadedOrgContext) {
     return (
       <SidebarMenu className="h-full">
         <SidebarMenuItem className="h-full group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center">
