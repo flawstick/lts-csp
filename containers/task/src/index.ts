@@ -97,6 +97,11 @@ const PREPARE_ONLY_SUBMISSION_MARKERS = [
   "downloaded the receipt",
 ];
 
+const REQUIRES_ATTENTION_OUTPUT_MARKERS = [
+  "requires_attention",
+  "requires attention",
+];
+
 const DETACHED_BROWSER_RECOVERY_PATTERNS = [
   "cdp still not connected",
   "target may have detached",
@@ -441,6 +446,13 @@ function isPrepareOnlyReadyOutput(output: string): boolean {
 function isPrepareOnlyLikelySubmittedOutput(output: string): boolean {
   const normalized = output.toLowerCase();
   return PREPARE_ONLY_SUBMISSION_MARKERS.some((marker) =>
+    normalized.includes(marker),
+  );
+}
+
+function hasRequiresAttentionOutputMarker(output: string): boolean {
+  const normalized = output.toLowerCase();
+  return REQUIRES_ATTENTION_OUTPUT_MARKERS.some((marker) =>
     normalized.includes(marker),
   );
 }
@@ -1788,6 +1800,7 @@ ${prompt}
         const prepareOnlyLikelySubmitted =
           submissionMode === "prepare_only" &&
           isPrepareOnlyLikelySubmittedOutput(output);
+        const explicitRequiresAttention = hasRequiresAttentionOutputMarker(output);
 
         if (prepareOnlyLikelySubmitted) {
           success = false;
@@ -1798,10 +1811,11 @@ ${prompt}
         }
 
         const needsAttention =
-          !success &&
-          REQUIRES_ATTENTION_KEYWORDS.some((keyword) =>
-            output.toLowerCase().includes(keyword.toLowerCase()),
-          );
+          explicitRequiresAttention ||
+          (!success &&
+            REQUIRES_ATTENTION_KEYWORDS.some((keyword) =>
+              output.toLowerCase().includes(keyword.toLowerCase()),
+            ));
 
         if (needsAttention) {
           await log("Task requires user attention - pausing", { output });
@@ -1902,6 +1916,7 @@ ${prompt}
             sessionStatus: browserSession.status,
             prepareOnlyReady,
             prepareOnlyLikelySubmitted,
+            explicitRequiresAttention,
           },
         );
 

@@ -67,7 +67,6 @@ interface PromptBuilderOptions {
 const DEFAULT_CERTIFICATE_TYPE = "Certificate 3";
 const INFERABLE_FIELDS = new Set([
   "entityActivity",
-  "relevantActivity",
   "hasIntellectualPropertyHolding",
 ]);
 
@@ -167,6 +166,15 @@ If prompted for CSP or secret credentials:
 
 **IF STUCK:** If you cannot complete a field or encounter an error you cannot resolve, pause the task and report the issue for user intervention.
 
+**MISSING-DATA POLICY:** Never do external research, never search the wider web, and never navigate away from the current Guernsey return/case flow to discover missing facts. You may use only:
+- the saved form values provided below
+- the attached financial statements / uploaded documents
+- text already visible inside the current portal return
+
+If the portal already shows a default/preselected value and you do not have explicit contradictory information, you may leave that portal default as-is. Do **NOT** replace portal defaults with guesses.
+
+If a material field is missing from the saved form and documents, STOP and report **REQUIRES_ATTENTION** rather than guessing.
+
 **PREPARE-ONLY SAFETY:** ${
   submissionMode === "submit_and_capture_pdf"
     ? "This run is allowed to fully submit once every section has been validated in this run."
@@ -182,11 +190,15 @@ If prompted for CSP or secret credentials:
 **TAB / BLANK PAGE RECOVERY:** Use Browser Use native tools only: **switch**, **close**, **navigate**, **go_back**, **click**, **input**, **upload_file**, **evaluate**, **screenshot**. Do **NOT** use Python or browser-wrapper tab recovery helpers such as **get_tabs**. If a bad click opens a stray tab or leaves you on **about:blank**, use **switch** or **close** to get back to the main Guernsey portal tab. If that fails quickly, use **navigate** to return to the filing URL and continue.
 
 ## INFERENCE RULES FOR GUERNSEY FILING
-- If the portal asks for **Entity Activity** or **Relevant Company Activity** and the saved value is blank, weak, or "None of the above", infer a short, plausible business description from the rest of the context. Use the company name, relevant activity, economic classification code, accounts data, and any other form details. Do NOT pause just because this field was not explicitly provided.
-- If the portal asks **Has Intellectual Property Holding?** and the saved answer is missing, infer it from context instead of pausing.
+- You may make only LOW-RISK inferences from the saved form, attached documents, and text already visible inside the current return.
+- You may infer a short **Entity Activity** description from the available context if it is blank.
+- If the portal asks **Has Intellectual Property Holding?** and the saved answer is missing, you may infer it from the available context instead of pausing.
 - Answer **"Yes"** for intellectual property holding only if the context clearly suggests IP ownership or exploitation, such as licensing, royalties, trademarks, patents, brands, software IP, or an Intellectual Property Holding Company relevant activity.
 - Otherwise answer **"No"** for intellectual property holding.
-- Prefer a reasonable inferred answer over stopping the task. Only pause if the portal blocks progress after you have already made the best inference from the provided context.
+- Do **NOT** infer ownership structures, parent companies, beneficial owners, tax residence details, registration facts, or incorporation facts if they are not explicitly provided.
+- If parent company / UBO / ownership information is not provided, do **NOT** try to look it up elsewhere. Use a portal-native "No", "None", or empty-list path only if the portal explicitly supports that flow. Otherwise STOP and report **REQUIRES_ATTENTION**.
+- Do **NOT** infer **Relevant Activity** if it is missing. That is a material field and should pause if the saved form and documents do not provide it clearly.
+- Prefer pausing over guessing for any field that could materially change the filing.
 ${
   financialStatementsFile && financialStatementsUrl
     ? `
@@ -357,6 +369,7 @@ ${field("Entity Activity", form.entityActivity)}
 - Economic Classification Code is REQUIRED for 2025 returns — this is a dropdown field on the portal, select the matching option.
 - Certificate Type is fixed for this filing flow: always use ${DEFAULT_CERTIFICATE_TYPE}.
 - Entity Activity describes the nature of the entity's business (e.g., "Property Holdings"). Preferred to have it filled even if the entity has no relevant activity.
+- If **Is Incorporated in Guernsey** or similar fields already have a portal default selected and you have no explicit contrary information, leave the portal default unchanged instead of guessing.
 `;
 }
 
@@ -434,8 +447,9 @@ ${field("Has Multiple Relevant Activities", form.hasMultipleRelevantActivities)}
 ${field("Has Intellectual Property Holding", form.hasIntellectualPropertyHolding)}
 
 **IMPORTANT:**
-- If the portal requires a business description such as "Entity Activity" or "Relevant Company Activity", infer a concise description from the broader context even if the saved value is blank or "None of the above".
-- If "Has Intellectual Property Holding" is missing, infer it from context. Default to **"No"** unless the form context clearly indicates IP ownership, licensing, royalties, trademarks, patents, brands, software IP, or an Intellectual Property Holding Company activity.
+- If the portal requires a business description such as "Entity Activity", you may infer a concise description from the broader context.
+- Do **NOT** invent or research a missing **Relevant Activity**. If it is not clearly available from the saved form/documents, STOP and report **REQUIRES_ATTENTION**.
+- If "Has Intellectual Property Holding" is missing, infer it only from the provided context. Default to **"No"** unless the form context clearly indicates IP ownership, licensing, royalties, trademarks, patents, brands, software IP, or an Intellectual Property Holding Company activity.
 - If you encounter the final summary page while Section 6 has not been checked in this run, do **NOT** submit from there. Use a **Change/Edit** link to return to the relevant activities section and continue filling the form.
 ${ipSection}
 `;
@@ -502,6 +516,11 @@ ${ultimateParents.length > 0 ? ultimateParents.map(formatParent).join("\n") : "N
 
 ### Ultimate Beneficial Owners:
 ${ubos.length > 0 ? ubos.map(formatUbo).join("\n") : "None listed"}
+
+**IMPORTANT:**
+- If these sections are empty in the saved form, do **NOT** research the parent/UBO details elsewhere.
+- Use an explicit portal "No" / "None" path only if the portal supports it.
+- If the portal requires ownership details that are not provided here or in the attached documents, STOP and report **REQUIRES_ATTENTION**.
 `;
 }
 
