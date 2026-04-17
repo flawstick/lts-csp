@@ -399,8 +399,6 @@ function buildInitializedSubstanceFormValues(input: {
       externalId: input.externalId,
       taxYear: input.taxYear,
     }),
-    accountingPeriodStart: `${Number(input.taxYear) - 1}-04-06`,
-    accountingPeriodEnd: `${input.taxYear}-04-05`,
     certificateType: DEFAULT_CERTIFICATE_TYPE,
     preparedBy: input.preparedByName,
     profitAllocation: autofillValues.profitAllocation ?? "Investment",
@@ -1231,7 +1229,7 @@ Do not make up or guess values - leave fields empty if information is not availa
 Some attached PDFs may also include a Firecrawl OCR/text parse. Use that parsed text as additional extraction support, but prioritize the source documents when they are clearer.
 
 IMPORTANT RULES:
-- accountingPeriodStart is ALWAYS "${Number(taxReturn.taxYear) - 1}-04-06" and accountingPeriodEnd is ALWAYS "${taxReturn.taxYear}-04-05". The Guernsey tax year runs 6 April to 5 April. Do NOT extract different dates from the documents.
+- accountingPeriodStart and accountingPeriodEnd are the entity's actual accounting period dates, not the Guernsey tax year. Extract them only if the documents clearly state them. If they are not stated, leave them empty.
 - certificateType is ALWAYS "${DEFAULT_CERTIFICATE_TYPE}". Never return Certificate 1 or Certificate 2.
 - taxReferenceNumber must preserve the exact source formatting. Do not strip leading letters and do not replace the letter "C" with the number "0".
 - If total profit is negative (a loss), return "0". The portal does not accept negative values.
@@ -1297,9 +1295,6 @@ IMPORTANT RULES:
 
       // Apply defaults for fields that should have default values
 
-      // Force correct accounting period (Guernsey tax year: 6 April to 5 April)
-      extractedData.accountingPeriodStart = `${Number(taxReturn.taxYear) - 1}-04-06`;
-      extractedData.accountingPeriodEnd = `${taxReturn.taxYear}-04-05`;
       extractedData.certificateType = DEFAULT_CERTIFICATE_TYPE;
       extractedData.taxReferenceNumber = normalizeTaxReferenceNumber({
         taxReferenceNumber: extractedData.taxReferenceNumber,

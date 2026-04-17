@@ -437,8 +437,6 @@ export function buildInitializedSubstanceFormValues(input: {
       externalId: input.externalId,
       taxYear: input.taxYear,
     }),
-    accountingPeriodStart: `${Number(input.taxYear) - 1}-04-06`,
-    accountingPeriodEnd: `${input.taxYear}-04-05`,
     certificateType: DEFAULT_CERTIFICATE_TYPE,
     preparedBy: input.preparedByName,
     profitAllocation: autofillValues.profitAllocation ?? "Investment",
@@ -1111,7 +1109,7 @@ Use these strict output rules:
 - If total profit is negative (a loss), return "0". The portal does not accept negative values.
 - If net book value is negative, return "0".
 - profitAllocation is REQUIRED — always pick "Investment" or "Business".
-- accountingPeriodStart is ALWAYS "${Number(input.returnRecord.taxYear) - 1}-04-06" and accountingPeriodEnd is ALWAYS "${input.returnRecord.taxYear}-04-05". The Guernsey tax year runs 6 April to 5 April. Do NOT extract different dates from the documents.
+- accountingPeriodStart and accountingPeriodEnd are the entity's actual accounting period dates, not the Guernsey tax year. Extract them only if the documents clearly state them. If they are not stated, leave them empty.
 - economicClassificationCode is REQUIRED for 2025 returns. It usually looks like a dotted numeric code such as "10.5.4". Look specifically for dot-separated numeric codes near labels like "Economic Classification Code" or "Company Activity Code", and return only the dotted code.
 - isConstituentEntity (CbCR) is REQUIRED for 2025 returns — default to "No" if not stated.
 - accountsPreparerName is the ACCOUNTANT who prepared the financial accounts, NOT "LTS Tax Limited".
@@ -1171,8 +1169,6 @@ ${cigaOptionsText}
   ) as Partial<SubstanceFormData>;
   const extractedTextContext = textContents.map((content) => content.text);
 
-  extractedData.accountingPeriodStart = `${Number(input.returnRecord.taxYear) - 1}-04-06`;
-  extractedData.accountingPeriodEnd = `${input.returnRecord.taxYear}-04-05`;
   extractedData.certificateType = DEFAULT_CERTIFICATE_TYPE;
   extractedData.taxReferenceNumber = normalizeTaxReferenceNumber({
     taxReferenceNumber: extractedData.taxReferenceNumber,
