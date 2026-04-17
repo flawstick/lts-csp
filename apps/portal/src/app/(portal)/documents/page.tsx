@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ClientSharedElement } from "@/components/view-transitions";
 import {
   getClientHref,
   getFolderColor,
@@ -311,10 +312,12 @@ function ClientRow({
       onClick={onOpen}
     >
       <td className="px-4 py-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <ClientMonogram name={client.name} id={client.id} />
-          <p className="truncate font-medium">{client.name}</p>
-        </div>
+        <ClientSharedElement slug={client.slug}>
+          <div className="flex min-w-0 items-center gap-3">
+            <ClientMonogram name={client.name} id={client.id} />
+            <p className="truncate font-medium">{client.name}</p>
+          </div>
+        </ClientSharedElement>
       </td>
       <td className="text-muted-foreground max-w-[220px] px-4 py-3">
         <p className="truncate">{client.orgName}</p>

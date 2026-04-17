@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { ClientSharedElement, SharedElement } from "@/components/view-transitions";
 import { api } from "@/trpc/react";
 import { DocumentsBackLink } from "../../_components/documents-back-link";
 import {
@@ -153,25 +154,37 @@ export default function ClientDocumentsPage() {
     <main className="mx-auto max-w-[1280px] space-y-4">
       <section className="portal-card overflow-hidden rounded-xl">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
-          <div className="space-y-2 min-w-0">
-            <DocumentsBackLink href="/documents" label="Back to clients" />
-            <div className="min-w-0">
-              <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">
-                {isLoading ? (
-                  <Skeleton className="h-6 w-56" />
-                ) : client ? (
-                  client.name
-                ) : (
-                  "Client not found"
-                )}
-              </h1>
-              <p className="text-muted-foreground mt-1 text-sm">
-                {client
-                  ? client.orgName
-                  : "Open a return to review files and available autofill."}
-              </p>
+          {client ? (
+            <ClientSharedElement slug={client.slug}>
+              <div className="space-y-2 min-w-0 flex-1">
+                <DocumentsBackLink href="/documents" label="Back to clients" />
+                <div className="min-w-0">
+                  <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">
+                    {client.name}
+                  </h1>
+                  <p className="text-muted-foreground mt-1 text-sm">
+                    {client.orgName}
+                  </p>
+                </div>
+              </div>
+            </ClientSharedElement>
+          ) : (
+            <div className="space-y-2 min-w-0">
+              <DocumentsBackLink href="/documents" label="Back to clients" />
+              <div className="min-w-0">
+                <h1 className="text-xl font-semibold tracking-tight">
+                  {isLoading ? (
+                    <Skeleton className="h-6 w-56" />
+                  ) : (
+                    "Client not found"
+                  )}
+                </h1>
+                <p className="text-muted-foreground mt-1 text-sm">
+                  Open a return to review files and available autofill.
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {client ? (
@@ -325,28 +338,32 @@ export default function ClientDocumentsPage() {
                     onFocus={() => router.prefetch(href)}
                     className="flex min-w-0 flex-1 items-center gap-3"
                   >
-                    <Folder
-                      color={getFolderColor(returnFolder.id)}
-                      size={0.36}
-                      items={folderItems}
-                      className="shrink-0"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline gap-2">
-                        <p className="text-base font-semibold leading-none">
-                          {returnFolder.taxYear}
-                        </p>
-                        <span className="text-muted-foreground text-[11px] font-medium uppercase tracking-[0.15em]">
-                          {returnFolder.jurisdictionCode}
-                        </span>
+                    <SharedElement name={`doc-return-${returnFolder.id}`}>
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        <Folder
+                          color={getFolderColor(returnFolder.id)}
+                          size={0.36}
+                          items={folderItems}
+                          className="shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline gap-2">
+                            <p className="text-base font-semibold leading-none">
+                              {returnFolder.taxYear}
+                            </p>
+                            <span className="text-muted-foreground text-[11px] font-medium uppercase tracking-[0.15em]">
+                              {returnFolder.jurisdictionCode}
+                            </span>
+                          </div>
+                          <p className="text-muted-foreground mt-1 truncate text-xs">
+                            {returnFolder.jurisdictionName} ·{" "}
+                            {returnFolder.files.length} file
+                            {returnFolder.files.length === 1 ? "" : "s"} · Updated{" "}
+                            {formatDateTime(returnFolder.updatedAt)}
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-muted-foreground mt-1 truncate text-xs">
-                        {returnFolder.jurisdictionName} ·{" "}
-                        {returnFolder.files.length} file
-                        {returnFolder.files.length === 1 ? "" : "s"} · Updated{" "}
-                        {formatDateTime(returnFolder.updatedAt)}
-                      </p>
-                    </div>
+                    </SharedElement>
                   </Link>
 
                   <div className="flex items-center gap-1">

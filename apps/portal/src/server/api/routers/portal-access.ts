@@ -609,11 +609,12 @@ export const portalAccessRouter = createTRPCRouter({
         });
       }
 
-      return getPortalClientProfileByEntityName({
+      const profile = await getPortalClientProfileByEntityName({
         db: ctx.db,
         orgId: input.orgId,
         entityName: input.entityName,
       });
+      return profile ?? null;
     }),
 
   upsertClientProfile: protectedProcedure

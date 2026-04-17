@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { SharedElement } from "@/components/view-transitions";
 import { api } from "@/trpc/react";
 
 type ReturnStatusTone =
@@ -535,16 +536,18 @@ export default function OrgReturnsPage() {
                         onClick={() => router.push(returnHref)}
                       >
                         <td className="px-4 py-3">
-                          <div className="min-w-0">
-                            <p className="truncate font-medium">
-                              {row.entityName}
-                            </p>
-                            <p className="text-muted-foreground truncate text-xs">
-                              {row.externalId
-                                ? `External ID: ${row.externalId}`
-                                : `${fileCount(row.files)} file(s)`}
-                            </p>
-                          </div>
+                          <SharedElement name={`return-${row.id}`}>
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">
+                                {row.entityName}
+                              </p>
+                              <p className="text-muted-foreground truncate text-xs">
+                                {row.externalId
+                                  ? `External ID: ${row.externalId}`
+                                  : `${fileCount(row.files)} file(s)`}
+                              </p>
+                            </div>
+                          </SharedElement>
                         </td>
                         <td className="text-muted-foreground px-4 py-3">
                           {row.jurisdictionName} ({row.jurisdictionCode})

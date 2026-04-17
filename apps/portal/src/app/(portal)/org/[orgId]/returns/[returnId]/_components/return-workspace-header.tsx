@@ -29,6 +29,7 @@ import {
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import Magnet from "@/components/Magnet";
 import { PortalClientAccessMenuSection } from "@/components/portal-client-access-actions";
+import { SharedElement } from "@/components/view-transitions";
 
 import {
   STATUS_CLASS,
@@ -65,9 +66,11 @@ export function ReturnWorkspaceHeader({
       <div className="flex flex-wrap items-start justify-between gap-5">
         <div className="max-w-3xl space-y-3">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-3xl font-semibold tracking-tight">
-              {selectedReturn.entityName}
-            </h1>
+            <SharedElement name={`return-${selectedReturn.id}`}>
+              <h1 className="text-3xl font-semibold tracking-tight">
+                {selectedReturn.entityName}
+              </h1>
+            </SharedElement>
             <span
               className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs ring-1 ${STATUS_CLASS[selectedStatus]}`}
             >

@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { SharedElement } from "@/components/view-transitions";
 import { DocumentsBackLink } from "../../../../_components/documents-back-link";
 import { formatBytes, formatDateTime, getClientHref, useDocumentsTree } from "../../../../_components/documents-tree";
 import { DocumentsFilterCard, type FilterOption } from "../../../../_components/documents-filter-card";
@@ -116,16 +117,25 @@ export default function ReturnDocumentsPage() {
             label="Back to client returns"
           />
           <div>
-            <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">
-              {returnFolder ? returnFolder.name : "Return files"}
-            </h1>
             {returnFolder ? (
-              <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
-                {returnFolder.jurisdictionName} ({returnFolder.jurisdictionCode}) • {returnFolder.taxYear}
-              </p>
+              <SharedElement name={`doc-return-${returnFolder.id}`}>
+                <div>
+                  <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">
+                    {returnFolder.name}
+                  </h1>
+                  <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                    {returnFolder.jurisdictionName} ({returnFolder.jurisdictionCode}) • {returnFolder.taxYear}
+                  </p>
+                </div>
+              </SharedElement>
             ) : (
-              <p className="mt-1 text-sm text-muted-foreground">Open and review files for this return.</p>
+              <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">
+                Return files
+              </h1>
             )}
+            {!returnFolder ? (
+              <p className="mt-1 text-sm text-muted-foreground">Open and review files for this return.</p>
+            ) : null}
             {returnFolder?.autofillFieldCount ? (
               <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">
                 Autofill is available for {returnFolder.autofillFieldCount} field{returnFolder.autofillFieldCount === 1 ? "" : "s"} when the GRS form is initialized, using the latest available values from prior company returns.

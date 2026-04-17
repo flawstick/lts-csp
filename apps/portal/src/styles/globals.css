@@ -240,3 +240,42 @@
       0 12px 24px -18px rgb(0 0 0 / 42%);
   }
 }
+
+/* ---------- View Transitions ---------- */
+:root {
+  --vt-duration: 380ms;
+  --vt-ease: cubic-bezier(0.32, 0.72, 0.24, 1);
+}
+
+/* No cross-fade on root navigations — only named shared elements animate.
+   Sidebar clicks (e.g. → /tasks, → /returns) snap instantly; row clicks
+   that pair a SharedElement name across pages morph via .client-morph. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+/* Shared element: client row morphing into the detail header.
+   The browser interpolates the bounding box of the named element, so a small
+   table row expands smoothly into the full-width header card. */
+::view-transition-group(.client-morph) {
+  animation-duration: var(--vt-duration);
+  animation-timing-function: var(--vt-ease);
+}
+::view-transition-image-pair(.client-morph) {
+  animation-name: vt-client-blur;
+  animation-duration: var(--vt-duration);
+}
+@keyframes vt-client-blur {
+  30% { filter: blur(2px); }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}

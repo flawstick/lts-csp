@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { SharedElement } from "@/components/view-transitions";
 
 import {
   STATUS_CLASS,
@@ -96,9 +97,10 @@ export function TasksTableRow({ orgId, row, index }: Props) {
             />
           </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              <p className="truncate text-sm font-semibold">{row.entityName}</p>
+          <SharedElement name={`return-${row.id}`}>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <p className="truncate text-sm font-semibold">{row.entityName}</p>
               <span className="text-muted-foreground text-xs">{row.taxYear}</span>
               {row.jurisdictionCode ? (
                 <span className="inline-flex rounded-md border border-border/60 bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -106,11 +108,12 @@ export function TasksTableRow({ orgId, row, index }: Props) {
                 </span>
               ) : null}
             </div>
-            <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">
-              {action.title}
-              {action.detail ? ` — ${action.detail}` : ""}
-            </p>
-          </div>
+              <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">
+                {action.title}
+                {action.detail ? ` — ${action.detail}` : ""}
+              </p>
+            </div>
+          </SharedElement>
         </Link>
 
         <div className="hidden shrink-0 items-center gap-2 sm:flex">
