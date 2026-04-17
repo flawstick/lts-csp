@@ -37,7 +37,7 @@ function BreadcrumbLink({
   className,
   href,
   ...props
-}: React.ComponentPropsWithoutRef<"a"> & {
+}: React.ComponentProps<"a"> & {
   asChild?: boolean
 }) {
   if (asChild) {

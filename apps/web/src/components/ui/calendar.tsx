@@ -129,23 +129,10 @@ function Calendar({
       }}
       components={{
         Root: ({ className, rootRef, ...props }) => {
-          const setRootRef = (node: HTMLDivElement | null) => {
-            if (typeof rootRef === "function") {
-              rootRef(node)
-              return
-            }
-
-            if (rootRef && "current" in rootRef) {
-              ;(
-                rootRef as { current: HTMLDivElement | null }
-              ).current = node
-            }
-          }
-
           return (
             <div
               data-slot="calendar"
-              ref={setRootRef}
+              ref={rootRef}
               className={cn(className)}
               {...props}
             />
