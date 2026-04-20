@@ -19,6 +19,16 @@ import {
 import { api } from "@/trpc/react";
 import { ReturnWorkspacePageSkeleton } from "@/components/return-workspace-skeleton";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DirectionalTransition } from "@/components/view-transitions";
 import { useNavigateWithTransition } from "@/lib/navigate-with-transition";
@@ -52,6 +62,10 @@ export default function ReturnWorkspacePage() {
   const [isSectionDialogOpen, setIsSectionDialogOpen] = useState(false);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const [isAiExtractionRunning, setIsAiExtractionRunning] = useState(false);
+  const [pendingCertificateType, setPendingCertificateType] = useState<
+    "Certificate 2" | "Certificate 3" | null
+  >(null);
+  const [isCertificateDialogOpen, setIsCertificateDialogOpen] = useState(false);
   const [uploadedFileUrls, setUploadedFileUrls] = useState<Array<{
     name: string;
     url: string;
@@ -470,19 +484,32 @@ export default function ReturnWorkspacePage() {
 
   const handleInitForm = async () => {
     try {
+      let certificateTypeInitialized = false;
       if (
         selectedReturn?.jurisdictionCode === "GG" &&
         selectedReturn?.returnType === "economic_substance" &&
         certificateResolution.unresolved
       ) {
-        await setCertificateTypeMutation.mutateAsync({
-          orgId,
-          taxReturnId: selectedReturn.id,
-          certificateType: "Certificate 3",
-          overwriteExisting: false,
-        });
+        const initializedCertificateType =
+          await setCertificateTypeMutation.mutateAsync({
+            orgId,
+            taxReturnId: selectedReturn.id,
+            certificateType: "Certificate 3",
+            overwriteExisting: false,
+          });
+        utils.portalReturns.getSubstanceForm.setData(
+          {
+            orgId,
+            taxReturnId: selectedReturn.id,
+          },
+          initializedCertificateType,
+        );
+        setDraftForm(sanitizeFormData(initializedCertificateType));
+        certificateTypeInitialized = true;
       }
-      await ensureSubstanceFormExists();
+      if (!certificateTypeInitialized) {
+        await ensureSubstanceFormExists();
+      }
       showMessage("Substance form initialized.");
     } catch (error) {
       showMessage(
@@ -495,32 +522,47 @@ export default function ReturnWorkspacePage() {
 
   const handleSetCertificateType = async (
     nextCertificateType: "Certificate 2" | "Certificate 3",
+    overwriteExisting: boolean,
   ) => {
     if (!selectedReturn) return;
 
-    const overwriteExisting =
-      substanceFormQuery.data != null &&
-      hasMeaningfulGuernseyFormData(
-        substanceFormQuery.data as Partial<SubstanceFormData>,
-      );
-
-    if (
-      overwriteExisting &&
-      !window.confirm(
-        `Switching this return to ${nextCertificateType} will update the current Guernsey form defaults while preserving existing shared answers where possible. Continue?`,
-      )
-    ) {
-      return;
-    }
-
-    await setCertificateTypeMutation.mutateAsync({
+    const nextForm = await setCertificateTypeMutation.mutateAsync({
       orgId,
       taxReturnId: selectedReturn.id,
       certificateType: nextCertificateType,
       overwriteExisting,
     });
 
+    utils.portalReturns.getSubstanceForm.setData(
+      {
+        orgId,
+        taxReturnId: selectedReturn.id,
+      },
+      nextForm,
+    );
+    setDraftForm(sanitizeFormData(nextForm));
+    setPendingCertificateType(null);
+    setIsCertificateDialogOpen(false);
+
     showMessage(`Switched to ${nextCertificateType}.`);
+  };
+
+  const requestCertificateTypeChange = async (
+    nextCertificateType: "Certificate 2" | "Certificate 3",
+  ) => {
+    const overwriteExisting =
+      substanceFormQuery.data != null &&
+      hasMeaningfulGuernseyFormData(
+        substanceFormQuery.data as Partial<SubstanceFormData>,
+      );
+
+    if (overwriteExisting) {
+      setPendingCertificateType(nextCertificateType);
+      setIsCertificateDialogOpen(true);
+      return;
+    }
+
+    await handleSetCertificateType(nextCertificateType, false);
   };
 
   const handleClearForm = async () => {
@@ -629,6 +671,49 @@ export default function ReturnWorkspacePage() {
   return (
     <DirectionalTransition>
       <main className="mx-auto max-w-6xl space-y-5 pb-8">
+      <AlertDialog
+        open={isCertificateDialogOpen}
+        onOpenChange={(open) => {
+          setIsCertificateDialogOpen(open);
+          if (!open) {
+            setPendingCertificateType(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch certificate type?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingCertificateType
+                ? `Switching this return to ${pendingCertificateType} will update the Guernsey form defaults while preserving shared answers where possible.`
+                : "Switching the certificate type will update the Guernsey form defaults."}{" "}
+              Review the form after switching in case any certificate-specific answers need adjustment.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={setCertificateTypeMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={
+                !pendingCertificateType || setCertificateTypeMutation.isPending
+              }
+              onClick={(event) => {
+                event.preventDefault();
+                if (!pendingCertificateType) {
+                  return;
+                }
+                void handleSetCertificateType(pendingCertificateType, true);
+              }}
+            >
+              {setCertificateTypeMutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
+              Switch
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {isGuernseyCertificateUnresolved ? (
         <div className="rounded-[1.8rem] border border-amber-500/25 bg-amber-500/10 px-6 py-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -647,28 +732,8 @@ export default function ReturnWorkspacePage() {
                   key={certificateType}
                   variant={certificateType === "Certificate 2" ? "outline" : "default"}
                   disabled={setCertificateTypeMutation.isPending}
-                  onClick={async () => {
-                    const overwriteExisting =
-                      substanceFormQuery.data != null &&
-                      hasMeaningfulGuernseyFormData(
-                        substanceFormQuery.data as Partial<SubstanceFormData>,
-                      );
-
-                    if (
-                      overwriteExisting &&
-                      !window.confirm(
-                        `Switching this return to ${certificateType} will overwrite the current Guernsey form defaults. Continue?`,
-                      )
-                    ) {
-                      return;
-                    }
-
-                    await setCertificateTypeMutation.mutateAsync({
-                      orgId,
-                      taxReturnId: selectedReturn.id,
-                      certificateType,
-                      overwriteExisting,
-                    });
+                  onClick={() => {
+                    void requestCertificateTypeChange(certificateType);
                   }}
                 >
                   {setCertificateTypeMutation.isPending ? (
@@ -795,7 +860,7 @@ export default function ReturnWorkspacePage() {
               }
               isCertificateTypeUpdating={setCertificateTypeMutation.isPending}
               onSetCertificateType={(nextCertificateType) => {
-                void handleSetCertificateType(nextCertificateType);
+                void requestCertificateTypeChange(nextCertificateType);
               }}
               onInitForm={() => {
                 void handleInitForm();

@@ -491,7 +491,7 @@ export const FORM_SECTIONS = [
       "entityActivity",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.entityType === "Company",
+      data.entityType !== "Partnership",
   },
   {
     id: "partnershipInfo",

@@ -58,4 +58,15 @@ describe("portal Guernsey substance form schema", () => {
     expect(visibleSectionIds).not.toContain("economicSubstance");
     expect(visibleSectionIds).not.toContain("beneficialOwnership");
   });
+
+  it("keeps company information visible before entity type is chosen", () => {
+    const visibleSectionIds = FORM_SECTIONS.filter((section) =>
+      !("conditional" in section) || !section.conditional
+        ? true
+        : section.conditional({ certificateType: "Certificate 3" }),
+    ).map((section) => section.id);
+
+    expect(visibleSectionIds).toContain("companyInfo");
+    expect(visibleSectionIds).not.toContain("partnershipInfo");
+  });
 });
