@@ -54,6 +54,7 @@ type ReturnFilesTabProps = {
   selectedReturnId: string;
   selectedFiles: VaultFile[];
   hasFinancialStatements: boolean;
+  requireFinancialStatements?: boolean;
   isUploading: boolean;
   isExtractPending: boolean;
   isAssignPending: boolean;
@@ -74,6 +75,7 @@ type ReturnFilesTabProps = {
 export function ReturnFilesTab({
   selectedFiles,
   hasFinancialStatements,
+  requireFinancialStatements = true,
   isUploading,
   isExtractPending,
   isAssignPending,
@@ -114,6 +116,7 @@ export function ReturnFilesTab({
 
   const shouldPrompt =
     uploadedFileUrls !== null &&
+    requireFinancialStatements &&
     !hasFinancialStatements &&
     uploadedPdfs.length > 0;
 

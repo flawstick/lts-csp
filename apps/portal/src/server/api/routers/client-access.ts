@@ -24,6 +24,7 @@ import {
   buildInitializedSubstanceFormValues,
   extractSubstanceFormFromFilesInternal,
   findPreviousSubstanceAutofillSource,
+  getGuernseyCertificateResolution,
 } from "@/server/api/routers/portal-returns";
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
 import { getMissingFields, substanceFormSchema } from "@/lib/schemas/substance-form";
@@ -164,14 +165,22 @@ export const clientAccessRouter = createTRPCRouter({
         return existing;
       }
 
-      const preparedByName =
-        share.organisation.accountName ??
-        share.organisation.name ??
-        "LTS Tax Limited";
       const previousForm = await findPreviousSubstanceAutofillSource(
         ctx.db,
         returnRecord,
       );
+      const certificateResolution = getGuernseyCertificateResolution({
+        taxReturn: returnRecord,
+        form: existing,
+      });
+
+      if (certificateResolution.unresolved) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "Certificate type is unresolved for this Guernsey return. Ask the internal team to confirm Certificate 2 or Certificate 3 before opening the form.",
+        });
+      }
 
       const [created] = await ctx.db
         .insert(substanceForms)
@@ -181,8 +190,8 @@ export const clientAccessRouter = createTRPCRouter({
             taxYear: returnRecord.taxYear,
             entityName: returnRecord.entityName,
             externalId: returnRecord.externalId,
-            preparedByName,
             sourceForm: previousForm,
+            certificateResolution,
           }),
         )
         .returning();

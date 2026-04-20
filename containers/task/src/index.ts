@@ -9,8 +9,10 @@ import {
   taxReturns,
   jobs,
   tasks,
+  orgSettings,
   eq,
   sql,
+  resolveOrgPortalContactInfo,
   type TaxReturnFileCategory,
   type TaxReturnFileRole,
 } from "@repo/database";
@@ -1315,6 +1317,16 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       throw new Error("Substance form not found");
     }
 
+    const portalContactSettings = await db.query.orgSettings.findFirst({
+      where: eq(orgSettings.orgId, taxReturn.orgId),
+      columns: {
+        settings: true,
+      },
+    });
+    const portalContactInfo = resolveOrgPortalContactInfo(
+      portalContactSettings?.settings,
+    );
+
     const taxReturnFiles = getTaxReturnFiles(taxReturn.files);
     const useProxy = process.env.USE_UK_PROXY !== "false";
 
@@ -1451,6 +1463,8 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       submissionMode,
       financialStatementsFile,
       financialStatementsUrl: financialStatementsFile?.url ?? null,
+      contactEmail: portalContactInfo.email,
+      contactPhone: portalContactInfo.phone,
     });
     const recoveryReturnUrl =
       taxReturn.link ||

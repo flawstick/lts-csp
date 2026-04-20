@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { uploadPortalFile } from "@/lib/portal-upload";
@@ -12,6 +12,10 @@ import {
   getMissingFields,
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
+import {
+  hasMeaningfulGuernseyFormData,
+  resolveGuernseyCertificateType,
+} from "@repo/database/guernsey-filing";
 import { api } from "@/trpc/react";
 import { ReturnWorkspacePageSkeleton } from "@/components/return-workspace-skeleton";
 import { Button } from "@/components/ui/button";
@@ -139,6 +143,17 @@ export default function ReturnWorkspacePage() {
         });
       },
     });
+  const setCertificateTypeMutation =
+    api.portalReturns.setSubstanceFormCertificateType.useMutation({
+      onSuccess: () => {
+        if (!selectedReturn) return;
+        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        void utils.portalReturns.getSubstanceForm.invalidate({
+          orgId,
+          taxReturnId: selectedReturn.id,
+        });
+      },
+    });
 
   const substanceFormQuery = api.portalReturns.getSubstanceForm.useQuery(
     {
@@ -167,6 +182,27 @@ export default function ReturnWorkspacePage() {
   useEffect(() => {
     setDraftForm(sanitizeFormData(substanceFormQuery.data));
   }, [substanceFormQuery.data, selectedReturn?.id]);
+
+  const certificateResolution = useMemo(
+    () =>
+      resolveGuernseyCertificateType({
+        metadata:
+          selectedReturn?.metadata && typeof selectedReturn.metadata === "object"
+            ? (selectedReturn.metadata as Record<string, unknown>)
+            : null,
+        savedCertificateType: substanceFormQuery.data?.certificateType ?? null,
+      }),
+    [selectedReturn?.metadata, substanceFormQuery.data?.certificateType],
+  );
+  const isGuernseyCertificateUnresolved = Boolean(
+    selectedReturn?.jurisdictionCode === "GG" &&
+      selectedReturn?.returnType === "economic_substance" &&
+      certificateResolution.unresolved,
+  );
+  const isCertificateTwo =
+    certificateResolution.certificateType === "Certificate 2";
+  const requiresFinancialStatements =
+    selectedReturn?.jurisdictionCode === "GG" && !isCertificateTwo;
 
   const visibleSections = useMemo(
     () =>
@@ -316,6 +352,7 @@ export default function ReturnWorkspacePage() {
   const handleRunAiExtraction = async () => {
     if (
       !selectedReturn ||
+      isCertificateTwo ||
       isGuernseyEsrLocked ||
       aiExtractionLockRef.current ||
       extractSubstanceFormMutation.isPending
@@ -432,6 +469,13 @@ export default function ReturnWorkspacePage() {
   };
 
   const handleInitForm = async () => {
+    if (isGuernseyCertificateUnresolved) {
+      showMessage(
+        "Confirm Certificate 2 or Certificate 3 before initializing the Guernsey form.",
+      );
+      return;
+    }
+
     try {
       await ensureSubstanceFormExists();
       showMessage("Substance form initialized.");
@@ -550,6 +594,58 @@ export default function ReturnWorkspacePage() {
   return (
     <DirectionalTransition>
       <main className="mx-auto max-w-6xl space-y-5 pb-8">
+      {isGuernseyCertificateUnresolved ? (
+        <div className="rounded-[1.8rem] border border-amber-500/25 bg-amber-500/10 px-6 py-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-1.5">
+              <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                Confirm the Guernsey certificate type
+              </p>
+              <p className="max-w-3xl text-sm text-amber-800 dark:text-amber-300">
+                This return has not been confidently classified as Certificate 2 or Certificate 3.
+                Choose the filing mode before initializing the Guernsey form or starting browser automation.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(["Certificate 2", "Certificate 3"] as const).map((certificateType) => (
+                <Button
+                  key={certificateType}
+                  variant={certificateType === "Certificate 2" ? "outline" : "default"}
+                  disabled={setCertificateTypeMutation.isPending}
+                  onClick={async () => {
+                    const overwriteExisting =
+                      substanceFormQuery.data != null &&
+                      hasMeaningfulGuernseyFormData(
+                        substanceFormQuery.data as Partial<SubstanceFormData>,
+                      );
+
+                    if (
+                      overwriteExisting &&
+                      !window.confirm(
+                        `Switching this return to ${certificateType} will overwrite the current Guernsey form defaults. Continue?`,
+                      )
+                    ) {
+                      return;
+                    }
+
+                    await setCertificateTypeMutation.mutateAsync({
+                      orgId,
+                      taxReturnId: selectedReturn.id,
+                      certificateType,
+                      overwriteExisting,
+                    });
+                  }}
+                >
+                  {setCertificateTypeMutation.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : null}
+                  Use {certificateType}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="portal-card overflow-hidden rounded-[1.95rem]">
         <ReturnWorkspaceHeader
           activeSectionTitle={activeSection?.title ?? null}
@@ -611,7 +707,9 @@ export default function ReturnWorkspacePage() {
                 <p className="text-muted-foreground text-sm">
                   {activeTab === "form"
                     ? "Review extracted answers, edit the ESR sections, and finish the remaining required fields."
-                    : "Upload the ESR, assign the financial statements PDF, and manage supporting return documents."}
+                    : isCertificateTwo
+                      ? "Upload source documents if needed and manage the return file set. Certificate 2 does not require accounts upload or AI extraction."
+                      : "Upload the ESR, assign the financial statements PDF, and manage supporting return documents."}
                 </p>
               </div>
 
@@ -655,10 +753,22 @@ export default function ReturnWorkspacePage() {
               hasFinancialStatements={selectedFiles.some(
                 (f) => f.role === "financial_statements",
               )}
+              requireFinancialStatements={Boolean(requiresFinancialStatements)}
               isUploading={isUploadingFiles}
               isExtractPending={isAiExtractionPending}
               isAssignPending={assignDocumentRoleMutation.isPending}
               uploadedFileUrls={uploadedFileUrls}
+              showAiExtraction={!isCertificateTwo}
+              uploadDescription={
+                isCertificateTwo
+                  ? "Drop supporting documents here or browse. Certificate 2 filings do not require financial statements upload."
+                  : undefined
+              }
+              uploadedFilesDescription={
+                isCertificateTwo
+                  ? "Review supporting return documents. AI extraction is not required for Certificate 2."
+                  : undefined
+              }
               isReadOnly={isGuernseyEsrLocked}
               readOnlyMessage={guernseyLockMessage}
               onUploadFiles={(files) => {

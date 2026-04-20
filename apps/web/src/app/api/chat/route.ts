@@ -122,9 +122,9 @@ The Guernsey Economic Substance Register (ESR) return has 14 sections:
 - **Entity Name**, **Entity Type** (Company/Partnership), **Accounting Period Start/End**, **Is Collective Investment Vehicle?**
 
 ### Section 2: Company Information (if Company)
-- **Company Number**, **Tax Reference Number**, **Registered Address**, **Principal Place of Business**
-- **Is Incorporated in Guernsey?**, **Company Activity Code**, **Certificate Type** (1/2/3)
-- **Entity Activity**, **Is Guernsey Tax Resident?**, **Has Registered with GRS?**, **Beneficial Member Categories**
+- **Company Number**, **Registered Address**, **Principal Place of Business**
+- **Is Incorporated in Guernsey?**, **Company Activity Code**, **Certificate Type** (2/3)
+- **Entity Activity**, **Is Guernsey Tax Resident?**
 
 ### Section 3: Partnership Information (if Partnership)
 - **Partnership Name**, **Partnership Number**, **Solely Guernsey Individual Partners?**, **Activities Wholly in Guernsey?**, **Place of Effective Management Outside Guernsey?**
@@ -137,7 +137,7 @@ The Guernsey Economic Substance Register (ESR) return has 14 sections:
 - **Is Guernsey FI under FATCA?**, **Is Guernsey FI under CRS?**, **Is Registered with IGOR?**, **Reason Not Registered with IGOR**
 
 ### Section 6: Country by Country Reporting (CbCR)
-- **Is Constituent Entity?**, **MNE Reporting Entity Name/Country**, **MNE Accounting Period**
+- **Is the entity a constituent entity?**, **MNE Reporting Entity Name/Country**, **MNE Accounting Period**
 - **In-scope of Pillar 2 Global Minimum Tax?**, **UPE Name/Location**
 
 ### Section 7: Statement of Practice C42
@@ -164,8 +164,7 @@ The Guernsey Economic Substance Register (ESR) return has 14 sections:
 - **Strategic Decisions/Records in Guernsey?**, **Board Meeting Location**, **Directors/Meetings** lists
 
 ### Section 13: Finalising the Return
-- **Additional Information**, **Has Post Balance Sheet Event?**
-- **Prepared By** (required), **Prepared Date** (required), **Manager Sign Off**
+- **Additional Information**, **Manager Sign Off**, **Manager Sign Off Date**
 
 ### CIGA Options by Relevant Activity
 - **Banking**: Raising funds/managing risk, Hedging, Providing loans/financial services, Managing capital/reports

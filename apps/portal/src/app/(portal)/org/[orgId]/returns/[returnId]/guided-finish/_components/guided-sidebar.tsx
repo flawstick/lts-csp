@@ -30,22 +30,30 @@ export type GuidedStep =
       description: string;
     };
 
-export function buildSteps(visibleSections: FormSection[]): GuidedStep[] {
-  return [
-    ...visibleSections.map((section) => ({
-      id: section.id,
-      kind: "section" as const,
-      title: section.title,
-      description: section.description,
-      fields: section.fields,
-    })),
-    {
+export function buildSteps(
+  visibleSections: FormSection[],
+  options?: {
+    includeFinancialPack?: boolean;
+  },
+): GuidedStep[] {
+  const steps: GuidedStep[] = visibleSections.map((section) => ({
+    id: section.id,
+    kind: "section" as const,
+    title: section.title,
+    description: section.description,
+    fields: section.fields,
+  }));
+
+  if (options?.includeFinancialPack !== false) {
+    steps.push({
       id: FINAL_STEP_ID,
       kind: "upload" as const,
       title: "Financial Pack",
       description: "Upload signed financial statements for the filing.",
-    },
-  ];
+    });
+  }
+
+  return steps;
 }
 
 type GuidedSidebarProps = {

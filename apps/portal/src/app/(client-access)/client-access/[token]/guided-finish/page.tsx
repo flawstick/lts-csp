@@ -10,6 +10,7 @@ import {
   getMissingFields,
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
+import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
 import { api } from "@/trpc/react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -86,14 +87,28 @@ export default function ClientAccessGuidedFinishPage() {
 
   useEffect(() => {
     const sanitized = sanitizeFormData(substanceFormQuery.data);
-    if (!sanitized.preparedBy) {
-      const accountingName =
-        accessQuery.data?.organisation.accountName ??
-        accessQuery.data?.organisation.name;
-      if (accountingName) sanitized.preparedBy = accountingName;
-    }
     setDraftForm(sanitized);
-  }, [substanceFormQuery.data, accessQuery.data?.organisation, selectedReturn?.id]);
+  }, [substanceFormQuery.data, selectedReturn?.id]);
+
+  const certificateResolution = useMemo(
+    () =>
+      resolveGuernseyCertificateType({
+        metadata:
+          selectedReturn?.metadata && typeof selectedReturn.metadata === "object"
+            ? (selectedReturn.metadata as Record<string, unknown>)
+            : null,
+        savedCertificateType: substanceFormQuery.data?.certificateType ?? null,
+      }),
+    [selectedReturn?.metadata, substanceFormQuery.data?.certificateType],
+  );
+  const isGuernseyCertificateUnresolved = Boolean(
+    selectedReturn?.jurisdictionCode === "GG" &&
+      selectedReturn?.returnType === "economic_substance" &&
+      certificateResolution.unresolved,
+  );
+  const isCertificateTwo =
+    certificateResolution.certificateType === "Certificate 2";
+  const requiresFinancialPack = !isCertificateTwo;
 
   const visibleSections = useMemo(
     () =>
@@ -115,7 +130,13 @@ export default function ClientAccessGuidedFinishPage() {
   const assignedFinancialStatementsFile =
     selectedFiles.find((file) => file.role === "financial_statements") ?? null;
 
-  const steps = useMemo(() => buildSteps(visibleSections), [visibleSections]);
+  const steps = useMemo(
+    () =>
+      buildSteps(visibleSections, {
+        includeFinancialPack: requiresFinancialPack,
+      }),
+    [requiresFinancialPack, visibleSections],
+  );
 
   const initialStepId = useMemo(() => {
     const firstMissingSection = visibleSections.find((section) =>
@@ -123,9 +144,16 @@ export default function ClientAccessGuidedFinishPage() {
     );
 
     if (firstMissingSection) return firstMissingSection.id;
-    if (!assignedFinancialStatementsFile) return FINAL_STEP_ID;
+    if (requiresFinancialPack && !assignedFinancialStatementsFile) {
+      return FINAL_STEP_ID;
+    }
     return visibleSections[0]?.id ?? FINAL_STEP_ID;
-  }, [assignedFinancialStatementsFile, draftMissingFields, visibleSections]);
+  }, [
+    assignedFinancialStatementsFile,
+    draftMissingFields,
+    requiresFinancialPack,
+    visibleSections,
+  ]);
 
   useEffect(() => {
     if (!activeStepId) setActiveStepId(initialStepId);
@@ -165,7 +193,8 @@ export default function ClientAccessGuidedFinishPage() {
   const totalSteps = steps.length;
   const progressRatio = totalSteps ? (activeStepIndex + 1) / totalSteps : 0;
   const uploadReady = Boolean(
-    assignedFinancialStatementsFile ??
+    !requiresFinancialPack ||
+      assignedFinancialStatementsFile ||
       (financialStatementsIndex !== null &&
         selectedFinancialFiles[financialStatementsIndex]),
   );
@@ -198,6 +227,12 @@ export default function ClientAccessGuidedFinishPage() {
 
   const ensureSubstanceFormExists = async () => {
     if (substanceFormQuery.data) return;
+
+    if (isGuernseyCertificateUnresolved) {
+      throw new Error(
+        "This return is still being prepared. LTS Tax must confirm whether it is Certificate 2 or Certificate 3 before guided finish can begin.",
+      );
+    }
 
     if (isGuernseyEsrLocked) {
       throw new Error(guernseyLockMessage);
@@ -311,6 +346,11 @@ export default function ClientAccessGuidedFinishPage() {
         className="rounded-[1.8rem] border bg-card px-6 py-6 shadow-xs"
       >
         <div className="space-y-5">
+          {isGuernseyCertificateUnresolved ? (
+            <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
+              LTS Tax is still confirming whether this filing is Certificate 2 or Certificate 3. You can upload documents in the workspace, but guided finish will stay unavailable until that confirmation is completed.
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
@@ -379,7 +419,12 @@ export default function ClientAccessGuidedFinishPage() {
           {resolvedActiveStep.kind === "upload" ? (
             <div className="border-t pt-4">
               <Button
-                disabled={isBusy || !uploadReady || isGuernseyEsrLocked}
+                disabled={
+                  isBusy ||
+                  !uploadReady ||
+                  isGuernseyEsrLocked ||
+                  isGuernseyCertificateUnresolved
+                }
                 onClick={() => {
                   void handleUploadFinancialStatements();
                 }}
@@ -410,14 +455,22 @@ export default function ClientAccessGuidedFinishPage() {
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
-                disabled={isBusy || isGuernseyEsrLocked}
+                disabled={
+                  isBusy ||
+                  isGuernseyEsrLocked ||
+                  isGuernseyCertificateUnresolved
+                }
                 onClick={() => {
                   const currentSection = visibleSections.find(
                     (section) => section.id === resolvedActiveStep.id,
                   );
 
                   if (!currentSection) {
-                    setWorkspaceMessage("Final review saved.");
+                    setWorkspaceMessage(
+                      requiresFinancialPack
+                        ? "Final review saved."
+                        : "Certificate 2 review saved.",
+                    );
                     return;
                   }
 

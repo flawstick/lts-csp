@@ -9,6 +9,7 @@ import {
   FolderOpen,
   UploadCloud,
 } from "lucide-react";
+import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
 
 import { api } from "@/trpc/react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -57,13 +58,38 @@ export default function ClientAccessOverviewPage() {
   const isGuernsey = returnRecord.jurisdictionCode === "GG";
   const isJerseyCompany =
     returnRecord.jurisdictionCode === "JE" && returnRecord.returnType === "company";
+  const certificateResolution = resolveGuernseyCertificateType({
+    metadata:
+      returnRecord.metadata && typeof returnRecord.metadata === "object"
+        ? (returnRecord.metadata as Record<string, unknown>)
+        : null,
+    savedCertificateType: null,
+  });
+  const isGuernseyCertificateUnresolved =
+    isGuernsey &&
+    returnRecord.returnType === "economic_substance" &&
+    certificateResolution.unresolved;
+  const isCertificateTwo =
+    certificateResolution.certificateType === "Certificate 2";
   const guidedFinishHref = isGuernsey
     ? `/client-access/${token}/guided-finish`
     : isJerseyCompany
       ? `/client-access/${token}/jersey-guided-finish`
       : null;
 
-  const checklist = isGuernsey
+  const checklist = isGuernseyCertificateUnresolved
+    ? [
+        "Upload the ESR or supporting documents in the workspace.",
+        "LTS Tax will confirm whether this filing is Certificate 2 or Certificate 3.",
+        "Guided finish will become available once that confirmation is complete.",
+      ]
+    : isCertificateTwo
+      ? [
+          "Open the workspace and review the reduced Certificate 2 form.",
+          "Upload supporting documents only if something exceptional needs review.",
+          "Use guided finish for a quick final review before submission.",
+        ]
+      : isGuernsey
     ? [
         "Upload the ESR, signed financial statements, and any supporting files.",
         "Run AI extraction to prefill the Guernsey economic substance form.",
@@ -99,7 +125,7 @@ export default function ClientAccessOverviewPage() {
               <ArrowRight className="size-4" />
             </Link>
           </Button>
-          {guidedFinishHref ? (
+          {guidedFinishHref && !isGuernseyCertificateUnresolved ? (
             <Button variant="outline" asChild>
               <Link href={guidedFinishHref}>
                 Open guided finish

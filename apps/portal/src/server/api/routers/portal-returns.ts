@@ -36,6 +36,16 @@ import {
   type SubstanceAutofillValues,
 } from "@repo/database/substance-autofill";
 import {
+  buildGuernseyCertificateTwoDefaults,
+  detectGuernseyCertificateTypeFromDocuments,
+  hasMeaningfulGuernseyFormData,
+  type GuernseyCertificateType,
+  type GuernseyCertificateTypeResolution,
+  resolveGuernseyCertificateType,
+  setGuernseyCertificateTypeMetadata,
+  validateGuernseySourceDocuments,
+} from "@repo/database/guernsey-filing";
+import {
   CIGA_BY_ACTIVITY,
   getMissingFields,
   relevantActivityEnum,
@@ -74,6 +84,7 @@ type ExtractionContextSource =
     }
   | null
   | undefined;
+type ValidationIssue = ReturnType<typeof validateGuernseySourceDocuments>[number];
 
 const ECONOMIC_CLASSIFICATION_CODE_PATTERN = /\b\d{1,3}(?:\.\d{1,3})+\b/;
 const ECONOMIC_CLASSIFICATION_CODE_CONTEXT_PATTERN =
@@ -350,6 +361,88 @@ function buildExistingExtractionContext(form: ExtractionContextSource) {
   return `Use this saved form context as prior context when the new files are ambiguous or incomplete:\n${lines.join("\n")}`;
 }
 
+function getTaxReturnMetadata(
+  metadata: unknown,
+): Record<string, unknown> | undefined {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return undefined;
+  }
+
+  return metadata as Record<string, unknown>;
+}
+
+export function getGuernseyCertificateResolution(input: {
+  taxReturn: {
+    metadata?: Record<string, unknown> | null;
+  };
+  form?: {
+    certificateType?: string | null;
+  } | null;
+}) {
+  return resolveGuernseyCertificateType({
+    metadata: input.taxReturn.metadata ?? undefined,
+    savedCertificateType: input.form?.certificateType ?? null,
+  });
+}
+
+async function persistGuernseyCertificateResolution(params: {
+  db: TRPCContext["db"];
+  taxReturnId: string;
+  metadata: Record<string, unknown> | undefined;
+  resolution: GuernseyCertificateTypeResolution;
+}) {
+  if (params.resolution.unresolved) {
+    return;
+  }
+
+  const nextMetadata = setGuernseyCertificateTypeMetadata(params.metadata, {
+    certificateType: params.resolution.certificateType,
+    source: params.resolution.source,
+    confidence: params.resolution.confidence,
+    overridden: params.resolution.overridden,
+  });
+
+  await params.db
+    .update(taxReturns)
+    .set({
+      metadata: nextMetadata,
+      updatedAt: new Date(),
+    })
+    .where(eq(taxReturns.id, params.taxReturnId));
+}
+
+function formatValidationIssues(issues: ValidationIssue[]) {
+  return issues.map((issue) => issue.message).join(" ");
+}
+
+function sanitizeConstituentEntityAnswer(input: {
+  existingValue?: "Yes" | "No" | null;
+  nextValue?: "Yes" | "No" | null;
+  textContexts: string[];
+}) {
+  if (input.nextValue !== "Yes") {
+    return input.nextValue ?? input.existingValue ?? undefined;
+  }
+
+  const combinedText = input.textContexts.join("\n").toLowerCase();
+  const explicitYes =
+    /constituent entity[^.\n]{0,120}\byes\b/.test(combinedText) ||
+    /\byes\b[^.\n]{0,120}constituent entity/.test(combinedText);
+  const explicitNo =
+    /constituent entity[^.\n]{0,120}\bno\b/.test(combinedText) ||
+    /\bno\b[^.\n]{0,120}constituent entity/.test(combinedText);
+
+  if (explicitNo && !explicitYes) {
+    return "No";
+  }
+
+  if (!explicitYes && input.existingValue === "No") {
+    return "No";
+  }
+
+  return explicitYes ? "Yes" : input.existingValue ?? undefined;
+}
+
 export async function findPreviousSubstanceAutofillSource(
   db: TRPCContext["db"],
   taxReturn: {
@@ -421,29 +514,58 @@ export function buildInitializedSubstanceFormValues(input: {
   taxYear: number;
   entityName: string;
   externalId?: string | null;
-  preparedByName: string;
   lastEditedBy?: string | null;
   sourceForm?: Partial<SubstanceAutofillValues> | null;
+  certificateResolution: GuernseyCertificateTypeResolution;
 }) {
-  const rawAutofillValues = pickSubstanceAutofillValues(input.sourceForm ?? null);
+  const shouldAutofillFromPreviousReturn =
+    !input.certificateResolution.unresolved &&
+    input.certificateResolution.certificateType === DEFAULT_CERTIFICATE_TYPE;
+  const rawAutofillValues = shouldAutofillFromPreviousReturn
+    ? pickSubstanceAutofillValues(input.sourceForm ?? null)
+    : {};
   const autofillValues = Object.fromEntries(
     Object.entries(rawAutofillValues).filter(([, value]) => value != null),
   ) as Partial<SubstanceFormData>;
+  const certificateType = input.certificateResolution.unresolved
+    ? undefined
+    : input.certificateResolution.certificateType;
+  const certificateTwoDefaults =
+    certificateType === "Certificate 2"
+      ? (buildGuernseyCertificateTwoDefaults(
+          input.taxYear,
+        ) as Partial<SubstanceFormData>)
+      : ({} as Partial<SubstanceFormData>);
   const values = {
     ...autofillValues,
+    ...certificateTwoDefaults,
     taxReturnId: input.taxReturnId,
     entityName: input.entityName,
     taxReferenceNumber: normalizeTaxReferenceNumber({
       externalId: input.externalId,
       taxYear: input.taxYear,
     }),
-    certificateType: DEFAULT_CERTIFICATE_TYPE,
-    preparedBy: input.preparedByName,
-    profitAllocation: autofillValues.profitAllocation ?? "Investment",
-    isGuernseyFiFatca: autofillValues.isGuernseyFiFatca ?? "No",
-    isGuernseyFiCrs: autofillValues.isGuernseyFiCrs ?? "No",
-    isRegisteredOnIgor: autofillValues.isRegisteredOnIgor ?? "No",
-    isConstituentEntity: "No" as const,
+    certificateType,
+    profitAllocation:
+      certificateType === DEFAULT_CERTIFICATE_TYPE
+        ? (autofillValues.profitAllocation ?? "Investment")
+        : undefined,
+    isGuernseyFiFatca:
+      certificateType === DEFAULT_CERTIFICATE_TYPE
+        ? (autofillValues.isGuernseyFiFatca ?? "No")
+        : certificateTwoDefaults.isGuernseyFiFatca,
+    isGuernseyFiCrs:
+      certificateType === DEFAULT_CERTIFICATE_TYPE
+        ? (autofillValues.isGuernseyFiCrs ?? "No")
+        : certificateTwoDefaults.isGuernseyFiCrs,
+    isRegisteredOnIgor:
+      certificateType === DEFAULT_CERTIFICATE_TYPE
+        ? (autofillValues.isRegisteredOnIgor ?? "No")
+        : certificateTwoDefaults.isRegisteredOnIgor,
+    isConstituentEntity:
+      certificateType === DEFAULT_CERTIFICATE_TYPE
+        ? ("No" as const)
+        : certificateTwoDefaults.isConstituentEntity,
     lastEditedBy: input.lastEditedBy ?? undefined,
   };
 
@@ -453,6 +575,97 @@ export function buildInitializedSubstanceFormValues(input: {
   };
 }
 
+async function setManualGuernseyCertificateType(params: {
+  db: TRPCContext["db"];
+  accountId: string;
+  taxReturn: {
+    id: string;
+    orgId: string;
+    jurisdictionId: string;
+    entityName: string;
+    taxYear: number;
+    externalId?: string | null;
+    metadata?: Record<string, unknown> | null;
+  };
+  existingForm:
+    | (typeof substanceForms.$inferSelect)
+    | null
+    | undefined;
+  certificateType: GuernseyCertificateType;
+  overwriteExisting: boolean;
+}) {
+  const metadata = setGuernseyCertificateTypeMetadata(
+    getTaxReturnMetadata(params.taxReturn.metadata),
+    {
+      certificateType: params.certificateType,
+      source: "manual_override",
+      confidence: 1,
+      overridden: true,
+    },
+  );
+
+  await params.db
+    .update(taxReturns)
+    .set({
+      metadata,
+      updatedAt: new Date(),
+    })
+    .where(eq(taxReturns.id, params.taxReturn.id));
+
+  const certificateResolution = resolveGuernseyCertificateType({
+    metadata,
+    savedCertificateType: params.existingForm?.certificateType ?? null,
+  });
+  const previousForm = await findPreviousSubstanceAutofillSource(
+    params.db,
+    params.taxReturn,
+  );
+  const nextValues = buildInitializedSubstanceFormValues({
+    taxReturnId: params.taxReturn.id,
+    taxYear: params.taxReturn.taxYear,
+    entityName: params.taxReturn.entityName,
+    externalId: params.taxReturn.externalId,
+    lastEditedBy: params.accountId,
+    sourceForm: previousForm,
+    certificateResolution,
+  });
+
+  if (!params.existingForm) {
+    const [created] = await params.db
+      .insert(substanceForms)
+      .values(nextValues)
+      .returning();
+
+    return created ?? null;
+  }
+
+  const isChangingType =
+    params.existingForm.certificateType !== params.certificateType;
+  if (
+    isChangingType &&
+    !params.overwriteExisting &&
+    hasMeaningfulGuernseyFormData(params.existingForm)
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "Changing the certificate type will replace the existing Guernsey form answers. Confirm again to overwrite the current form.",
+    });
+  }
+
+  const [updated] = await params.db
+    .update(substanceForms)
+    .set({
+      ...nextValues,
+      lastEditedAt: new Date(),
+      lastEditedBy: params.accountId,
+    })
+    .where(eq(substanceForms.taxReturnId, params.taxReturn.id))
+    .returning();
+
+  return updated ?? null;
+}
+
 const aiExtractionSchema = z.object({
   entityName: z.string().nullable(),
   entityType: z.enum(["Company", "Partnership"]).nullable(),
@@ -460,12 +673,6 @@ const aiExtractionSchema = z.object({
   accountingPeriodEnd: z.string().nullable(),
   isCollectiveInvestmentVehicle: z.enum(["Yes", "No"]).nullable(),
   companyNumber: z.string().nullable(),
-  taxReferenceNumber: z
-    .string()
-    .nullable()
-    .describe(
-      "Tax reference number - preserve the exact alphanumeric format, including any leading letters such as C",
-    ),
   registeredAddress: z.string().nullable(),
   principalPlaceOfBusiness: z.string().nullable(),
   isIncorporatedInGuernsey: z.enum(["Yes", "No"]).nullable(),
@@ -475,10 +682,6 @@ const aiExtractionSchema = z.object({
     .describe(
       'REQUIRED for 2025 returns — Company Activity Code dropdown. It usually looks like a dotted numeric code such as "10.5.4". Return only the dotted code.',
     ),
-  certificateType: z
-    .string()
-    .nullable()
-    .describe('Certificate type - always return exactly "Certificate 3"'),
   entityActivity: z
     .string()
     .nullable()
@@ -637,13 +840,9 @@ const aiExtractionSchema = z.object({
       }),
     )
     .nullable(),
-  preparedBy: z.string().nullable(),
-  preparedDate: z.string().nullable(),
   managerSignOff: z.string().nullable(),
   managerSignOffDate: z.string().nullable(),
   isConstituentEntity: z.enum(["Yes", "No"]).nullable(),
-  hasPostBalanceSheetEvent: z.enum(["Yes", "No"]).nullable(),
-  postBalanceSheetEventDetails: z.string().nullable(),
   hasC42Association: z.enum(["Yes", "No"]).nullable(),
   c42AssociatedCompanies: z.string().nullable(),
   contractInformation: z.string().nullable(),
@@ -914,6 +1113,8 @@ export async function extractSubstanceFormFromFilesInternal(input: {
     externalId?: string | null;
     status: string;
     returnType: string | null;
+    files?: Array<{ url?: string; name?: string }> | null;
+    metadata?: Record<string, unknown> | null;
     jurisdiction?: { code: string } | null;
   };
   actorAccountId?: string | null;
@@ -928,50 +1129,30 @@ export async function extractSubstanceFormFromFilesInternal(input: {
     });
   }
 
-  const org = await input.db.query.organisations.findFirst({
-    where: eq(organisations.id, input.orgId),
-  });
-  const preparedByName = org?.accountName ?? org?.name ?? "LTS Tax Limited";
-
   let form = await input.db.query.substanceForms.findFirst({
     where: eq(substanceForms.taxReturnId, input.taxReturnId),
   });
-
-  if (!form) {
-    const previousForm = await findPreviousSubstanceAutofillSource(
-      input.db,
-      input.returnRecord,
-    );
-    const [created] = await input.db
-      .insert(substanceForms)
-      .values(
-        buildInitializedSubstanceFormValues({
-          taxReturnId: input.taxReturnId,
-          taxYear: input.returnRecord.taxYear,
-          entityName: input.returnRecord.entityName,
-          externalId: input.returnRecord.externalId,
-          preparedByName,
-          lastEditedBy: input.actorAccountId ?? undefined,
-          sourceForm: previousForm,
-        }),
-      )
-      .returning();
-
-    form = created ?? undefined;
-  }
-
-  if (!form) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Failed to initialize the Guernsey substance form.",
-    });
-  }
 
   type FileContent = { type: "file"; data: string; mediaType: string };
   type TextContent = { type: "text"; text: string };
 
   const fileContents: FileContent[] = [];
   const textContents: TextContent[] = [];
+  const taxReturnFiles = Array.isArray(input.returnRecord.files)
+    ? input.returnRecord.files
+    : [];
+  const sourceFileNames = input.fileUrls.map((url) => {
+    const matchedFile = taxReturnFiles.find((file) => file?.url === url);
+    if (matchedFile && typeof matchedFile.name === "string") {
+      return matchedFile.name;
+    }
+
+    try {
+      return new URL(url).pathname.split("/").pop() ?? url;
+    } catch {
+      return url;
+    }
+  });
 
   const supportedFileTypes = [
     "application/pdf",
@@ -1078,6 +1259,125 @@ export async function extractSubstanceFormFromFilesInternal(input: {
     });
   }
 
+  const extractedTextContext = textContents.map((content) => content.text);
+  const metadataResolution = getGuernseyCertificateResolution({
+    taxReturn: input.returnRecord,
+    form,
+  });
+  const documentResolution = detectGuernseyCertificateTypeFromDocuments({
+    fileNames: sourceFileNames,
+    texts: extractedTextContext,
+  });
+  const certificateResolution = metadataResolution.unresolved
+    ? documentResolution
+    : metadataResolution;
+
+  const validationIssues = validateGuernseySourceDocuments({
+    entityName: input.returnRecord.entityName,
+    taxYear: input.returnRecord.taxYear,
+    accountingPeriodStart: form?.accountingPeriodStart,
+    accountingPeriodEnd: form?.accountingPeriodEnd,
+    fileNames: sourceFileNames,
+    texts: extractedTextContext,
+  });
+  const blockingValidationIssues = validationIssues.filter(
+    (issue) => issue.severity === "error",
+  );
+
+  if (blockingValidationIssues.length > 0) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: formatValidationIssues(blockingValidationIssues),
+    });
+  }
+
+  if (certificateResolution.unresolved) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "Certificate type could not be determined from the existing return metadata or the uploaded documents. Confirm whether this is Certificate 2 or Certificate 3 before initializing or extracting the form.",
+    });
+  }
+
+  await persistGuernseyCertificateResolution({
+    db: input.db,
+    taxReturnId: input.returnRecord.id,
+    metadata: getTaxReturnMetadata(input.returnRecord.metadata),
+    resolution: certificateResolution,
+  });
+
+  if (!form) {
+    const previousForm = await findPreviousSubstanceAutofillSource(
+      input.db,
+      input.returnRecord,
+    );
+    const [created] = await input.db
+      .insert(substanceForms)
+      .values(
+        buildInitializedSubstanceFormValues({
+          taxReturnId: input.taxReturnId,
+          taxYear: input.returnRecord.taxYear,
+          entityName: input.returnRecord.entityName,
+          externalId: input.returnRecord.externalId,
+          lastEditedBy: input.actorAccountId ?? undefined,
+          sourceForm: previousForm,
+          certificateResolution,
+        }),
+      )
+      .returning();
+
+    form = created ?? undefined;
+  }
+
+  if (!form) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Failed to initialize the Guernsey substance form.",
+    });
+  }
+
+  if (certificateResolution.certificateType === "Certificate 2") {
+    const certificateTwoDefaults = buildGuernseyCertificateTwoDefaults(
+      input.returnRecord.taxYear,
+    );
+    const merged = {
+      ...form,
+      ...certificateTwoDefaults,
+      certificateType: "Certificate 2" as const,
+      taxReferenceNumber: normalizeTaxReferenceNumber({
+        externalId: input.returnRecord.externalId,
+        taxYear: input.returnRecord.taxYear,
+      }),
+    } as Partial<SubstanceFormData>;
+    const missingFields = getMissingFields(merged);
+
+    const [updated] = await input.db
+      .update(substanceForms)
+      .set({
+        ...certificateTwoDefaults,
+        certificateType: "Certificate 2",
+        taxReferenceNumber: normalizeTaxReferenceNumber({
+          externalId: input.returnRecord.externalId,
+          taxYear: input.returnRecord.taxYear,
+        }),
+        missingFields,
+        isComplete: missingFields.length === 0,
+        aiExtractedAt: new Date(),
+        lastEditedAt: new Date(),
+        lastEditedBy: input.actorAccountId ?? undefined,
+      })
+      .where(eq(substanceForms.taxReturnId, input.taxReturnId))
+      .returning();
+
+    return {
+      form: updated ?? null,
+      extractedFields: Object.keys(certificateTwoDefaults),
+      warnings: validationIssues
+        .filter((issue) => issue.severity === "warning")
+        .map((issue) => issue.message),
+    };
+  }
+
   const gateway = createGateway({
     apiKey,
     baseURL: "https://ai-gateway.vercel.sh/v3/ai",
@@ -1091,7 +1391,7 @@ export async function extractSubstanceFormFromFilesInternal(input: {
     .join("\n\n");
   const existingContextText = buildExistingExtractionContext(form);
 
-  const prompt = `You are extracting data for a Guernsey Economic Substance Register form.
+  const prompt = `You are extracting data for a Guernsey Economic Substance Register form for Certificate 3 filings.
 
 Read all attached files and return values only when they are explicitly stated or clearly inferable.
 If a value is unknown, leave it empty.
@@ -1104,8 +1404,6 @@ Use these strict output rules:
 - Yes/No fields: "Yes" or "No"
 - Yes/No/N/A fields: "Yes", "No", or "N/A"
 - relevantActivity: pick exactly one allowed option from the enum.
-- certificateType: always return "${DEFAULT_CERTIFICATE_TYPE}".
-- taxReferenceNumber: preserve the exact source formatting. Do not strip leading letters and do not replace the letter "C" with the number "0".
 - If total profit is negative (a loss), return "0". The portal does not accept negative values.
 - If net book value is negative, return "0".
 - profitAllocation is REQUIRED — always pick "Investment" or "Business".
@@ -1167,11 +1465,9 @@ ${cigaOptionsText}
   const extractedData = stripNullishStructuredValue(
     result.object,
   ) as Partial<SubstanceFormData>;
-  const extractedTextContext = textContents.map((content) => content.text);
 
-  extractedData.certificateType = DEFAULT_CERTIFICATE_TYPE;
+  extractedData.certificateType = certificateResolution.certificateType;
   extractedData.taxReferenceNumber = normalizeTaxReferenceNumber({
-    taxReferenceNumber: extractedData.taxReferenceNumber,
     externalId: input.returnRecord.externalId,
     taxYear: input.returnRecord.taxYear,
   });
@@ -1200,8 +1496,18 @@ ${cigaOptionsText}
     }
   }
 
-  extractedData.preparedBy ??= preparedByName;
-  extractedData.isConstituentEntity ??= "No";
+  extractedData.isConstituentEntity = sanitizeConstituentEntityAnswer({
+    existingValue:
+      form.isConstituentEntity === "Yes" || form.isConstituentEntity === "No"
+        ? form.isConstituentEntity
+        : null,
+    nextValue:
+      extractedData.isConstituentEntity === "Yes" ||
+      extractedData.isConstituentEntity === "No"
+        ? extractedData.isConstituentEntity
+        : null,
+    textContexts: extractedTextContext,
+  }) ?? "No";
 
   extractedData.economicClassificationCode =
     normalizeEconomicClassificationCode(
@@ -1259,6 +1565,9 @@ ${cigaOptionsText}
   return {
     form: updated ?? null,
     extractedFields,
+    warnings: validationIssues
+      .filter((issue) => issue.severity === "warning")
+      .map((issue) => issue.message),
   };
 }
 
@@ -1809,16 +2118,22 @@ export const portalReturnsRouter = createTRPCRouter({
       if (existing) {
         return existing;
       }
-
-      // Get org for account name (used as preparedBy default)
-      const org = await ctx.db.query.organisations.findFirst({
-        where: eq(organisations.id, input.orgId),
-      });
-      const preparedByName = org?.accountName ?? org?.name ?? "LTS Tax Limited";
       const previousForm = await findPreviousSubstanceAutofillSource(
         ctx.db,
         returnRecord,
       );
+      const certificateResolution = getGuernseyCertificateResolution({
+        taxReturn: returnRecord,
+        form: existing,
+      });
+
+      if (certificateResolution.unresolved) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "Certificate type is unresolved for this Guernsey return. Confirm Certificate 2 or Certificate 3 before initializing the form.",
+        });
+      }
 
       const [created] = await ctx.db
         .insert(substanceForms)
@@ -1828,14 +2143,60 @@ export const portalReturnsRouter = createTRPCRouter({
             taxYear: returnRecord.taxYear,
             entityName: returnRecord.entityName,
             externalId: returnRecord.externalId,
-            preparedByName,
             lastEditedBy: account.id,
             sourceForm: previousForm,
+            certificateResolution,
           }),
         )
         .returning();
 
       return created ?? null;
+    }),
+
+  setSubstanceFormCertificateType: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        taxReturnId: z.string().uuid(),
+        certificateType: z.enum(["Certificate 2", "Certificate 3"]),
+        overwriteExisting: z.boolean().optional().default(false),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertActiveMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
+      });
+
+      if (!returnRecord) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
+      }
+
+      assertGuernseyPortalReturnUnlocked(returnRecord);
+
+      const existing = await ctx.db.query.substanceForms.findFirst({
+        where: eq(substanceForms.taxReturnId, input.taxReturnId),
+      });
+
+      return setManualGuernseyCertificateType({
+        db: ctx.db,
+        accountId: account.id,
+        taxReturn: returnRecord,
+        existingForm: existing,
+        certificateType: input.certificateType,
+        overwriteExisting: input.overwriteExisting,
+      });
     }),
 
   updateSubstanceForm: protectedProcedure

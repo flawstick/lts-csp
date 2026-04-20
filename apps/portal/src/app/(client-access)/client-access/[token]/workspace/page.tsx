@@ -27,6 +27,7 @@ import {
   getMissingFields,
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
+import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
 import { uploadPortalFile } from "@/lib/portal-upload";
 import { api } from "@/trpc/react";
 import { ReturnWorkspacePageSkeleton } from "@/components/return-workspace-skeleton";
@@ -147,6 +148,9 @@ function DocumentsPanel({
   isUploadingFiles,
   isExtractPending,
   showAiExtraction,
+  requireFinancialStatements,
+  uploadDescription,
+  uploadedFilesDescription,
   onUploadFiles,
   onRunAiExtraction,
   onAssignFinancialStatements,
@@ -160,6 +164,9 @@ function DocumentsPanel({
   isUploadingFiles: boolean;
   isExtractPending: boolean;
   showAiExtraction: boolean;
+  requireFinancialStatements: boolean;
+  uploadDescription?: string;
+  uploadedFilesDescription?: string;
   onUploadFiles: (files: File[]) => void;
   onRunAiExtraction: () => void;
   onAssignFinancialStatements: (fileUrl: string) => void;
@@ -194,7 +201,8 @@ function DocumentsPanel({
               Upload and organise return files
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Add signed accounts, ESR documents, and supporting material for this return.
+              {uploadDescription ??
+                "Add signed accounts, ESR documents, and supporting material for this return."}
             </p>
           </div>
 
@@ -277,9 +285,11 @@ function DocumentsPanel({
           </label>
 
           <div className="grid gap-2 text-xs text-muted-foreground">
-            <div className="rounded-xl border border-border bg-background px-3 py-3">
-              Pick one PDF as the financial statements before filing.
-            </div>
+            {requireFinancialStatements ? (
+              <div className="rounded-xl border border-border bg-background px-3 py-3">
+                Pick one PDF as the financial statements before filing.
+              </div>
+            ) : null}
             {showAiExtraction ? (
               <Button
                 variant="outline"
@@ -315,6 +325,11 @@ function DocumentsPanel({
             <h2 className="mt-2 text-lg font-semibold tracking-tight">
               Current documents on this return
             </h2>
+            {uploadedFilesDescription ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {uploadedFilesDescription}
+              </p>
+            ) : null}
           </div>
           <span className="client-access-chip">{selectedFiles.length} file(s)</span>
         </div>
@@ -501,6 +516,18 @@ export default function ClientAccessWorkspacePage() {
     setDraftForm(sanitizeFormData(substanceFormQuery.data));
   }, [substanceFormQuery.data, selectedReturn?.id]);
 
+  const certificateResolution = useMemo(
+    () =>
+      resolveGuernseyCertificateType({
+        metadata:
+          selectedReturn?.metadata && typeof selectedReturn.metadata === "object"
+            ? (selectedReturn.metadata as Record<string, unknown>)
+            : null,
+        savedCertificateType: substanceFormQuery.data?.certificateType ?? null,
+      }),
+    [selectedReturn?.metadata, substanceFormQuery.data?.certificateType],
+  );
+
   const selectedFiles = asVaultFiles(selectedReturn?.files);
   const selectedStatus = selectedReturn
     ? normalizeStatus(selectedReturn.status)
@@ -509,6 +536,13 @@ export default function ClientAccessWorkspacePage() {
   const isJerseyCompany =
     selectedReturn?.jurisdictionCode === "JE" &&
     selectedReturn.returnType === "company";
+  const isGuernseyCertificateUnresolved =
+    isGuernsey &&
+    selectedReturn?.returnType === "economic_substance" &&
+    certificateResolution.unresolved;
+  const isCertificateTwo =
+    certificateResolution.certificateType === "Certificate 2";
+  const requiresFinancialStatements = isGuernsey && !isCertificateTwo;
   const isGuernseyEsrLocked = Boolean(
     selectedReturn?.jurisdictionCode === "GG" &&
       selectedReturn?.returnType === "economic_substance" &&
@@ -580,6 +614,12 @@ export default function ClientAccessWorkspacePage() {
   const ensureSubstanceFormExists = async () => {
     if (!selectedReturn || substanceFormQuery.data) {
       return;
+    }
+
+    if (isGuernseyCertificateUnresolved) {
+      throw new Error(
+        "This return is still being prepared. LTS Tax must confirm whether it is Certificate 2 or Certificate 3 before the form can be initialized.",
+      );
     }
 
     if (isGuernseyEsrLocked) {
@@ -662,6 +702,7 @@ export default function ClientAccessWorkspacePage() {
   const handleRunAiExtraction = async () => {
     if (
       !selectedReturn ||
+      isCertificateTwo ||
       isGuernseyEsrLocked ||
       aiExtractionLockRef.current ||
       extractSubstanceFormMutation.isPending
@@ -848,7 +889,11 @@ export default function ClientAccessWorkspacePage() {
                 <StatusBadge status={selectedReturn.status} />
               </div>
               <p className="text-sm text-muted-foreground">
-                Use this workspace to manage documents and complete the return form.
+                {isGuernseyCertificateUnresolved
+                  ? "Upload supporting documents while LTS Tax confirms the correct Guernsey certificate type."
+                  : isCertificateTwo
+                    ? "Certificate 2 uses a reduced Guernsey flow with fixed defaults and no accounts upload requirement."
+                    : "Use this workspace to manage documents and complete the return form."}
               </p>
             </div>
 
@@ -918,7 +963,18 @@ export default function ClientAccessWorkspacePage() {
           readOnlyMessage={guernseyLockMessage}
           isUploadingFiles={isUploadingFiles}
           isExtractPending={isAiExtractionRunning || extractSubstanceFormMutation.isPending}
-          showAiExtraction={isGuernsey}
+          showAiExtraction={isGuernsey && !isCertificateTwo}
+          requireFinancialStatements={Boolean(requiresFinancialStatements)}
+          uploadDescription={
+            isCertificateTwo
+              ? "Upload supporting documents if needed. Certificate 2 filings do not require financial statements upload."
+              : undefined
+          }
+          uploadedFilesDescription={
+            isCertificateTwo
+              ? "Review supporting return documents. AI extraction is not required for Certificate 2."
+              : undefined
+          }
           onUploadFiles={handleUploadFiles}
           onRunAiExtraction={handleRunAiExtraction}
           onAssignFinancialStatements={handleAssignFinancialStatements}
@@ -926,10 +982,18 @@ export default function ClientAccessWorkspacePage() {
           onRemoveDocument={handleRemoveDocument}
         />
       ) : isGuernsey ? (
-        !substanceFormQuery.data ? (
+        isGuernseyCertificateUnresolved ? (
+          <section className="client-access-card text-sm text-amber-900 dark:text-amber-200">
+            LTS Tax is still confirming whether this filing is Certificate 2 or Certificate 3. You can upload documents from the Documents tab while that confirmation is completed.
+          </section>
+        ) : !substanceFormQuery.data ? (
           <EmptyFormState
             title="Create the Guernsey substance form"
-            description="Initialize the form first, then complete sections here or use the guided finish flow."
+            description={
+              isCertificateTwo
+                ? "Initialize the reduced Certificate 2 form here, then review the prefilled answers."
+                : "Initialize the form first, then complete sections here or use the guided finish flow."
+            }
             onInitialize={() => {
               void ensureSubstanceFormExists()
                 .then(() => showMessage("Substance form initialized."))
@@ -953,7 +1017,9 @@ export default function ClientAccessWorkspacePage() {
                     Return form
                   </h2>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Work section by section, then use guided finish for the final pass.
+                    {isCertificateTwo
+                      ? "Review the reduced Certificate 2 defaults and only adjust anything exceptional."
+                      : "Work section by section, then use guided finish for the final pass."}
                   </p>
                 </div>
 
@@ -1024,6 +1090,11 @@ export default function ClientAccessWorkspacePage() {
               {isGuernseyEsrLocked ? (
                 <div className="mb-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800">
                   {guernseyLockMessage}
+                </div>
+              ) : null}
+              {isCertificateTwo ? (
+                <div className="mb-4 rounded-2xl border border-blue-500/25 bg-blue-500/10 px-4 py-3 text-sm text-blue-900 dark:text-blue-200">
+                  Certificate 2 uses fixed defaults: dormant activity, no economic substance, no FATCA/CRS/IGOR, no CbCR, and no accounts upload requirement.
                 </div>
               ) : null}
 

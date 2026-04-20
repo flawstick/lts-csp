@@ -1,6 +1,8 @@
 import {
   FIELD_LABELS,
   REQUIRED_FIELDS,
+  isGuernseyCertificateTwo,
+  isGuernseySubstanceInScope,
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
 import type { FORM_SECTIONS } from "@/lib/schemas/substance-form";
@@ -148,11 +150,24 @@ export function isFieldRequired(
   field: string,
   data: Partial<SubstanceFormData>,
 ): boolean {
+  if (
+    isGuernseyCertificateTwo(data) &&
+    (field === "relevantActivity" ||
+      field === "economicClassificationCode" ||
+      field === "profitAllocation")
+  ) {
+    return false;
+  }
+
   if (REQUIRED_FIELDS.includes(field as keyof SubstanceFormData)) {
     return true;
   }
 
   if (field === "partnershipName" && data.entityType === "Partnership") {
+    return true;
+  }
+
+  if (field === "totalBoardMeetings" && isGuernseySubstanceInScope(data)) {
     return true;
   }
 

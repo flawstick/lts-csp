@@ -97,11 +97,9 @@ The Guernsey Economic Substance Register (ESR) return has 14 sections:
 - **Registered Address**, **Principal Place of Business**
 - **Is Incorporated in Guernsey?** — Yes/No
 - **Company Activity Code** — Economic classification code (required)
-- **Certificate Type** — Certificate 1, 2, or 3
+- **Certificate Type** — Certificate 2 or 3
 - **Entity Activity** — From Directors Report
 - **Is Guernsey Tax Resident?** — Yes/No
-- **Has Registered with the GRS?** — Yes/No
-- **Beneficial Member Categories** — Tick-box categories
 
 ### Section 3: Partnership Information (if Partnership)
 - **Partnership Name** (required), **Partnership Number**
@@ -118,7 +116,7 @@ The Guernsey Economic Substance Register (ESR) return has 14 sections:
 - **Reason Not Registered with IGOR** — if not registered
 
 ### Section 6: Country by Country Reporting (CbCR)
-- **Is Constituent Entity?** — Yes/No (required)
+- **Is the entity a constituent entity?** — Yes/No (required)
 - **MNE Reporting Entity Name/Country**, **MNE Accounting Period Start/End**
 - **In-scope of Pillar 2 Global Minimum Tax?** — Yes/No
 - **UPE Name/Location**, **Expected Constituent Entity Next Period?**
@@ -155,8 +153,6 @@ The Guernsey Economic Substance Register (ESR) return has 14 sections:
 
 ### Section 13: Finalising the Return
 - **Additional Information** — free text
-- **Has Post Balance Sheet Event?** — Yes/No, with details
-- **Prepared By** (required), **Prepared Date** (required)
 - **Manager Sign Off**, **Manager Sign Off Date**
 
 ### CIGA Options by Relevant Activity

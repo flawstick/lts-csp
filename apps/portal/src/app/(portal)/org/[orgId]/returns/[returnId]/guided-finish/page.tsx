@@ -17,6 +17,10 @@ import {
   getMissingFields,
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
+import {
+  hasMeaningfulGuernseyFormData,
+  resolveGuernseyCertificateType,
+} from "@repo/database/guernsey-filing";
 import { api } from "@/trpc/react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -104,6 +108,17 @@ export default function GuidedFinishPage() {
       },
     },
   );
+  const setCertificateTypeMutation =
+    api.portalReturns.setSubstanceFormCertificateType.useMutation({
+      onSuccess: () => {
+        if (!selectedReturn) return;
+        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        void utils.portalReturns.getSubstanceForm.invalidate({
+          orgId,
+          taxReturnId: selectedReturn.id,
+        });
+      },
+    });
 
   const substanceFormQuery = api.portalReturns.getSubstanceForm.useQuery(
     {
@@ -117,13 +132,28 @@ export default function GuidedFinishPage() {
 
   useEffect(() => {
     const sanitized = sanitizeFormData(substanceFormQuery.data);
-    // Auto-fill preparedBy from org accounting name if empty
-    if (!sanitized.preparedBy) {
-      const accountingName = orgQuery.data?.accountName ?? orgQuery.data?.name;
-      if (accountingName) sanitized.preparedBy = accountingName;
-    }
     setDraftForm(sanitized);
-  }, [substanceFormQuery.data, selectedReturn?.id, orgQuery.data]);
+  }, [substanceFormQuery.data, selectedReturn?.id]);
+
+  const certificateResolution = useMemo(
+    () =>
+      resolveGuernseyCertificateType({
+        metadata:
+          selectedReturn?.metadata && typeof selectedReturn.metadata === "object"
+            ? (selectedReturn.metadata as Record<string, unknown>)
+            : null,
+        savedCertificateType: substanceFormQuery.data?.certificateType ?? null,
+      }),
+    [selectedReturn?.metadata, substanceFormQuery.data?.certificateType],
+  );
+  const isGuernseyCertificateUnresolved = Boolean(
+    selectedReturn?.jurisdictionCode === "GG" &&
+      selectedReturn?.returnType === "economic_substance" &&
+      certificateResolution.unresolved,
+  );
+  const isCertificateTwo =
+    certificateResolution.certificateType === "Certificate 2";
+  const requiresFinancialPack = !isCertificateTwo;
 
   const visibleSections = useMemo(
     () =>
@@ -145,7 +175,13 @@ export default function GuidedFinishPage() {
   const assignedFinancialStatementsFile =
     selectedFiles.find((file) => file.role === "financial_statements") ?? null;
 
-  const steps = useMemo(() => buildSteps(visibleSections), [visibleSections]);
+  const steps = useMemo(
+    () =>
+      buildSteps(visibleSections, {
+        includeFinancialPack: requiresFinancialPack,
+      }),
+    [requiresFinancialPack, visibleSections],
+  );
 
   const initialStepId = useMemo(() => {
     const firstMissingSection = visibleSections.find((section) =>
@@ -153,9 +189,16 @@ export default function GuidedFinishPage() {
     );
 
     if (firstMissingSection) return firstMissingSection.id;
-    if (!assignedFinancialStatementsFile) return FINAL_STEP_ID;
+    if (requiresFinancialPack && !assignedFinancialStatementsFile) {
+      return FINAL_STEP_ID;
+    }
     return visibleSections[0]?.id ?? FINAL_STEP_ID;
-  }, [assignedFinancialStatementsFile, draftMissingFields, visibleSections]);
+  }, [
+    assignedFinancialStatementsFile,
+    draftMissingFields,
+    requiresFinancialPack,
+    visibleSections,
+  ]);
 
   useEffect(() => {
     if (!activeStepId) setActiveStepId(initialStepId);
@@ -195,7 +238,8 @@ export default function GuidedFinishPage() {
   const totalSteps = steps.length;
   const progressRatio = totalSteps ? (activeStepIndex + 1) / totalSteps : 0;
   const uploadReady = Boolean(
-    assignedFinancialStatementsFile ??
+    !requiresFinancialPack ||
+      assignedFinancialStatementsFile ||
       (financialStatementsIndex !== null &&
         selectedFinancialFiles[financialStatementsIndex]),
   );
@@ -235,6 +279,11 @@ export default function GuidedFinishPage() {
 
   const ensureSubstanceFormExists = async () => {
     if (!selectedReturn || substanceFormQuery.data) return;
+    if (isGuernseyCertificateUnresolved) {
+      throw new Error(
+        "Confirm Certificate 2 or Certificate 3 before initializing the Guernsey form.",
+      );
+    }
     if (isGuernseyEsrLocked) {
       throw new Error(guernseyLockMessage);
     }
@@ -300,13 +349,9 @@ export default function GuidedFinishPage() {
       }
       showMessage("Saving guided return...");
       const finalData = { ...draftForm };
-      if (!finalData.preparedBy) {
-        const accountingName = orgQuery.data?.accountName ?? orgQuery.data?.name;
-        if (accountingName) finalData.preparedBy = accountingName;
-      }
       await persistFormData(finalData);
 
-      if (selectedFinancialFiles.length && selectedReturn) {
+      if (requiresFinancialPack && selectedFinancialFiles.length && selectedReturn) {
         const assignedIndex =
           financialStatementsIndex !== null &&
           isPdfLike(selectedFinancialFiles[financialStatementsIndex] ?? null)
@@ -445,6 +490,57 @@ export default function GuidedFinishPage() {
               {guernseyLockMessage}
             </div>
           ) : null}
+          {isGuernseyCertificateUnresolved ? (
+            <div className="border-b border-amber-500/20 bg-amber-500/10 px-6 py-4">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-1.5">
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                    Confirm the Guernsey certificate type first
+                  </p>
+                  <p className="max-w-3xl text-sm text-amber-800 dark:text-amber-300">
+                    This return needs a staff confirmation of Certificate 2 or Certificate 3 before guided finish can begin.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(["Certificate 2", "Certificate 3"] as const).map((certificateType) => (
+                    <Button
+                      key={certificateType}
+                      variant={certificateType === "Certificate 2" ? "outline" : "default"}
+                      disabled={setCertificateTypeMutation.isPending}
+                      onClick={async () => {
+                        const overwriteExisting =
+                          substanceFormQuery.data != null &&
+                          hasMeaningfulGuernseyFormData(
+                            substanceFormQuery.data as Partial<SubstanceFormData>,
+                          );
+
+                        if (
+                          overwriteExisting &&
+                          !window.confirm(
+                            `Switching this return to ${certificateType} will overwrite the current Guernsey form defaults. Continue?`,
+                          )
+                        ) {
+                          return;
+                        }
+
+                        await setCertificateTypeMutation.mutateAsync({
+                          orgId,
+                          taxReturnId: selectedReturn.id,
+                          certificateType,
+                          overwriteExisting,
+                        });
+                      }}
+                    >
+                      {setCertificateTypeMutation.isPending ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : null}
+                      Use {certificateType}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
           <GuidedStepContent
             contentRef={contentRef}
             resolvedActiveStep={resolvedActiveStep}
@@ -534,6 +630,7 @@ export default function GuidedFinishPage() {
                     }}
                     disabled={
                       draftMissingFields.length > 0 ||
+                      isGuernseyCertificateUnresolved ||
                       isBusy ||
                       isGuernseyEsrLocked
                     }
@@ -545,7 +642,9 @@ export default function GuidedFinishPage() {
                       <Check className="size-3.5" />
                     )}
                     {selectedFinancialFiles.length
-                      ? "Save & upload financials"
+                      ? requiresFinancialPack
+                        ? "Save & upload financials"
+                        : "Save & finish"
                       : "Save & finish"}
                   </Button>
                 )}

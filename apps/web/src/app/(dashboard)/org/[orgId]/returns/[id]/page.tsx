@@ -36,6 +36,10 @@ import {
   FORM_SECTIONS,
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
+import {
+  hasMeaningfulGuernseyFormData,
+  resolveGuernseyCertificateType,
+} from "@repo/database/guernsey-filing";
 import { JerseyCompanyReturnWorkspace } from "@/components/jersey-company-return-workspace";
 import { SubstanceFormEditor } from "@/components/substance-form-editor";
 import { DirectionalTransition } from "@/components/view-transition";
@@ -137,6 +141,13 @@ export default function ReturnDetailPage() {
   });
 
   const createTaskMutation = api.taxReturn.createTask.useMutation();
+  const setCertificateTypeMutation =
+    api.substanceForm.setCertificateType.useMutation({
+      onSuccess: () => {
+        utils.taxReturn.getById.invalidate({ id });
+        utils.substanceForm.getByTaxReturnId.invalidate({ taxReturnId: id });
+      },
+    });
 
   // Auto-extract when files are uploaded
   const runExtraction = useCallback(
@@ -145,11 +156,6 @@ export default function ReturnDetailPage() {
 
       setIsExtracting(true);
       try {
-        // Ensure form exists first
-        if (!substanceFormData) {
-          await createFormMutation.mutateAsync({ taxReturnId: taxReturn.id });
-        }
-
         await extractMutation.mutateAsync({
           taxReturnId: taxReturn.id,
           fileUrls,
@@ -234,8 +240,25 @@ export default function ReturnDetailPage() {
 
   const handleCreateForm = useCallback(async () => {
     if (!taxReturn) return;
+    const certificateResolution = resolveGuernseyCertificateType({
+      metadata:
+        taxReturn.metadata && typeof taxReturn.metadata === "object"
+          ? (taxReturn.metadata as Record<string, unknown>)
+          : null,
+      savedCertificateType: substanceFormData?.certificateType ?? null,
+    });
+    if (
+      taxReturn.jurisdiction?.code === "GG" &&
+      taxReturn.returnType === "economic_substance" &&
+      certificateResolution.unresolved
+    ) {
+      alert(
+        "Confirm whether this Guernsey return is Certificate 2 or Certificate 3 before initializing the form.",
+      );
+      return;
+    }
     await createFormMutation.mutateAsync({ taxReturnId: taxReturn.id });
-  }, [taxReturn, createFormMutation]);
+  }, [taxReturn, substanceFormData?.certificateType, createFormMutation]);
 
   const handleSaveSection = useCallback(
     async (data: Partial<SubstanceFormData>) => {
@@ -307,6 +330,26 @@ export default function ReturnDetailPage() {
     files.find((file) => file.role === "financial_statements") ?? null;
   const substanceForm = substanceFormData;
   const missingFields = (substanceForm?.missingFields as string[]) ?? [];
+  const certificateResolution = resolveGuernseyCertificateType({
+    metadata:
+      taxReturn.metadata && typeof taxReturn.metadata === "object"
+        ? (taxReturn.metadata as Record<string, unknown>)
+        : null,
+    savedCertificateType: substanceForm?.certificateType ?? null,
+  });
+  const isGuernseyCertificateUnresolved =
+    taxReturn.jurisdiction?.code === "GG" &&
+    taxReturn.returnType === "economic_substance" &&
+    certificateResolution.unresolved;
+  const isCertificateTwo =
+    certificateResolution.certificateType === "Certificate 2";
+  const visibleSections = FORM_SECTIONS.filter((section) => {
+    if (!("conditional" in section) || !section.conditional) {
+      return true;
+    }
+
+    return section.conditional((substanceForm ?? {}) as Partial<SubstanceFormData>);
+  });
 
   const statusConfig = {
     pending: { bg: "bg-amber-500/10", text: "text-amber-600" },
@@ -419,7 +462,9 @@ export default function ReturnDetailPage() {
                       setIsCreatingTask(false);
                     }
                   }}
-                  disabled={!substanceForm || isCreatingTask}
+                  disabled={
+                    !substanceForm || isCreatingTask || isGuernseyCertificateUnresolved
+                  }
                 >
                   {isCreatingTask ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -441,6 +486,58 @@ export default function ReturnDetailPage() {
               </span>
             </div>
           )}
+
+          {isGuernseyCertificateUnresolved ? (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                    Confirm the Guernsey certificate type before initializing the return
+                  </h2>
+                  <p className="mt-1 max-w-2xl text-sm text-amber-800 dark:text-amber-300">
+                    This return has not been confidently identified as Certificate 2 or Certificate 3.
+                    Pick the filing mode here before creating the Guernsey form or starting browser automation.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(["Certificate 2", "Certificate 3"] as const).map((certificateType) => (
+                    <Button
+                      key={certificateType}
+                      variant={certificateType === "Certificate 2" ? "outline" : "default"}
+                      disabled={setCertificateTypeMutation.isPending}
+                      onClick={async () => {
+                        const overwriteExisting =
+                          substanceForm != null &&
+                          hasMeaningfulGuernseyFormData(
+                            substanceForm as Partial<SubstanceFormData>,
+                          );
+
+                        if (
+                          overwriteExisting &&
+                          !window.confirm(
+                            `Switching this return to ${certificateType} will overwrite the current Guernsey form defaults. Continue?`,
+                          )
+                        ) {
+                          return;
+                        }
+
+                        await setCertificateTypeMutation.mutateAsync({
+                          taxReturnId: taxReturn.id,
+                          certificateType,
+                          overwriteExisting,
+                        });
+                      }}
+                    >
+                      {setCertificateTypeMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : null}
+                      Use {certificateType}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {/* Main Content Tabs */}
           <Tabs
@@ -546,7 +643,9 @@ export default function ReturnDetailPage() {
                           setIsCreatingTask(false);
                         }
                       }}
-                      disabled={!substanceForm || isCreatingTask}
+                      disabled={
+                        !substanceForm || isCreatingTask || isGuernseyCertificateUnresolved
+                      }
                     >
                       {isCreatingTask ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -739,13 +838,13 @@ export default function ReturnDetailPage() {
                       ))}
                     </div>
                   )}
-                  {files.length > 0 && (
+                  {files.length > 0 && !isCertificateTwo && (
                     <div className="bg-muted/20 flex justify-end border-t p-4">
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={handleManualExtract}
-                        disabled={isExtracting}
+                        disabled={isExtracting || isCertificateTwo}
                       >
                         {isExtracting ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -791,23 +890,39 @@ export default function ReturnDetailPage() {
               <div className="space-y-6">
                 {!substanceForm ? (
                   <div className="bg-card rounded-lg border p-12 text-center">
-                    <div className="bg-muted/50 mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full">
-                      <Building2 className="text-muted-foreground/50 h-6 w-6" />
-                    </div>
-                    <h3 className="mb-1 font-medium">Form Not Initialized</h3>
-                    <p className="text-muted-foreground mb-6 text-sm">
-                      Create a substance form to start tracking data for this
-                      return.
-                    </p>
-                    <Button
-                      onClick={handleCreateForm}
-                      disabled={createFormMutation.isPending}
-                    >
-                      {createFormMutation.isPending && (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      )}
-                      Initialize Form
-                    </Button>
+                    {isGuernseyCertificateUnresolved ? (
+                      <>
+                        <div className="bg-muted/50 mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full">
+                          <AlertCircle className="text-muted-foreground/50 h-6 w-6" />
+                        </div>
+                        <h3 className="mb-1 font-medium">
+                          Certificate type confirmation required
+                        </h3>
+                        <p className="text-muted-foreground mb-6 text-sm">
+                          Confirm whether this is Certificate 2 or Certificate 3 above before initializing the form.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="bg-muted/50 mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full">
+                          <Building2 className="text-muted-foreground/50 h-6 w-6" />
+                        </div>
+                        <h3 className="mb-1 font-medium">Form Not Initialized</h3>
+                        <p className="text-muted-foreground mb-6 text-sm">
+                          Create a substance form to start tracking data for this
+                          return.
+                        </p>
+                        <Button
+                          onClick={handleCreateForm}
+                          disabled={createFormMutation.isPending}
+                        >
+                          {createFormMutation.isPending && (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          )}
+                          Initialize Form
+                        </Button>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <>
@@ -873,7 +988,7 @@ export default function ReturnDetailPage() {
 
                     {/* Sections Grid */}
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                      {FORM_SECTIONS.map((section) => {
+                      {visibleSections.map((section) => {
                         const filledFields = section.fields.filter((f) => {
                           const val =
                             substanceForm[f as keyof typeof substanceForm];

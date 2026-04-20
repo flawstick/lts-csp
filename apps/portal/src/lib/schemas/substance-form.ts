@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  GUERNSEY_CONSTITUENT_ENTITY_LABEL,
+  isGuernseySubstanceInScope as sharedIsGuernseySubstanceInScope,
+} from "@repo/database/guernsey-filing";
 
 // ============================================================================
 // ENUMS - Based on actual Guernsey form dropdown options
@@ -250,6 +254,27 @@ export const substanceFormSchema = z.object({
 
 export type SubstanceFormData = z.infer<typeof substanceFormSchema>;
 
+export function isGuernseyCertificateTwo(
+  data: Partial<SubstanceFormData> | null | undefined,
+) {
+  return data?.certificateType === "Certificate 2";
+}
+
+export function isGuernseyCertificateThree(
+  data: Partial<SubstanceFormData> | null | undefined,
+) {
+  return data?.certificateType === "Certificate 3";
+}
+
+export function isGuernseySubstanceInScope(
+  data: Partial<SubstanceFormData> | null | undefined,
+) {
+  return sharedIsGuernseySubstanceInScope({
+    certificateType: data?.certificateType,
+    relevantActivity: data?.relevantActivity,
+  });
+}
+
 // ============================================================================
 // REQUIRED FIELDS FOR COMPLETION
 // ============================================================================
@@ -263,9 +288,6 @@ export const REQUIRED_FIELDS: (keyof SubstanceFormData)[] = [
   "profitAllocation",
   "isConstituentEntity",
   "relevantActivity",
-  "totalBoardMeetings",
-  "preparedBy",
-  "preparedDate",
 ];
 
 // ============================================================================
@@ -274,12 +296,18 @@ export const REQUIRED_FIELDS: (keyof SubstanceFormData)[] = [
 
 export function getMissingFields(data: Partial<SubstanceFormData>): string[] {
   const missing: string[] = [];
-  const hasRelevantActivity =
-    data.relevantActivity !== undefined &&
-    data.relevantActivity !== null &&
-    data.relevantActivity !== "None of the above";
+  const inScope = isGuernseySubstanceInScope(data);
 
   for (const field of REQUIRED_FIELDS) {
+    if (
+      (field === "relevantActivity" ||
+        field === "economicClassificationCode" ||
+        field === "profitAllocation") &&
+      isGuernseyCertificateTwo(data)
+    ) {
+      continue;
+    }
+
     const value = data[field];
     if (value === undefined || value === null || value === "") {
       missing.push(field);
@@ -291,8 +319,12 @@ export function getMissingFields(data: Partial<SubstanceFormData>): string[] {
     if (!data.partnershipName) missing.push("partnershipName");
   }
 
-  // Only require substance-related fields when entity has a relevant activity
-  if (hasRelevantActivity) {
+  if (inScope && !data.totalBoardMeetings && data.totalBoardMeetings !== 0) {
+    missing.push("totalBoardMeetings");
+  }
+
+  // Only require substance-related fields when entity is in scope
+  if (inScope) {
     if (data.hasCigaOutsourcing === "Yes" && !data.outsourcingDetails) {
       missing.push("outsourcingDetails");
     }
@@ -408,13 +440,11 @@ export const FIELD_LABELS: Record<string, string> = {
   boardMeetings: "Board Meetings",
 
   // Declaration
-  preparedBy: "Prepared By",
-  preparedDate: "Prepared Date",
   managerSignOff: "Manager Sign Off",
   managerSignOffDate: "Manager Sign Off Date",
 
   // Country by Country Reporting
-  isConstituentEntity: "Is Constituent Entity (CbCR)?",
+  isConstituentEntity: `${GUERNSEY_CONSTITUENT_ENTITY_LABEL} (CbCR)?`,
   mneReportingEntityName: "MNE Reporting Entity Name",
   mneReportingEntityCountry: "MNE Reporting Entity Country",
   mneAccountingPeriodStart: "MNE Accounting Period Start",
@@ -425,8 +455,6 @@ export const FIELD_LABELS: Record<string, string> = {
   expectConstituentEntityNextPeriod: "Expected Constituent Entity Next Period?",
 
   // Additional Information
-  hasPostBalanceSheetEvent: "Has Post Balance Sheet Event?",
-  postBalanceSheetEventDetails: "Post Balance Sheet Event Details",
   hasC42Association: "Has C42 Application?",
   c42SubmissionDate: "C42 Application Submission Date",
   c42AssociatedCompanies: "C42 Associated Companies",
@@ -455,13 +483,12 @@ export const FORM_SECTIONS = [
   {
     id: "companyInfo",
     title: "Company Information",
-    description: "Company activity code, tax residency, and GRS registration",
+    description:
+      "Company activity code, tax residency, and entity activity details",
     fields: [
       "economicClassificationCode",
       "isGuernseyTaxResident",
-      "hasRegisteredWithGrs",
-      "taxReferenceNumber",
-      "beneficialMemberCategories",
+      "entityActivity",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
       data.entityType === "Company",
@@ -473,7 +500,6 @@ export const FORM_SECTIONS = [
     fields: [
       "partnershipName",
       "partnershipNumber",
-      "hasRegisteredWithGrs",
       "isSolelyGuernseyPartners",
       "partnershipActivitiesWhollyInGuernsey",
       "partnershipPoeMOutsideGuernsey",
@@ -493,6 +519,8 @@ export const FORM_SECTIONS = [
       "totalProfit",
       "profitAllocation",
     ],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      !isGuernseyCertificateTwo(data),
   },
   {
     id: "financialInstitutions",
@@ -545,6 +573,8 @@ export const FORM_SECTIONS = [
       "cigaPerformed",
       "cigaDetails",
     ],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      isGuernseyCertificateThree(data),
   },
   {
     id: "substanceRequirements",
@@ -565,8 +595,7 @@ export const FORM_SECTIONS = [
       "adequacyPhysicalPresenceDetails",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity !== undefined &&
-      data.relevantActivity !== "None of the above",
+      isGuernseySubstanceInScope(data),
   },
   {
     id: "economicSubstance2",
@@ -577,9 +606,9 @@ export const FORM_SECTIONS = [
       "secondCigaCheckboxes",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
+      isGuernseyCertificateThree(data) &&
       data.hasMultipleRelevantActivities === "Yes" &&
-      data.relevantActivity !== undefined &&
-      data.relevantActivity !== "None of the above",
+      isGuernseySubstanceInScope(data),
   },
   {
     id: "intellectualProperty",
@@ -593,8 +622,9 @@ export const FORM_SECTIONS = [
       "ipIncomeType",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity === "Intellectual Property Holding Company" ||
-      data.hasIntellectualPropertyHolding === "Yes",
+      isGuernseyCertificateThree(data) &&
+      (data.relevantActivity === "Intellectual Property Holding Company" ||
+        data.hasIntellectualPropertyHolding === "Yes"),
   },
 
   // ── Ownership & Governance ───────────────────────────────────────────
@@ -609,8 +639,7 @@ export const FORM_SECTIONS = [
       "ultimateBeneficialOwners",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>
-      data.relevantActivity !== undefined &&
-      data.relevantActivity !== "None of the above",
+      isGuernseySubstanceInScope(data),
   },
   {
     id: "directedManaged",
@@ -629,19 +658,17 @@ export const FORM_SECTIONS = [
       "directors",
       "boardMeetings",
     ],
+    conditional: (data: Partial<SubstanceFormData>) =>
+      isGuernseyCertificateThree(data),
   },
 
   // ── Finalising ───────────────────────────────────────────────────────
   {
     id: "finalising",
     title: "Finalising the Return",
-    description: "Additional information, declaration, and sign-off",
+    description: "Additional information and internal sign-off",
     fields: [
       "additionalInformation",
-      "hasPostBalanceSheetEvent",
-      "postBalanceSheetEventDetails",
-      "preparedBy",
-      "preparedDate",
       "managerSignOff",
       "managerSignOffDate",
     ],

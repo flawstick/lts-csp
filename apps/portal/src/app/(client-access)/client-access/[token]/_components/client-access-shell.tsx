@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Building2, FileText, FolderOpen, Mail, Phone, Sparkles } from "lucide-react";
+import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
 
 import { api } from "@/trpc/react";
 import { cn } from "@/lib/utils";
@@ -12,7 +13,19 @@ function buildTabs(
   token: string,
   jurisdictionCode: string | null,
   returnType: string | null,
+  metadata: Record<string, unknown> | null,
 ) {
+  const certificateResolution = resolveGuernseyCertificateType({
+    metadata,
+    savedCertificateType: null,
+  });
+  const allowGuidedFinish =
+    !(
+      jurisdictionCode === "GG" &&
+      returnType === "economic_substance" &&
+      certificateResolution.unresolved
+    );
+
   const tabs = [
     {
       href: `/client-access/${token}`,
@@ -26,7 +39,7 @@ function buildTabs(
     },
   ];
 
-  if (jurisdictionCode === "GG") {
+  if (jurisdictionCode === "GG" && allowGuidedFinish) {
     tabs.push({
       href: `/client-access/${token}/guided-finish`,
       label: "Guided finish",
@@ -104,6 +117,9 @@ export function ClientAccessShell({
     token,
     returnRecord.jurisdictionCode,
     returnRecord.returnType,
+    returnRecord.metadata && typeof returnRecord.metadata === "object"
+      ? (returnRecord.metadata as Record<string, unknown>)
+      : null,
   );
 
   return (

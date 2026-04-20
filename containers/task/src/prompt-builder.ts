@@ -3,7 +3,11 @@
  * Generates comprehensive instructions from substance form data for Guernsey tax return filing
  */
 
-import type { SubstanceForm, TaxReturn } from "@repo/database";
+import {
+  isGuernseySubstanceInScope,
+  type SubstanceForm,
+  type TaxReturn,
+} from "@repo/database";
 
 interface Employee {
   name?: string;
@@ -62,9 +66,10 @@ interface PromptBuilderOptions {
   submissionMode?: "prepare_only" | "submit_and_capture_pdf";
   financialStatementsFile?: SessionInputFile | null;
   financialStatementsUrl?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
 }
 
-const DEFAULT_CERTIFICATE_TYPE = "Certificate 3";
 const INFERABLE_FIELDS = new Set([
   "entityActivity",
   "hasIntellectualPropertyHolding",
@@ -107,10 +112,21 @@ export function buildSubstanceFormPrompt(
     submissionMode = "prepare_only",
     financialStatementsFile,
     financialStatementsUrl,
+    contactEmail,
+    contactPhone,
   } = options;
 
   const sections: string[] = [];
   const caseViewUrl = getCaseViewUrl(returnLink);
+  const certificateType =
+    substanceForm.certificateType === "Certificate 2"
+      ? "Certificate 2"
+      : "Certificate 3";
+  const isCertificateTwo = certificateType === "Certificate 2";
+  const isInScope = isGuernseySubstanceInScope({
+    certificateType,
+    relevantActivity: substanceForm.relevantActivity ?? null,
+  });
   const missingFields = Array.isArray(substanceForm.missingFields)
     ? substanceForm.missingFields
     : [];
@@ -158,7 +174,7 @@ If prompted for CSP or secret credentials:
 
 ## IMPORTANT INSTRUCTIONS
 
-**CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "${DEFAULT_CERTIFICATE_TYPE}" (this is always the correct option).
+**CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "${certificateType}".
 
 **TURNOVER FIELD:** The "Turnover / Gross Income" field in Section 6 may be labeled simply as "Turnover" on the portal. Look for a field asking for gross income or turnover amount in the Adequacy Assessment area.
 
@@ -200,7 +216,18 @@ If a material field is missing from the saved form and documents, STOP and repor
 - Do **NOT** infer **Relevant Activity** if it is missing. That is a material field and should pause if the saved form and documents do not provide it clearly.
 - Prefer pausing over guessing for any field that could materially change the filing.
 ${
-  financialStatementsFile && financialStatementsUrl
+  contactEmail || contactPhone
+    ? `
+
+## FILING CONTACT INFORMATION
+- If the portal asks for a contact email, use: ${contactEmail ?? "[MISSING - STOP if required]"}
+- If the portal asks for a contact telephone number, use: ${contactPhone ?? "[MISSING - STOP if required]"}
+- Do not invent other contact details. If the portal requires more than email/phone and it is not already visible on the portal, STOP and report **REQUIRES_ATTENTION**.
+`
+    : ""
+}
+${
+  !isCertificateTwo && financialStatementsFile && financialStatementsUrl
     ? `
 
 ## FINANCIAL STATEMENTS PDF — CRITICAL: DO NOT SKIP THIS
@@ -224,11 +251,19 @@ fetch('${financialStatementsUrl}').then(r=>r.blob()).then(blob=>{const f=new Fil
 9. Never leave the Accounts upload step while the control still says **"No file chosen"**. If the portal somehow advances without a file attached, go back and upload it before continuing.
 10. If neither **upload_file** nor **evaluate** works, STOP and report "REQUIRES_ATTENTION: Financial statements upload failed".
 `
-    : `
+    : !isCertificateTwo
+      ? `
 
 ## FINANCIAL STATEMENTS PDF
 - No financial statements PDF was provided.
 - If the portal requires a financial statements upload, STOP and report "REQUIRES_ATTENTION: No financial statements PDF available for upload".
+`
+      : `
+
+## CERTIFICATE 2 FILES
+- This is a Certificate 2 filing.
+- Do NOT look for or upload financial statements.
+- Do NOT attempt the Certificate 3 accounts upload flow.
 `
 }
 ${
@@ -247,57 +282,46 @@ ${
   sections.push(buildBackgroundSection(substanceForm));
 
   // Section 2: Company Information
-  sections.push(buildCompanyInfoSection(substanceForm));
+  sections.push(buildCompanyInfoSection(substanceForm, certificateType));
 
   // Section 3: Partnership Information (if applicable)
   if (substanceForm.entityType === "Partnership") {
     sections.push(buildPartnershipSection(substanceForm));
   }
 
-  // Section 4: Financial Statements
-  sections.push(buildFinancialStatementsSection(substanceForm));
-
-  // Section 5: Financial Institutions
-  sections.push(buildFinancialInstitutionsSection(substanceForm));
-
-  // Section 6: Relevant Activities
-  sections.push(buildRelevantActivitiesSection(substanceForm));
-
-  const hasRelevantActivity =
-    substanceForm.relevantActivity &&
-    substanceForm.relevantActivity !== "None of the above";
-
-  if (hasRelevantActivity) {
-    // Sections 7-10 only apply when entity has a relevant activity
-    // Section 7: CIGA
-    sections.push(buildCigaSection(substanceForm));
-
-    // Section 8: Employees
-    sections.push(buildEmployeesSection(substanceForm));
-
-    // Section 9: Outsourcing
-    sections.push(buildOutsourcingSection(substanceForm));
-
-    // Section 10: Beneficial Ownership
-    sections.push(buildBeneficialOwnershipSection(substanceForm));
+  if (isCertificateTwo) {
+    sections.push(buildCertificateTwoSection(substanceForm));
   } else {
-    sections.push(`
+    // Section 4: Financial Statements
+    sections.push(buildFinancialStatementsSection(substanceForm));
+
+    // Section 5: Financial Institutions
+    sections.push(buildFinancialInstitutionsSection(substanceForm));
+
+    // Section 6: Relevant Activities
+    sections.push(buildRelevantActivitiesSection(substanceForm));
+
+    if (isInScope) {
+      sections.push(buildCigaSection(substanceForm));
+      sections.push(buildEmployeesSection(substanceForm));
+      sections.push(buildOutsourcingSection(substanceForm));
+      sections.push(buildBeneficialOwnershipSection(substanceForm));
+    } else {
+      sections.push(`
 ## SECTIONS 7-10: SKIPPED
-The entity has no relevant activity — Adequacy Assessment, CIGA, Employees (FTE), Outsourcing, and Beneficial Ownership sections are not applicable. Leave these sections blank on the portal.
+The entity is not in scope of economic substance for this filing. Leave CIGA, Employees (FTE), Outsourcing, and Beneficial Ownership sections blank unless the portal explicitly requires them.
 `);
+    }
+
+    // Section 11: Direction and Management
+    sections.push(buildDirectionManagementSection(substanceForm, isInScope));
+
+    // Section 13: Country by Country Reporting
+    sections.push(buildCbcrSection(substanceForm));
+
+    // Section 14: Additional Information
+    sections.push(buildAdditionalInfoSection(substanceForm));
   }
-
-  // Section 11: Direction and Management
-  sections.push(buildDirectionManagementSection(substanceForm));
-
-  // Section 12: Declaration
-  sections.push(buildDeclarationSection(substanceForm));
-
-  // Section 13: Country by Country Reporting
-  sections.push(buildCbcrSection(substanceForm));
-
-  // Section 14: Additional Information
-  sections.push(buildAdditionalInfoSection(substanceForm));
 
   if (inferableMissingFields.length > 0) {
     sections.push(`
@@ -353,21 +377,23 @@ ${field("Is Collective Investment Vehicle", form.isCollectiveInvestmentVehicle)}
 `;
 }
 
-function buildCompanyInfoSection(form: SubstanceForm): string {
+function buildCompanyInfoSection(
+  form: SubstanceForm,
+  certificateType: string,
+): string {
   return `
 ## SECTION 2: COMPANY INFORMATION
 ${field("Company Number", form.companyNumber)}
-${field("Tax Reference Number", form.taxReferenceNumber)}
 ${field("Registered Address", form.registeredAddress)}
 ${field("Principal Place of Business", form.principalPlaceOfBusiness)}
 ${field("Is Incorporated in Guernsey", form.isIncorporatedInGuernsey)}
 ${field("Economic Classification Code", form.economicClassificationCode)}
-${field("Certificate Type", DEFAULT_CERTIFICATE_TYPE)}
+${field("Certificate Type", certificateType)}
 ${field("Entity Activity", form.entityActivity)}
 
 **IMPORTANT:**
 - Economic Classification Code is REQUIRED for 2025 returns — this is a dropdown field on the portal, select the matching option.
-- Certificate Type is fixed for this filing flow: always use ${DEFAULT_CERTIFICATE_TYPE}.
+- Certificate Type is fixed for this filing flow: always use ${certificateType}.
 - Entity Activity describes the nature of the entity's business (e.g., "Property Holdings"). Preferred to have it filled even if the entity has no relevant activity.
 - If **Is Incorporated in Guernsey** or similar fields already have a portal default selected and you have no explicit contrary information, leave the portal default unchanged instead of guessing.
 `;
@@ -406,6 +432,27 @@ ${field("Profit Before Tax Allocation", form.profitAllocation)}
 - Accounts Preparer Name/Qualification is the ACCOUNTANT who prepared the financial statements, NOT LTS Tax.
 - **FINANCIAL STATEMENTS UPLOAD:** When the portal asks if financial statements are available online, select **"No"** and then use **upload_file** on the visible file input with the preloaded Browser Use workspace PDF described above. If the control still shows **"No file chosen"**, use **evaluate** as fallback. Do NOT click Save/Continue until a filename is visible.
 - If you reach **reviewAndSubmit/summary** before verifying this upload, go back into the filing using a **Change/Edit** link and return to the Financial Statements / Accounts section before continuing.
+`;
+}
+
+function buildCertificateTwoSection(form: SubstanceForm): string {
+  return `
+## CERTIFICATE 2 FILING RULES
+This is a **Certificate 2** return. Apply the Certificate 2 flow, not the Certificate 3 flow.
+
+${field("Company Activity", form.entityActivity || "Dormant")}
+${field("Relevant Activity", form.relevantActivity || "None of the above")}
+${field("FATCA: Is Guernsey Financial Institution", form.isGuernseyFiFatca || "No")}
+${field("CRS: Is Guernsey Financial Institution", form.isGuernseyFiCrs || "No")}
+${field("Registered on IGOR", form.isRegisteredOnIgor || "No")}
+${field("Is the entity a constituent entity", form.isConstituentEntity || "No")}
+
+**IMPORTANT:**
+- Company activity must be **Dormant**.
+- Economic substance questions should follow the out-of-scope / "No" path.
+- FATCA, CRS, IGOR, and CbCR should all be **No** unless the portal already shows the same fixed default.
+- Do **NOT** upload accounts or financial statements for Certificate 2.
+- Do **NOT** enter Certificate 3-only information such as accounts preparer details, adequacy assessment amounts, CIGA, employees, or outsourcing.
 `;
 }
 
@@ -524,7 +571,10 @@ ${ubos.length > 0 ? ubos.map(formatUbo).join("\n") : "None listed"}
 `;
 }
 
-function buildDirectionManagementSection(form: SubstanceForm): string {
+function buildDirectionManagementSection(
+  form: SubstanceForm,
+  isInScope: boolean,
+): string {
   const directors = (form.directors as Director[]) || [];
   const meetings = (form.boardMeetings as BoardMeeting[]) || [];
 
@@ -550,7 +600,7 @@ function buildDirectionManagementSection(form: SubstanceForm): string {
   return `
 ## SECTION 11: DIRECTED AND MANAGED IN GUERNSEY
 ${field("All Board Meetings in Guernsey", form.allBoardMeetingsInGuernsey)}
-${field("Total Board Meetings", form.totalBoardMeetings?.toString())}
+${isInScope ? field("Total Board Meetings", form.totalBoardMeetings?.toString()) : ""}
 ${field("Board Meetings in Guernsey", form.boardMeetingsInGuernsey?.toString())}
 ${field("Adequate Meeting Frequency", form.adequateMeetingFrequency)}
 ${field("Enough Directors Present", form.enoughDirectorsPresent)}
@@ -567,20 +617,10 @@ ${meetingList}
 `;
 }
 
-function buildDeclarationSection(form: SubstanceForm): string {
-  return `
-## SECTION 12: DECLARATION
-${field("Prepared By", form.preparedBy || "LTS Tax Limited")}
-${field("Prepared Date", form.preparedDate)}
-${field("Manager Sign Off", form.managerSignOff)}
-${field("Manager Sign Off Date", form.managerSignOffDate)}
-`;
-}
-
 function buildCbcrSection(form: SubstanceForm): string {
   return `
 ## SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)
-${field("Is Constituent Entity", form.isConstituentEntity || "No")}
+${field("Is the entity a constituent entity", form.isConstituentEntity || "No")}
 
 **IMPORTANT:** This is a REQUIRED question for 2025 returns. Default is "No".
 `;
@@ -589,11 +629,11 @@ ${field("Is Constituent Entity", form.isConstituentEntity || "No")}
 function buildAdditionalInfoSection(form: SubstanceForm): string {
   return `
 ## SECTION 14: ADDITIONAL INFORMATION
-${field("Has Post Balance Sheet Event", form.hasPostBalanceSheetEvent)}
-${field("Post Balance Sheet Event Details", form.postBalanceSheetEventDetails)}
 ${field("Has C42 Association", form.hasC42Association)}
 ${field("C42 Associated Companies", form.c42AssociatedCompanies)}
 ${field("Contract Information (CSP)", form.contractInformation)}
+${field("Manager Sign Off", form.managerSignOff)}
+${field("Manager Sign Off Date", form.managerSignOffDate)}
 `;
 }
 

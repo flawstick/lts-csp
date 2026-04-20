@@ -20,6 +20,7 @@ import {
   taxReturnFileCategories,
   taxReturnFileRoles,
 } from "@repo/database";
+import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
 import { asc, desc, sql, eq, and, lt, inArray, or } from "drizzle-orm";
 import {
   CloudWatchLogsClient,
@@ -76,6 +77,21 @@ function isActiveBrowserJobStatus(status: string) {
     status === "running" ||
     status === "paused"
   );
+}
+
+function getGuernseyCertificateResolutionForReturn(input: {
+  metadata?: unknown;
+  substanceForm?: {
+    certificateType?: string | null;
+  } | null;
+}) {
+  return resolveGuernseyCertificateType({
+    metadata:
+      input.metadata && typeof input.metadata === "object"
+        ? (input.metadata as Record<string, unknown>)
+        : null,
+    savedCertificateType: input.substanceForm?.certificateType ?? null,
+  });
 }
 
 function getTaskDisplayStatus(
@@ -1522,20 +1538,6 @@ export const taxReturnRouter = createTRPCRouter({
         })
         .returning();
 
-      // Create Guernsey substance form for the tax return if it doesn't exist
-      if (
-        taxReturn.returnType === "economic_substance" &&
-        !taxReturn.substanceForm
-      ) {
-        await ctx.db.insert(substanceForms).values({
-          taxReturnId: input.taxReturnId,
-          entityName: taxReturn.entityName,
-          taxReferenceNumber: taxReturn.externalId ?? undefined,
-          accountingPeriodStart: `${taxReturn.taxYear}-01-01`,
-          accountingPeriodEnd: `${taxReturn.taxYear}-12-31`,
-        });
-      }
-
       if (
         taxReturn.jurisdiction?.code === "JE" &&
         taxReturn.returnType === "company" &&
@@ -1604,6 +1606,24 @@ export const taxReturnRouter = createTRPCRouter({
           warning:
             "Jersey browser automation has not been implemented yet. Use the Jersey form pages to prepare the filing.",
         };
+      }
+
+      if (
+        taxReturn.jurisdiction?.code === "GG" &&
+        taxReturn.returnType === "economic_substance"
+      ) {
+        const certificateResolution = getGuernseyCertificateResolutionForReturn({
+          metadata: taxReturn.metadata,
+          substanceForm: taxReturn.substanceForm,
+        });
+
+        if (certificateResolution.unresolved) {
+          return {
+            canStart: false,
+            warning:
+              "Certificate type is unresolved for this Guernsey return. Confirm Certificate 2 or Certificate 3 on the return page before starting automation.",
+          };
+        }
       }
 
       const form = await ctx.db.query.substanceForms.findFirst({
@@ -1744,6 +1764,24 @@ export const taxReturnRouter = createTRPCRouter({
         throw new Error(
           "Jersey browser automation is not implemented yet. Use the Jersey return form workflow instead.",
         );
+      }
+
+      if (
+        task.taxReturn.jurisdiction?.code === "GG" &&
+        task.taxReturn.returnType === "economic_substance"
+      ) {
+        const certificateResolution = getGuernseyCertificateResolutionForReturn({
+          metadata: task.taxReturn.metadata,
+          substanceForm: task.taxReturn.substanceForm,
+        });
+
+        if (certificateResolution.unresolved) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "Certificate type is unresolved for this Guernsey return. Confirm Certificate 2 or Certificate 3 on the return page before starting automation.",
+          });
+        }
       }
 
       const normalizedJobs = await Promise.all(

@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import { gotScraping } from "got-scraping";
+import { setGuernseyCertificateTypeMetadata } from "@repo/database/guernsey-filing";
 import { CookieJar } from "tough-cookie";
 import { authenticate } from "./auth";
 import type { SyncedTaxReturn, SyncLogger } from "./types";
@@ -92,6 +93,7 @@ function parseGuernseyReturns(html: string): SyncedTaxReturn[] {
       .text()
       .replace(/\s+/g, " ")
       .trim();
+    const rowText = currentRow.text().replace(/\s+/g, " ").trim();
     const clientLink = currentRow
       .find(".views-field-taxReferenceOwnerName a")
       .attr("href");
@@ -109,6 +111,13 @@ function parseGuernseyReturns(html: string): SyncedTaxReturn[] {
     }
 
     const taxYear = Number.parseInt(yearText, 10) || new Date().getFullYear();
+    const certificateTypeMatch = rowText.match(/\bcertificate\s*(2|3)\b/i);
+    const certificateType =
+      certificateTypeMatch?.[1] === "2"
+        ? "Certificate 2"
+        : certificateTypeMatch?.[1] === "3"
+          ? "Certificate 3"
+          : null;
 
     returns.push({
       externalId: `${taxReferenceNumber}-${taxYear}`,
@@ -119,10 +128,25 @@ function parseGuernseyReturns(html: string): SyncedTaxReturn[] {
       link: caseLink ? `https://my.gov.gg${caseLink}` : "",
       pdfUrl: `https://my.gov.gg/revenue/pdf/${taxReferenceNumber}/${taxYear}/instructions.pdf`,
       metadata: {
-        source: "Guernsey Tax Portal",
-        clientProfileUrl: clientLink || null,
-        rawStatus: statusText,
-        taxReferenceNumber,
+        ...setGuernseyCertificateTypeMetadata(
+          {
+            source: "Guernsey Tax Portal",
+            clientProfileUrl: clientLink || null,
+            rawStatus: statusText,
+            taxReferenceNumber,
+          },
+          certificateType
+            ? {
+                certificateType,
+                source: "synced_metadata",
+                confidence: 0.99,
+              }
+            : {
+                certificateType: null,
+                source: null,
+                confidence: null,
+              },
+        ),
       },
     });
   });
