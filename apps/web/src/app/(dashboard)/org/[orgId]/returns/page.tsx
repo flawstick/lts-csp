@@ -67,11 +67,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { SyncJobsDialog } from "@/components/sync-jobs-dialog"
 import { DirectionalTransition } from "@/components/view-transition"
 import { useNavigateWithTransition } from "@/lib/navigate-with-transition"
+import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing"
 
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | "dismissed" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
 type TaxYearFilter = "all" | `${number}`
 type ReadinessFilter = "all" | "ready" | "missing" | "needs_form"
+type CertificateFilter = "all" | "Certificate 2" | "Certificate 3" | "unresolved"
 
 type TaxReturnRow = {
   id: string
@@ -81,9 +83,44 @@ type TaxReturnRow = {
   returnType: string | null
   externalId: string | null
   link: string | null
+  metadata?: unknown
+  substanceCertificateType?: string | null
   isSubstanceComplete: boolean | null
   missingSubstanceFieldCount: number | null
   jurisdiction: { code: string } | null
+}
+
+function matchesCertificateFilter(
+  row: Pick<
+    TaxReturnRow,
+    "metadata" | "substanceCertificateType" | "returnType" | "jurisdiction"
+  >,
+  certificateFilter: CertificateFilter,
+) {
+  if (certificateFilter === "all") {
+    return true
+  }
+
+  if (
+    row.jurisdiction?.code !== "GG" ||
+    row.returnType !== "economic_substance"
+  ) {
+    return false
+  }
+
+  const resolution = resolveGuernseyCertificateType({
+    metadata:
+      row.metadata && typeof row.metadata === "object"
+        ? (row.metadata as Record<string, unknown>)
+        : null,
+    savedCertificateType: row.substanceCertificateType ?? null,
+  })
+
+  if (certificateFilter === "unresolved") {
+    return resolution.unresolved
+  }
+
+  return resolution.certificateType === certificateFilter
 }
 
 const statusBadgeStyles: Record<string, string> = {
@@ -288,6 +325,7 @@ export default function ReturnsPage() {
 
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(initialStatus ?? undefined)
   const [jurisdictionFilter, setJurisdictionFilter] = React.useState<JurisdictionFilter>("all")
+  const [certificateFilter, setCertificateFilter] = React.useState<CertificateFilter>("all")
   const [taxYearFilter, setTaxYearFilter] = React.useState<TaxYearFilter>(
     `${defaultTaxYear}` as TaxYearFilter,
   )
@@ -318,7 +356,7 @@ export default function ReturnsPage() {
   React.useEffect(() => {
     setPagination((prev) => ({ ...prev, pageIndex: 0 }))
     setRowSelection({})
-  }, [jurisdictionFilter, statusFilter, taxYearFilter, readinessFilter])
+  }, [jurisdictionFilter, statusFilter, certificateFilter, taxYearFilter, readinessFilter])
 
   React.useEffect(() => {
     setSyncJobsDialogOpen(syncJobsDialogRequested)
@@ -335,6 +373,8 @@ export default function ReturnsPage() {
         jurisdictionFilter === "all" ? undefined : jurisdictionFilter,
       taxYear: taxYearFilter === "all" ? undefined : Number(taxYearFilter),
       status: statusFilter,
+      certificateType:
+        certificateFilter === "all" ? undefined : certificateFilter,
       search: debouncedSearch || undefined,
     },
     {
@@ -442,12 +482,13 @@ export default function ReturnsPage() {
     const returns = (data?.returns ?? []) as TaxReturnRow[]
     if (readinessFilter === "all") return returns
     return returns.filter((r) => {
+      if (!matchesCertificateFilter(r, certificateFilter)) return false
       if (readinessFilter === "ready") return r.isSubstanceComplete === true
       if (readinessFilter === "missing") return (r.missingSubstanceFieldCount ?? 0) > 0 && !r.isSubstanceComplete
       if (readinessFilter === "needs_form") return !r.isSubstanceComplete && (r.missingSubstanceFieldCount ?? 0) === 0
       return true
     })
-  }, [data?.returns, readinessFilter])
+  }, [certificateFilter, data?.returns, readinessFilter])
 
   const table = useReactTable({
     data: filteredReturns,
@@ -589,6 +630,41 @@ export default function ReturnsPage() {
                         {label}
                       </DropdownMenuCheckboxItem>
                     ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </Tooltip>
+                <Tooltip>
+                  <DropdownMenu>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="relative size-8">
+                          <IconShieldCheck className="h-4 w-4" />
+                          {certificateFilter !== "all" && (
+                            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Certificate Type</TooltipContent>
+                    <DropdownMenuContent align="start" className="w-48">
+                      <DropdownMenuLabel>Certificate Type</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {([
+                        ["all", "All certificates"],
+                        ["Certificate 2", "Certificate 2"],
+                        ["Certificate 3", "Certificate 3"],
+                        ["unresolved", "Unresolved"],
+                      ] as const).map(([value, label]) => (
+                        <DropdownMenuCheckboxItem
+                          key={value}
+                          checked={certificateFilter === value}
+                          onCheckedChange={() =>
+                            setCertificateFilter(value as CertificateFilter)
+                          }
+                        >
+                          {label}
+                        </DropdownMenuCheckboxItem>
+                      ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </Tooltip>

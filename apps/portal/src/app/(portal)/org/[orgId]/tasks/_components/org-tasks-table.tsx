@@ -12,8 +12,10 @@ import {
   PAGE_SIZE,
   classifyTaskKind,
   fileCount,
+  matchesCertificateFilter,
   normalizeStatus,
   toTimestamp,
+  type CertificateFilter,
   type SortDirection,
   type SortKey,
   type StatusFilter,
@@ -32,6 +34,8 @@ export function OrgTasksTable({ orgId }: Props) {
   const [query, setQuery] = useState("");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [certificateFilter, setCertificateFilter] =
+    useState<CertificateFilter>("all");
   const [jurisdictionFilter, setJurisdictionFilter] = useState("all");
   const [taxYearFilter, setTaxYearFilter] = useState<TaxYearFilter>(
     defaultTaxYear,
@@ -132,6 +136,10 @@ export function OrgTasksTable({ orgId }: Props) {
           return false;
         }
 
+        if (!matchesCertificateFilter(row, certificateFilter)) {
+          return false;
+        }
+
         if (!term) {
           return true;
         }
@@ -171,6 +179,7 @@ export function OrgTasksTable({ orgId }: Props) {
       });
   }, [
     deferredQuery,
+    certificateFilter,
     jurisdictionFilter,
     sortDirection,
     sortKey,
@@ -205,6 +214,7 @@ export function OrgTasksTable({ orgId }: Props) {
     query.trim().length > 0 ||
     taskFilter !== "all" ||
     statusFilter !== "all" ||
+    certificateFilter !== "all" ||
     jurisdictionFilter !== "all" ||
     taxYearFilter !== "all";
 
@@ -258,6 +268,8 @@ export function OrgTasksTable({ orgId }: Props) {
         onTaskFilterChange={setTaskFilter}
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
+        certificateFilter={certificateFilter}
+        onCertificateFilterChange={setCertificateFilter}
         jurisdictionFilter={jurisdictionFilter}
         onJurisdictionFilterChange={setJurisdictionFilter}
         taxYearFilter={taxYearFilter}
@@ -272,6 +284,7 @@ export function OrgTasksTable({ orgId }: Props) {
           setQuery("");
           setTaskFilter("all");
           setStatusFilter("all");
+          setCertificateFilter("all");
           setJurisdictionFilter("all");
           setTaxYearFilter(defaultTaxYear);
         }}

@@ -653,10 +653,18 @@ async function setManualGuernseyCertificateType(params: {
     });
   }
 
+  const currentFormValues = substanceFormSchema
+    .partial()
+    .parse(params.existingForm);
+  const mergedValues = {
+    ...currentFormValues,
+    ...nextValues,
+  };
+
   const [updated] = await params.db
     .update(substanceForms)
     .set({
-      ...nextValues,
+      ...mergedValues,
       lastEditedAt: new Date(),
       lastEditedBy: params.accountId,
     })
@@ -1968,6 +1976,7 @@ export const portalReturnsRouter = createTRPCRouter({
           jurisdictionCode: jurisdictions.code,
           jurisdictionName: jurisdictions.name,
           substanceId: substanceForms.id,
+          substanceCertificateType: substanceForms.certificateType,
           jerseyFormId: jerseyCompanyReturnForms.id,
           isSubstanceComplete: sql<boolean | null>`
             CASE

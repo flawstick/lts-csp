@@ -280,9 +280,12 @@ export default function GuidedFinishPage() {
   const ensureSubstanceFormExists = async () => {
     if (!selectedReturn || substanceFormQuery.data) return;
     if (isGuernseyCertificateUnresolved) {
-      throw new Error(
-        "Confirm Certificate 2 or Certificate 3 before initializing the Guernsey form.",
-      );
+      await setCertificateTypeMutation.mutateAsync({
+        orgId,
+        taxReturnId: selectedReturn.id,
+        certificateType: "Certificate 3",
+        overwriteExisting: false,
+      });
     }
     if (isGuernseyEsrLocked) {
       throw new Error(guernseyLockMessage);

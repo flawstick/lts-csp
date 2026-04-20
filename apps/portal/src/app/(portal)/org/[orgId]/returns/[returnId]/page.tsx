@@ -469,14 +469,19 @@ export default function ReturnWorkspacePage() {
   };
 
   const handleInitForm = async () => {
-    if (isGuernseyCertificateUnresolved) {
-      showMessage(
-        "Confirm Certificate 2 or Certificate 3 before initializing the Guernsey form.",
-      );
-      return;
-    }
-
     try {
+      if (
+        selectedReturn?.jurisdictionCode === "GG" &&
+        selectedReturn?.returnType === "economic_substance" &&
+        certificateResolution.unresolved
+      ) {
+        await setCertificateTypeMutation.mutateAsync({
+          orgId,
+          taxReturnId: selectedReturn.id,
+          certificateType: "Certificate 3",
+          overwriteExisting: false,
+        });
+      }
       await ensureSubstanceFormExists();
       showMessage("Substance form initialized.");
     } catch (error) {
@@ -486,6 +491,36 @@ export default function ReturnWorkspacePage() {
           : "Unable to initialize the substance form.",
       );
     }
+  };
+
+  const handleSetCertificateType = async (
+    nextCertificateType: "Certificate 2" | "Certificate 3",
+  ) => {
+    if (!selectedReturn) return;
+
+    const overwriteExisting =
+      substanceFormQuery.data != null &&
+      hasMeaningfulGuernseyFormData(
+        substanceFormQuery.data as Partial<SubstanceFormData>,
+      );
+
+    if (
+      overwriteExisting &&
+      !window.confirm(
+        `Switching this return to ${nextCertificateType} will update the current Guernsey form defaults while preserving existing shared answers where possible. Continue?`,
+      )
+    ) {
+      return;
+    }
+
+    await setCertificateTypeMutation.mutateAsync({
+      orgId,
+      taxReturnId: selectedReturn.id,
+      certificateType: nextCertificateType,
+      overwriteExisting,
+    });
+
+    showMessage(`Switched to ${nextCertificateType}.`);
   };
 
   const handleClearForm = async () => {
@@ -707,16 +742,29 @@ export default function ReturnWorkspacePage() {
                 <p className="text-muted-foreground text-sm">
                   {activeTab === "form"
                     ? "Review extracted answers, edit the ESR sections, and finish the remaining required fields."
-                    : isCertificateTwo
-                      ? "Upload source documents if needed and manage the return file set. Certificate 2 does not require accounts upload or AI extraction."
-                      : "Upload the ESR, assign the financial statements PDF, and manage supporting return documents."}
+                    : "Upload source documents if needed and manage the return file set."}
                 </p>
               </div>
 
-              <TabsList className="w-fit border-none bg-transparent p-0">
-                <TabsTrigger value="form">Substance Form</TabsTrigger>
-                <TabsTrigger value="files">Files & Documents</TabsTrigger>
-              </TabsList>
+              <div className="flex flex-wrap items-start justify-end gap-3">
+                {selectedReturn.jurisdictionCode === "GG" &&
+                certificateResolution.certificateType ? (
+                  <div className="space-y-1 text-right">
+                    <span className="inline-flex items-center rounded-full border border-border/70 bg-background px-3 py-1 text-xs font-medium">
+                      {certificateResolution.certificateType}
+                    </span>
+                    {certificateResolution.certificateType === "Certificate 2" ? (
+                      <p className="text-muted-foreground text-[11px]">
+                        No accounts upload or AI extraction
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                <TabsList className="w-fit border-none bg-transparent p-0">
+                  <TabsTrigger value="form">Substance Form</TabsTrigger>
+                  <TabsTrigger value="files">Files & Documents</TabsTrigger>
+                </TabsList>
+              </div>
             </div>
 
             <ReturnFormTab
@@ -736,6 +784,19 @@ export default function ReturnWorkspacePage() {
               isInitializing={createSubstanceFormMutation.isPending}
               isReadOnly={isGuernseyEsrLocked}
               readOnlyMessage={guernseyLockMessage}
+              certificateType={
+                selectedReturn.jurisdictionCode === "GG"
+                  ? (certificateResolution.certificateType ?? "Certificate 3")
+                  : null
+              }
+              showCertificateTypeControl={
+                selectedReturn.jurisdictionCode === "GG" &&
+                selectedReturn.returnType === "economic_substance"
+              }
+              isCertificateTypeUpdating={setCertificateTypeMutation.isPending}
+              onSetCertificateType={(nextCertificateType) => {
+                void handleSetCertificateType(nextCertificateType);
+              }}
               onInitForm={() => {
                 void handleInitForm();
               }}

@@ -1,7 +1,7 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
-import { Loader2, Save, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, Loader2, Save, Sparkles, Trash2 } from "lucide-react";
 
 import {
   FIELD_LABELS,
@@ -20,6 +20,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -57,6 +63,10 @@ type ReturnFormTabProps = {
   isInitializing: boolean;
   isReadOnly?: boolean;
   readOnlyMessage?: string;
+  certificateType: "Certificate 2" | "Certificate 3" | null;
+  showCertificateTypeControl?: boolean;
+  isCertificateTypeUpdating?: boolean;
+  onSetCertificateType?: (certificateType: "Certificate 2" | "Certificate 3") => void;
   onInitForm: () => void;
   onSaveSection: () => void;
   onClearForm: () => void;
@@ -79,10 +89,16 @@ export function ReturnFormTab({
   isInitializing,
   isReadOnly = false,
   readOnlyMessage,
+  certificateType,
+  showCertificateTypeControl = false,
+  isCertificateTypeUpdating = false,
+  onSetCertificateType,
   onInitForm,
   onSaveSection,
   onClearForm,
 }: ReturnFormTabProps) {
+  const certificateLabel = certificateType ?? "Certificate 3";
+
   return (
     <TabsContent value="form">
       <div className="space-y-4">
@@ -102,18 +118,46 @@ export function ReturnFormTab({
               Create the form first, then complete the sections manually or use
               the guided finish flow to work through every question.
             </p>
-            <Button
-              onClick={onInitForm}
-              disabled={isInitializing || isReadOnly}
-              className="mt-5 px-5 shadow-[0_18px_44px_-26px_rgba(37,99,235,0.85)]"
-            >
-              {isInitializing ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Sparkles className="size-4" />
-              )}
-              Initialize form
-            </Button>
+            <div className="mt-5 flex items-center justify-center gap-2">
+              {showCertificateTypeControl && onSetCertificateType ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      disabled={isCertificateTypeUpdating || isReadOnly}
+                    >
+                      {isCertificateTypeUpdating ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : null}
+                      {certificateLabel}
+                      <ChevronDown className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    {(["Certificate 2", "Certificate 3"] as const).map((nextType) => (
+                      <DropdownMenuItem
+                        key={nextType}
+                        onSelect={() => onSetCertificateType(nextType)}
+                      >
+                        Use {nextType}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+              <Button
+                onClick={onInitForm}
+                disabled={isInitializing || isReadOnly}
+                className="px-5 shadow-[0_18px_44px_-26px_rgba(37,99,235,0.85)]"
+              >
+                {isInitializing ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Sparkles className="size-4" />
+                )}
+                Initialize form
+              </Button>
+            </div>
           </div>
         ) : (
           <>
@@ -268,7 +312,34 @@ export function ReturnFormTab({
               </Dialog>
             ) : null}
 
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-end gap-2 pt-2">
+              {showCertificateTypeControl && onSetCertificateType ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isCertificateTypeUpdating || isReadOnly}
+                    >
+                      {isCertificateTypeUpdating ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : null}
+                      {certificateLabel}
+                      <ChevronDown className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    {(["Certificate 2", "Certificate 3"] as const).map((nextType) => (
+                      <DropdownMenuItem
+                        key={nextType}
+                        onSelect={() => onSetCertificateType(nextType)}
+                      >
+                        Use {nextType}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                   <Button

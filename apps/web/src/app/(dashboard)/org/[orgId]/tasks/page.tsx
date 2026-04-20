@@ -70,6 +70,7 @@ import {
   IconLayoutColumns,
   IconCircleDot,
   IconGlobe,
+  IconShieldCheck,
 } from "@tabler/icons-react"
 import {
   flexRender,
@@ -85,9 +86,11 @@ import { api } from "@/trpc/react"
 import { useParams } from "next/navigation"
 import { DirectionalTransition } from "@/components/view-transition"
 import { useNavigateWithTransition } from "@/lib/navigate-with-transition"
+import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing"
 
 type StatusFilter = "pending" | "in_progress" | "completed" | "failed" | "cancelled" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
+type CertificateFilter = "all" | "Certificate 2" | "Certificate 3" | "unresolved"
 
 type TaskRow = {
   id: string
@@ -96,8 +99,48 @@ type TaskRow = {
   status: string
   createdAt: string
   jurisdiction: { code: string; name: string } | null
-  taxReturn: { id: string; entityName: string; taxYear: number } | null
-  substanceForm: { isComplete: boolean; missingFields: unknown } | null
+  taxReturn: {
+    id: string
+    entityName: string
+    taxYear: number
+    returnType: string | null
+    metadata?: unknown
+  } | null
+  substanceForm: {
+    isComplete: boolean
+    missingFields: unknown
+    certificateType?: string | null
+  } | null
+}
+
+function matchesCertificateFilter(
+  task: Pick<TaskRow, "jurisdiction" | "taxReturn" | "substanceForm">,
+  certificateFilter: CertificateFilter,
+) {
+  if (certificateFilter === "all") {
+    return true
+  }
+
+  if (
+    task.jurisdiction?.code !== "GG" ||
+    task.taxReturn?.returnType !== "economic_substance"
+  ) {
+    return false
+  }
+
+  const resolution = resolveGuernseyCertificateType({
+    metadata:
+      task.taxReturn?.metadata && typeof task.taxReturn.metadata === "object"
+        ? (task.taxReturn.metadata as Record<string, unknown>)
+        : null,
+    savedCertificateType: task.substanceForm?.certificateType ?? null,
+  })
+
+  if (certificateFilter === "unresolved") {
+    return resolution.unresolved
+  }
+
+  return resolution.certificateType === certificateFilter
 }
 
 function getStatusBadge(status: string) {
@@ -230,6 +273,7 @@ export default function TasksPage() {
   const orgId = params?.orgId as string
 
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(undefined)
+  const [certificateFilter, setCertificateFilter] = React.useState<CertificateFilter>("all")
   const [jurisdictionFilter, setJurisdictionFilter] = React.useState<JurisdictionFilter>("all")
   const [searchQuery, setSearchQuery] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
@@ -258,7 +302,7 @@ export default function TasksPage() {
   React.useEffect(() => {
     setPagination((prev) => ({ ...prev, pageIndex: 0 }))
     setRowSelection({})
-  }, [jurisdictionFilter, statusFilter])
+  }, [jurisdictionFilter, statusFilter, certificateFilter])
 
   const { data, isLoading, refetch } = api.taxReturn.listTasks.useQuery({
     orgId,
@@ -267,6 +311,8 @@ export default function TasksPage() {
     jurisdictionCode:
       jurisdictionFilter === "all" ? undefined : jurisdictionFilter,
     status: statusFilter,
+    certificateType:
+      certificateFilter === "all" ? undefined : certificateFilter,
     search: debouncedSearch || undefined,
   }, {
     enabled: !!orgId,
@@ -442,6 +488,41 @@ export default function TasksPage() {
                         {label}
                       </DropdownMenuCheckboxItem>
                     ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </Tooltip>
+                <Tooltip>
+                  <DropdownMenu>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="icon" className="relative size-8">
+                          <IconShieldCheck className="h-4 w-4" />
+                          {certificateFilter !== "all" && (
+                            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Certificate Type</TooltipContent>
+                    <DropdownMenuContent align="start" className="w-48">
+                      <DropdownMenuLabel>Certificate Type</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {([
+                        ["all", "All certificates"],
+                        ["Certificate 2", "Certificate 2"],
+                        ["Certificate 3", "Certificate 3"],
+                        ["unresolved", "Unresolved"],
+                      ] as const).map(([value, label]) => (
+                        <DropdownMenuCheckboxItem
+                          key={value}
+                          checked={certificateFilter === value}
+                          onCheckedChange={() =>
+                            setCertificateFilter(value as CertificateFilter)
+                          }
+                        >
+                          {label}
+                        </DropdownMenuCheckboxItem>
+                      ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </Tooltip>

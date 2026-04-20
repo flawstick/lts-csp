@@ -6,6 +6,7 @@ import {
   FileSpreadsheet,
   FolderOpen,
   Search,
+  ShieldCheck,
   X,
 } from "lucide-react";
 
@@ -18,9 +19,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 import type {
+  CertificateFilter,
   StatusFilter,
   TaskFilter,
   TaskKind,
@@ -35,6 +43,8 @@ type Props = {
   onTaskFilterChange: (value: TaskFilter) => void;
   statusFilter: StatusFilter;
   onStatusFilterChange: (value: StatusFilter) => void;
+  certificateFilter: CertificateFilter;
+  onCertificateFilterChange: (value: CertificateFilter) => void;
   jurisdictionFilter: string;
   onJurisdictionFilterChange: (value: string) => void;
   taxYearFilter: TaxYearFilter;
@@ -55,6 +65,8 @@ export function TasksTableToolbar({
   onTaskFilterChange,
   statusFilter,
   onStatusFilterChange,
+  certificateFilter,
+  onCertificateFilterChange,
   jurisdictionFilter,
   onJurisdictionFilterChange,
   taxYearFilter,
@@ -191,6 +203,40 @@ export function TasksTableToolbar({
               ))}
             </SelectContent>
           </Select>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="relative size-9 shrink-0"
+                aria-label="Filter by certificate type"
+              >
+                <ShieldCheck className="size-4" />
+                {certificateFilter !== "all" ? (
+                  <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
+                ) : null}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              {([
+                ["all", "All certificates"],
+                ["Certificate 2", "Certificate 2"],
+                ["Certificate 3", "Certificate 3"],
+                ["unresolved", "Unresolved"],
+              ] as const).map(([value, label]) => (
+                <DropdownMenuCheckboxItem
+                  key={value}
+                  checked={certificateFilter === value}
+                  onCheckedChange={() =>
+                    onCertificateFilterChange(value as CertificateFilter)
+                  }
+                >
+                  {label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {hasFilters ? (
             <Button

@@ -94,6 +94,59 @@ function getGuernseyCertificateResolutionForReturn(input: {
   });
 }
 
+type CertificateFilter = "Certificate 2" | "Certificate 3" | "unresolved";
+
+function getResolvedGuernseyCertificateState(input: {
+  jurisdictionCode?: string | null;
+  returnType?: string | null;
+  metadata?: unknown;
+  substanceCertificateType?: string | null;
+}) {
+  const isGuernseyEconomicSubstance =
+    input.jurisdictionCode === "GG" && input.returnType === "economic_substance";
+
+  if (!isGuernseyEconomicSubstance) {
+    return {
+      certificateType: null,
+      unresolved: false,
+    } as const;
+  }
+
+  const resolution = resolveGuernseyCertificateType({
+    metadata:
+      input.metadata && typeof input.metadata === "object"
+        ? (input.metadata as Record<string, unknown>)
+        : null,
+    savedCertificateType: input.substanceCertificateType ?? null,
+  });
+
+  return {
+    certificateType: resolution.certificateType,
+    unresolved: resolution.unresolved,
+  } as const;
+}
+
+function matchesGuernseyCertificateFilter(
+  input: {
+    jurisdictionCode?: string | null;
+    returnType?: string | null;
+    metadata?: unknown;
+    substanceCertificateType?: string | null;
+  },
+  certificateFilter?: CertificateFilter,
+) {
+  if (!certificateFilter) {
+    return true;
+  }
+
+  const resolved = getResolvedGuernseyCertificateState(input);
+  if (certificateFilter === "unresolved") {
+    return resolved.unresolved;
+  }
+
+  return resolved.certificateType === certificateFilter;
+}
+
 function getTaskDisplayStatus(
   taskStatus: string,
   latestJobStatus?: string | null,
@@ -727,6 +780,9 @@ export const taxReturnRouter = createTRPCRouter({
             "dismissed",
           ])
           .optional(),
+        certificateType: z
+          .enum(["Certificate 2", "Certificate 3", "unresolved"])
+          .optional(),
         search: z.string().optional(),
 
 
@@ -740,6 +796,7 @@ export const taxReturnRouter = createTRPCRouter({
         jurisdictionCode,
         taxYear,
         status,
+        certificateType,
         search,
       } = input;
       const offset = (page - 1) * pageSize;
@@ -773,64 +830,66 @@ export const taxReturnRouter = createTRPCRouter({
       const whereClause =
         conditions.length > 0 ? and(...conditions) : undefined;
 
-      const [returns, countResult] = await Promise.all([
-        ctx.db
-          .select({
-            id: taxReturns.id,
-            entityName: taxReturns.entityName,
-            taxYear: taxReturns.taxYear,
-            status: taxReturns.status,
-            returnType: taxReturns.returnType,
-            externalId: taxReturns.externalId,
-            link: taxReturns.link,
-            pdfUrl: taxReturns.pdfUrl,
-            createdAt: taxReturns.createdAt,
-            isSubstanceComplete: sql<boolean | null>`
-              CASE
-                WHEN ${taxReturns.returnType} = 'economic_substance' THEN ${substanceForms.isComplete}
-                ELSE ${jerseyCompanyReturnForms.isComplete}
-              END
-            `,
-            missingSubstanceFieldCount: sql<number>`
-              CASE
-                WHEN ${taxReturns.returnType} = 'economic_substance' THEN COALESCE(jsonb_array_length(${substanceForms.missingFields}), 0)
-                ELSE COALESCE(jsonb_array_length(${jerseyCompanyReturnForms.missingFields}), 0)
-              END
-            `,
-            jurisdiction: {
-              name: jurisdictions.name,
-              code: jurisdictions.code,
-            },
-          })
-          .from(taxReturns)
-          .leftJoin(substanceForms, eq(substanceForms.taxReturnId, taxReturns.id))
-          .leftJoin(
-            jerseyCompanyReturnForms,
-            eq(jerseyCompanyReturnForms.taxReturnId, taxReturns.id),
-          )
-          .leftJoin(
-            jurisdictions,
-            eq(taxReturns.jurisdictionId, jurisdictions.id),
-          )
-          .where(whereClause)
-          .orderBy(desc(taxReturns.createdAt))
-          .limit(pageSize)
-          .offset(offset),
-        ctx.db
-          .select({ count: sql<number>`count(*)` })
-          .from(taxReturns)
-          .leftJoin(
-            jurisdictions,
-            eq(taxReturns.jurisdictionId, jurisdictions.id),
-          )
-          .where(whereClause),
-      ]);
+      const rows = await ctx.db
+        .select({
+          id: taxReturns.id,
+          entityName: taxReturns.entityName,
+          taxYear: taxReturns.taxYear,
+          status: taxReturns.status,
+          returnType: taxReturns.returnType,
+          externalId: taxReturns.externalId,
+          link: taxReturns.link,
+          pdfUrl: taxReturns.pdfUrl,
+          createdAt: taxReturns.createdAt,
+          metadata: taxReturns.metadata,
+          substanceCertificateType: substanceForms.certificateType,
+          isSubstanceComplete: sql<boolean | null>`
+            CASE
+              WHEN ${taxReturns.returnType} = 'economic_substance' THEN ${substanceForms.isComplete}
+              ELSE ${jerseyCompanyReturnForms.isComplete}
+            END
+          `,
+          missingSubstanceFieldCount: sql<number>`
+            CASE
+              WHEN ${taxReturns.returnType} = 'economic_substance' THEN COALESCE(jsonb_array_length(${substanceForms.missingFields}), 0)
+              ELSE COALESCE(jsonb_array_length(${jerseyCompanyReturnForms.missingFields}), 0)
+            END
+          `,
+          jurisdiction: {
+            name: jurisdictions.name,
+            code: jurisdictions.code,
+          },
+        })
+        .from(taxReturns)
+        .leftJoin(substanceForms, eq(substanceForms.taxReturnId, taxReturns.id))
+        .leftJoin(
+          jerseyCompanyReturnForms,
+          eq(jerseyCompanyReturnForms.taxReturnId, taxReturns.id),
+        )
+        .leftJoin(
+          jurisdictions,
+          eq(taxReturns.jurisdictionId, jurisdictions.id),
+        )
+        .where(whereClause)
+        .orderBy(desc(taxReturns.createdAt));
 
-      const total = Number(countResult[0]?.count || 0);
+      const filteredReturns = rows.filter((row) =>
+        matchesGuernseyCertificateFilter(
+          {
+            jurisdictionCode: row.jurisdiction?.code ?? null,
+            returnType: row.returnType,
+            metadata: row.metadata,
+            substanceCertificateType: row.substanceCertificateType,
+          },
+          certificateType,
+        ),
+      );
+      const total = filteredReturns.length;
+      const paginatedReturns = filteredReturns.slice(offset, offset + pageSize);
       const totalPages = Math.ceil(total / pageSize);
 
       return {
-        returns,
+        returns: paginatedReturns,
         total,
         page,
         pageSize,
@@ -1245,11 +1304,22 @@ export const taxReturnRouter = createTRPCRouter({
         status: z
           .enum(["pending", "in_progress", "completed", "failed", "cancelled"])
           .optional(),
+        certificateType: z
+          .enum(["Certificate 2", "Certificate 3", "unresolved"])
+          .optional(),
         search: z.string().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
-      const { orgId, page, pageSize, jurisdictionCode, status, search } = input;
+      const {
+        orgId,
+        page,
+        pageSize,
+        jurisdictionCode,
+        status,
+        certificateType,
+        search,
+      } = input;
       const offset = (page - 1) * pageSize;
 
       const conditions = [];
@@ -1277,54 +1347,59 @@ export const taxReturnRouter = createTRPCRouter({
       const whereClause =
         conditions.length > 0 ? and(...conditions) : undefined;
 
-      const [taskList, countResult] = await Promise.all([
-        ctx.db
-          .select({
-            id: tasks.id,
-            name: tasks.name,
-            description: tasks.description,
-            status: tasks.status,
-            taskType: tasks.taskType,
-            createdAt: tasks.createdAt,
-            jurisdiction: {
-              code: jurisdictions.code,
-              name: jurisdictions.name,
-            },
-            taxReturn: {
-              id: taxReturns.id,
-              entityName: taxReturns.entityName,
-              taxYear: taxReturns.taxYear,
-              externalId: taxReturns.externalId,
-            },
-            substanceForm: {
-              id: substanceForms.id,
-              isComplete: substanceForms.isComplete,
-              missingFields: substanceForms.missingFields,
-            },
-          })
-          .from(tasks)
-          .leftJoin(taxReturns, eq(tasks.taxReturnId, taxReturns.id))
-          .leftJoin(jurisdictions, eq(tasks.jurisdictionId, jurisdictions.id))
-          .leftJoin(
-            substanceForms,
-            eq(taxReturns.id, substanceForms.taxReturnId),
-          )
-          .where(whereClause)
-          .orderBy(desc(tasks.createdAt))
-          .limit(pageSize)
-          .offset(offset),
-        ctx.db
-          .select({ count: sql<number>`count(*)` })
-          .from(tasks)
-          .leftJoin(taxReturns, eq(tasks.taxReturnId, taxReturns.id))
-          .leftJoin(jurisdictions, eq(tasks.jurisdictionId, jurisdictions.id))
-          .where(whereClause),
-      ]);
+      const taskList = await ctx.db
+        .select({
+          id: tasks.id,
+          name: tasks.name,
+          description: tasks.description,
+          status: tasks.status,
+          taskType: tasks.taskType,
+          createdAt: tasks.createdAt,
+          jurisdiction: {
+            code: jurisdictions.code,
+            name: jurisdictions.name,
+          },
+          taxReturn: {
+            id: taxReturns.id,
+            entityName: taxReturns.entityName,
+            taxYear: taxReturns.taxYear,
+            externalId: taxReturns.externalId,
+            returnType: taxReturns.returnType,
+            metadata: taxReturns.metadata,
+          },
+          substanceForm: {
+            id: substanceForms.id,
+            isComplete: substanceForms.isComplete,
+            missingFields: substanceForms.missingFields,
+            certificateType: substanceForms.certificateType,
+          },
+        })
+        .from(tasks)
+        .leftJoin(taxReturns, eq(tasks.taxReturnId, taxReturns.id))
+        .leftJoin(jurisdictions, eq(tasks.jurisdictionId, jurisdictions.id))
+        .leftJoin(
+          substanceForms,
+          eq(taxReturns.id, substanceForms.taxReturnId),
+        )
+        .where(whereClause)
+        .orderBy(desc(tasks.createdAt));
 
-      const total = Number(countResult[0]?.count || 0);
+      const filteredTaskList = taskList.filter((task) =>
+        matchesGuernseyCertificateFilter(
+          {
+            jurisdictionCode: task.jurisdiction?.code ?? null,
+            returnType: task.taxReturn?.returnType ?? null,
+            metadata: task.taxReturn?.metadata,
+            substanceCertificateType: task.substanceForm?.certificateType ?? null,
+          },
+          certificateType,
+        ),
+      );
+
+      const total = filteredTaskList.length;
       const totalPages = Math.ceil(total / pageSize);
 
-      const taskIds = taskList.map((task) => task.id);
+      const taskIds = filteredTaskList.map((task) => task.id);
       const latestJobsByTaskId = new Map<string, string>();
 
       if (taskIds.length > 0) {
@@ -1338,7 +1413,7 @@ export const taxReturnRouter = createTRPCRouter({
             continue;
           }
 
-          const relatedTask = taskList.find((task) => task.id === job.taskId);
+          const relatedTask = filteredTaskList.find((task) => task.id === job.taskId);
           const normalizedJob = await maybeMarkBrowserJobStale(ctx.db, job, {
             taskId: job.taskId,
             taxReturnId: relatedTask?.taxReturn?.id ?? null,
@@ -1348,7 +1423,7 @@ export const taxReturnRouter = createTRPCRouter({
         }
       }
 
-      const normalizedTasks = taskList.map((task) => ({
+      const normalizedTasks = filteredTaskList.map((task) => ({
         ...task,
         status: getTaskDisplayStatus(
           task.status,
@@ -1356,8 +1431,10 @@ export const taxReturnRouter = createTRPCRouter({
         ),
       }));
 
+      const paginatedTasks = normalizedTasks.slice(offset, offset + pageSize);
+
       return {
-        tasks: normalizedTasks,
+        tasks: paginatedTasks,
         total,
         page,
         pageSize,

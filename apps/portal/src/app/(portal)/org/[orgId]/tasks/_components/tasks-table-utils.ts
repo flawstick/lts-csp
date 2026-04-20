@@ -1,3 +1,5 @@
+import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
+
 export type ReturnStatusTone =
   | "pending"
   | "in_progress"
@@ -9,6 +11,7 @@ export type TaskKind = "review" | "active" | "esr" | "documents";
 export type TaskFilter = "all" | TaskKind;
 export type StatusFilter = "all" | ReturnStatusTone;
 export type TaxYearFilter = "all" | `${number}`;
+export type CertificateFilter = "all" | "Certificate 2" | "Certificate 3" | "unresolved";
 export type SortKey = "entity" | "year" | "status" | "updated";
 export type SortDirection = "asc" | "desc";
 export type PaginationItem = number | "ellipsis-left" | "ellipsis-right";
@@ -23,6 +26,9 @@ export type TaskRecord = {
   updatedAt: Date | string | null | undefined;
   jurisdictionCode: string;
   jurisdictionName: string;
+  returnType: string | null;
+  metadata?: unknown;
+  substanceCertificateType?: string | null;
   isSubstanceComplete: boolean | null;
   missingSubstanceFields: unknown;
 };
@@ -157,6 +163,39 @@ export function classifyTaskKind(row: TaskRecord): TaskKind {
   }
 
   return "active";
+}
+
+export function matchesCertificateFilter(
+  row: Pick<
+    TaskRecord,
+    "jurisdictionCode" | "returnType" | "metadata" | "substanceCertificateType"
+  >,
+  certificateFilter: CertificateFilter,
+) {
+  if (certificateFilter === "all") {
+    return true;
+  }
+
+  if (
+    row.jurisdictionCode !== "GG" ||
+    row.returnType !== "economic_substance"
+  ) {
+    return false;
+  }
+
+  const resolution = resolveGuernseyCertificateType({
+    metadata:
+      row.metadata && typeof row.metadata === "object"
+        ? (row.metadata as Record<string, unknown>)
+        : null,
+    savedCertificateType: row.substanceCertificateType ?? null,
+  });
+
+  if (certificateFilter === "unresolved") {
+    return resolution.unresolved;
+  }
+
+  return resolution.certificateType === certificateFilter;
 }
 
 export function getTaskAction(row: TaskRecord) {

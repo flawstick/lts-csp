@@ -1,9 +1,10 @@
 "use client";
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { ArrowUpDown, EllipsisVertical, ExternalLink, Search, XCircle } from "lucide-react";
+import { ArrowUpDown, EllipsisVertical, ExternalLink, Search, ShieldCheck, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
 
 import {
   AlertDialog,
@@ -19,6 +20,7 @@ import {
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -49,6 +51,7 @@ type ReturnStatusTone =
 type StatusFilter = "all" | ReturnStatusTone;
 type JurisdictionFilter = string;
 type TaxYearFilter = "all" | `${number}`;
+type CertificateFilter = "all" | "Certificate 2" | "Certificate 3" | "unresolved";
 type SortKey = "entity" | "year" | "status" | "updated";
 type SortDirection = "asc" | "desc";
 
@@ -109,6 +112,41 @@ function fileCount(files: unknown) {
   return Array.isArray(files) ? files.length : 0;
 }
 
+function matchesCertificateFilter(
+  row: {
+    jurisdictionCode: string;
+    returnType: string | null;
+    metadata: unknown;
+    substanceCertificateType?: string | null;
+  },
+  certificateFilter: CertificateFilter,
+) {
+  if (certificateFilter === "all") {
+    return true;
+  }
+
+  if (
+    row.jurisdictionCode !== "GG" ||
+    row.returnType !== "economic_substance"
+  ) {
+    return false;
+  }
+
+  const resolution = resolveGuernseyCertificateType({
+    metadata:
+      row.metadata && typeof row.metadata === "object"
+        ? (row.metadata as Record<string, unknown>)
+        : null,
+    savedCertificateType: row.substanceCertificateType ?? null,
+  });
+
+  if (certificateFilter === "unresolved") {
+    return resolution.unresolved;
+  }
+
+  return resolution.certificateType === certificateFilter;
+}
+
 export default function OrgReturnsPage() {
   const params = useParams<{ orgId: string }>();
   const orgId = params.orgId;
@@ -135,6 +173,8 @@ export default function OrgReturnsPage() {
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [certificateFilter, setCertificateFilter] =
+    useState<CertificateFilter>("all");
   const currentCalendarYear = useMemo(() => new Date().getUTCFullYear(), []);
   const [taxYearFilter, setTaxYearFilter] = useState<TaxYearFilter>("all");
   const jurisdictionFilter: JurisdictionFilter = searchParams.get("jurisdiction") ?? "all";
@@ -212,6 +252,10 @@ export default function OrgReturnsPage() {
           return false;
         }
 
+        if (!matchesCertificateFilter(row, certificateFilter)) {
+          return false;
+        }
+
         if (!term) {
           return true;
         }
@@ -252,6 +296,7 @@ export default function OrgReturnsPage() {
     returns,
     sortDirection,
     sortKey,
+    certificateFilter,
     statusFilter,
     taxYearFilter,
   ]);
@@ -393,6 +438,41 @@ export default function OrgReturnsPage() {
               ))}
             </SelectContent>
           </Select>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="relative size-9"
+                aria-label="Filter returns by certificate type"
+              >
+                <ShieldCheck className="size-4" />
+                {certificateFilter !== "all" ? (
+                  <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
+                ) : null}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              {([
+                ["all", "All certificates"],
+                ["Certificate 2", "Certificate 2"],
+                ["Certificate 3", "Certificate 3"],
+                ["unresolved", "Unresolved"],
+              ] as const).map(([value, label]) => (
+                <DropdownMenuCheckboxItem
+                  key={value}
+                  checked={certificateFilter === value}
+                  onCheckedChange={() => {
+                    setCertificateFilter(value);
+                    setPage(1);
+                  }}
+                >
+                  {label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           <Button
             variant="outline"

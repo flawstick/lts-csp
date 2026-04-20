@@ -16,6 +16,7 @@ import {
   Loader2,
   File,
   Building2,
+  ChevronDown,
   Pencil,
   Play,
   Bot,
@@ -252,13 +253,47 @@ export default function ReturnDetailPage() {
       taxReturn.returnType === "economic_substance" &&
       certificateResolution.unresolved
     ) {
-      alert(
-        "Confirm whether this Guernsey return is Certificate 2 or Certificate 3 before initializing the form.",
-      );
-      return;
+      await setCertificateTypeMutation.mutateAsync({
+        taxReturnId: taxReturn.id,
+        certificateType: "Certificate 3",
+        overwriteExisting: false,
+      });
     }
     await createFormMutation.mutateAsync({ taxReturnId: taxReturn.id });
-  }, [taxReturn, substanceFormData?.certificateType, createFormMutation]);
+  }, [
+    taxReturn,
+    substanceFormData?.certificateType,
+    createFormMutation,
+    setCertificateTypeMutation,
+  ]);
+
+  const handleSetCertificateType = useCallback(
+    async (nextCertificateType: "Certificate 2" | "Certificate 3") => {
+      if (!taxReturn) return;
+
+      const overwriteExisting =
+        substanceFormData != null &&
+        hasMeaningfulGuernseyFormData(
+          substanceFormData as Partial<SubstanceFormData>,
+        );
+
+      if (
+        overwriteExisting &&
+        !window.confirm(
+          `Switching this return to ${nextCertificateType} will update the current Guernsey form defaults while preserving existing shared answers where possible. Continue?`,
+        )
+      ) {
+        return;
+      }
+
+      await setCertificateTypeMutation.mutateAsync({
+        taxReturnId: taxReturn.id,
+        certificateType: nextCertificateType,
+        overwriteExisting,
+      });
+    },
+    [taxReturn, setCertificateTypeMutation, substanceFormData],
+  );
 
   const handleSaveSection = useCallback(
     async (data: Partial<SubstanceFormData>) => {
@@ -912,15 +947,46 @@ export default function ReturnDetailPage() {
                           Create a substance form to start tracking data for this
                           return.
                         </p>
-                        <Button
-                          onClick={handleCreateForm}
-                          disabled={createFormMutation.isPending}
-                        >
-                          {createFormMutation.isPending && (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          )}
-                          Initialize Form
-                        </Button>
+                        <div className="flex items-center justify-center gap-2">
+                          {taxReturn.jurisdiction?.code === "GG" &&
+                          taxReturn.returnType === "economic_substance" ? (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  disabled={setCertificateTypeMutation.isPending}
+                                >
+                                  {setCertificateTypeMutation.isPending ? (
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  ) : null}
+                                  {certificateResolution.certificateType ?? "Certificate 3"}
+                                  <ChevronDown className="ml-2 h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="center" className="w-44">
+                                {(["Certificate 2", "Certificate 3"] as const).map((nextType) => (
+                                  <DropdownMenuItem
+                                    key={nextType}
+                                    onSelect={() => {
+                                      void handleSetCertificateType(nextType);
+                                    }}
+                                  >
+                                    Use {nextType}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          ) : null}
+                          <Button
+                            onClick={handleCreateForm}
+                            disabled={createFormMutation.isPending}
+                          >
+                            {createFormMutation.isPending && (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            )}
+                            Initialize Form
+                          </Button>
+                        </div>
                       </>
                     )}
                   </div>
@@ -985,6 +1051,38 @@ export default function ReturnDetailPage() {
                           )}
                       </div>
                     </div>
+
+                    {taxReturn.jurisdiction?.code === "GG" &&
+                    taxReturn.returnType === "economic_substance" ? (
+                      <div className="flex justify-end">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="outline"
+                              disabled={setCertificateTypeMutation.isPending}
+                            >
+                              {setCertificateTypeMutation.isPending ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : null}
+                              {certificateResolution.certificateType ?? "Certificate 3"}
+                              <ChevronDown className="ml-2 h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            {(["Certificate 2", "Certificate 3"] as const).map((nextType) => (
+                              <DropdownMenuItem
+                                key={nextType}
+                                onSelect={() => {
+                                  void handleSetCertificateType(nextType);
+                                }}
+                              >
+                                Use {nextType}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    ) : null}
 
                     {/* Sections Grid */}
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
