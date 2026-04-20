@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -49,6 +49,7 @@ import {
 
 export default function ReturnWorkspacePage() {
   const params = useParams<{ orgId: string; returnId: string }>();
+  const router = useRouter();
   const orgId = params.orgId;
   const returnId = params.returnId;
   const navigate = useNavigateWithTransition();
@@ -510,6 +511,7 @@ export default function ReturnWorkspacePage() {
       if (!certificateTypeInitialized) {
         await ensureSubstanceFormExists();
       }
+      router.refresh();
       showMessage("Substance form initialized.");
     } catch (error) {
       showMessage(
@@ -543,6 +545,7 @@ export default function ReturnWorkspacePage() {
     setDraftForm(sanitizeFormData(nextForm));
     setPendingCertificateType(null);
     setIsCertificateDialogOpen(false);
+    router.refresh();
 
     showMessage(`Switched to ${nextCertificateType}.`);
   };
