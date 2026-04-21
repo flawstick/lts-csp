@@ -161,16 +161,7 @@ export default function ReturnWorkspacePage() {
       },
     });
   const setCertificateTypeMutation =
-    api.portalReturns.setSubstanceFormCertificateType.useMutation({
-      onSuccess: () => {
-        if (!selectedReturn) return;
-        void utils.portalReturns.listByOrg.invalidate({ orgId });
-        void utils.portalReturns.getSubstanceForm.invalidate({
-          orgId,
-          taxReturnId: selectedReturn.id,
-        });
-      },
-    });
+    api.portalReturns.setSubstanceFormCertificateType.useMutation();
 
   const substanceFormQuery = api.portalReturns.getSubstanceForm.useQuery(
     {
@@ -511,6 +502,27 @@ export default function ReturnWorkspacePage() {
             certificateType: "Certificate 3",
             overwriteExisting: false,
           });
+        utils.portalReturns.listByOrg.setData({ orgId }, (current) =>
+          current?.map((row) =>
+            row.id !== selectedReturn.id
+              ? row
+              : {
+                  ...row,
+                  metadata: {
+                    ...(row.metadata &&
+                    typeof row.metadata === "object" &&
+                    !Array.isArray(row.metadata)
+                      ? (row.metadata as Record<string, unknown>)
+                      : {}),
+                    certificateTypeHint: "Certificate 3",
+                    certificateTypeSource: "manual_override",
+                    certificateTypeConfidence: 1,
+                    certificateTypeOverridden: true,
+                  },
+                  substanceCertificateType: "Certificate 3",
+                },
+          ) ?? [],
+        );
         utils.portalReturns.getSubstanceForm.setData(
           {
             orgId,
@@ -552,6 +564,27 @@ export default function ReturnWorkspacePage() {
         overwriteExisting,
       });
 
+      utils.portalReturns.listByOrg.setData({ orgId }, (current) =>
+        current?.map((row) =>
+          row.id !== selectedReturn.id
+            ? row
+            : {
+                ...row,
+                metadata: {
+                  ...(row.metadata &&
+                  typeof row.metadata === "object" &&
+                  !Array.isArray(row.metadata)
+                    ? (row.metadata as Record<string, unknown>)
+                    : {}),
+                  certificateTypeHint: nextCertificateType,
+                  certificateTypeSource: "manual_override",
+                  certificateTypeConfidence: 1,
+                  certificateTypeOverridden: true,
+                },
+                substanceCertificateType: nextCertificateType,
+              },
+        ) ?? [],
+      );
       utils.portalReturns.getSubstanceForm.setData(
         {
           orgId,

@@ -160,12 +160,7 @@ export default function ReturnDetailPage() {
 
   const createTaskMutation = api.taxReturn.createTask.useMutation();
   const setCertificateTypeMutation =
-    api.substanceForm.setCertificateType.useMutation({
-      onSuccess: () => {
-        utils.taxReturn.getById.invalidate({ id });
-        utils.substanceForm.getByTaxReturnId.invalidate({ taxReturnId: id });
-      },
-    });
+    api.substanceForm.setCertificateType.useMutation();
 
   // Auto-extract when files are uploaded
   const runExtraction = useCallback(
@@ -273,9 +268,32 @@ export default function ReturnDetailPage() {
       setLocalCertificateType("Certificate 3");
       const initializedCertificateType =
         await setCertificateTypeMutation.mutateAsync({
-        taxReturnId: taxReturn.id,
-        certificateType: "Certificate 3",
-        overwriteExisting: false,
+          taxReturnId: taxReturn.id,
+          certificateType: "Certificate 3",
+          overwriteExisting: false,
+        });
+      utils.taxReturn.getById.setData({ id }, (current) => {
+        if (!current) return current;
+        const metadata =
+          current.metadata &&
+          typeof current.metadata === "object" &&
+          !Array.isArray(current.metadata)
+            ? (current.metadata as Record<string, unknown>)
+            : {};
+
+        return {
+          ...current,
+          metadata: {
+            ...metadata,
+            certificateTypeHint: "Certificate 3",
+            certificateTypeSource: "manual_override",
+            certificateTypeConfidence: 1,
+            certificateTypeOverridden: true,
+          },
+          substanceForm: current.substanceForm
+            ? initializedCertificateType ?? current.substanceForm
+            : current.substanceForm,
+        };
       });
       utils.substanceForm.getByTaxReturnId.setData(
         { taxReturnId: taxReturn.id },
@@ -284,10 +302,12 @@ export default function ReturnDetailPage() {
     }
     await createFormMutation.mutateAsync({ taxReturnId: taxReturn.id });
   }, [
+    id,
     taxReturn,
     substanceFormData?.certificateType,
     createFormMutation,
     setCertificateTypeMutation,
+    utils.taxReturn.getById,
     utils.substanceForm.getByTaxReturnId,
   ]);
 
@@ -309,6 +329,29 @@ export default function ReturnDetailPage() {
           overwriteExisting,
         });
 
+        utils.taxReturn.getById.setData({ id }, (current) => {
+          if (!current) return current;
+          const metadata =
+            current.metadata &&
+            typeof current.metadata === "object" &&
+            !Array.isArray(current.metadata)
+              ? (current.metadata as Record<string, unknown>)
+              : {};
+
+          return {
+            ...current,
+            metadata: {
+              ...metadata,
+              certificateTypeHint: nextCertificateType,
+              certificateTypeSource: "manual_override",
+              certificateTypeConfidence: 1,
+              certificateTypeOverridden: true,
+            },
+            substanceForm: current.substanceForm
+              ? nextForm ?? current.substanceForm
+              : current.substanceForm,
+          };
+        });
         utils.substanceForm.getByTaxReturnId.setData(
           { taxReturnId: taxReturn.id },
           nextForm,
@@ -319,8 +362,10 @@ export default function ReturnDetailPage() {
       }
     },
     [
+      id,
       taxReturn,
       setCertificateTypeMutation,
+      utils.taxReturn.getById,
       utils.substanceForm.getByTaxReturnId,
     ],
   );
