@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -49,7 +49,6 @@ import {
 
 export default function ReturnWorkspacePage() {
   const params = useParams<{ orgId: string; returnId: string }>();
-  const router = useRouter();
   const orgId = params.orgId;
   const returnId = params.returnId;
   const navigate = useNavigateWithTransition();
@@ -274,15 +273,6 @@ export default function ReturnWorkspacePage() {
     () => getMissingFields(effectiveDraftForm),
     [effectiveDraftForm],
   );
-
-  useEffect(() => {
-    if (
-      localCertificateType &&
-      certificateResolution.certificateType === localCertificateType
-    ) {
-      setLocalCertificateType(null);
-    }
-  }, [localCertificateType, certificateResolution.certificateType]);
 
   const showMessage = (message: string) => {
     const isError =
@@ -534,7 +524,6 @@ export default function ReturnWorkspacePage() {
       if (!certificateTypeInitialized) {
         await ensureSubstanceFormExists();
       }
-      router.refresh();
       showMessage("Substance form initialized.");
     } catch (error) {
       showMessage(
@@ -575,8 +564,6 @@ export default function ReturnWorkspacePage() {
     } catch (error) {
       setLocalCertificateType(null);
       throw error;
-    } finally {
-      router.refresh();
     }
   };
 

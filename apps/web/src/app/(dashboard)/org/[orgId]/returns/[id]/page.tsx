@@ -22,7 +22,7 @@ import {
   Bot,
   MoreHorizontal,
 } from "@/lib/icons";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -283,14 +283,12 @@ export default function ReturnDetailPage() {
       );
     }
     await createFormMutation.mutateAsync({ taxReturnId: taxReturn.id });
-    router.refresh();
   }, [
     taxReturn,
     substanceFormData?.certificateType,
     createFormMutation,
     setCertificateTypeMutation,
     utils.substanceForm.getByTaxReturnId,
-    router,
   ]);
 
   const handleSetCertificateType = useCallback(
@@ -318,15 +316,12 @@ export default function ReturnDetailPage() {
       } catch (error) {
         setLocalCertificateType(null);
         throw error;
-      } finally {
-        router.refresh();
       }
     },
     [
       taxReturn,
       setCertificateTypeMutation,
       utils.substanceForm.getByTaxReturnId,
-      router,
     ],
   );
 
@@ -453,15 +448,6 @@ export default function ReturnDetailPage() {
       (effectiveSubstanceForm ?? {}) as Partial<SubstanceFormData>,
     );
   });
-
-  useEffect(() => {
-    if (
-      localCertificateType &&
-      certificateResolution.certificateType === localCertificateType
-    ) {
-      setLocalCertificateType(null);
-    }
-  }, [localCertificateType, certificateResolution.certificateType]);
 
   const statusConfig = {
     pending: { bg: "bg-amber-500/10", text: "text-amber-600" },
