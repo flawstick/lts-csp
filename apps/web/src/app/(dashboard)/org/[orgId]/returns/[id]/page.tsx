@@ -22,7 +22,7 @@ import {
   Bot,
   MoreHorizontal,
 } from "@/lib/icons";
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -106,6 +106,9 @@ export default function ReturnDetailPage() {
     "Certificate 2" | "Certificate 3" | null
   >(null);
   const [isCertificateDialogOpen, setIsCertificateDialogOpen] = useState(false);
+  const [localCertificateType, setLocalCertificateType] = useState<
+    "Certificate 2" | "Certificate 3" | null
+  >(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const utils = api.useUtils();
@@ -267,6 +270,7 @@ export default function ReturnDetailPage() {
       taxReturn.returnType === "economic_substance" &&
       certificateResolution.unresolved
     ) {
+      setLocalCertificateType("Certificate 3");
       const initializedCertificateType =
         await setCertificateTypeMutation.mutateAsync({
         taxReturnId: taxReturn.id,
@@ -296,19 +300,27 @@ export default function ReturnDetailPage() {
     ) => {
       if (!taxReturn) return;
 
-      const nextForm = await setCertificateTypeMutation.mutateAsync({
-        taxReturnId: taxReturn.id,
-        certificateType: nextCertificateType,
-        overwriteExisting,
-      });
-
-      utils.substanceForm.getByTaxReturnId.setData(
-        { taxReturnId: taxReturn.id },
-        nextForm,
-      );
       setPendingCertificateType(null);
       setIsCertificateDialogOpen(false);
-      router.refresh();
+      setLocalCertificateType(nextCertificateType);
+
+      try {
+        const nextForm = await setCertificateTypeMutation.mutateAsync({
+          taxReturnId: taxReturn.id,
+          certificateType: nextCertificateType,
+          overwriteExisting,
+        });
+
+        utils.substanceForm.getByTaxReturnId.setData(
+          { taxReturnId: taxReturn.id },
+          nextForm,
+        );
+      } catch (error) {
+        setLocalCertificateType(null);
+        throw error;
+      } finally {
+        router.refresh();
+      }
     },
     [
       taxReturn,
@@ -413,11 +425,13 @@ export default function ReturnDetailPage() {
         : null,
     savedCertificateType: substanceForm?.certificateType ?? null,
   });
+  const activeCertificateType =
+    localCertificateType ?? certificateResolution.certificateType;
   const effectiveSubstanceForm = substanceForm
     ? ({
         ...substanceForm,
         certificateType:
-          certificateResolution.certificateType ??
+          activeCertificateType ??
           substanceForm.certificateType ??
           undefined,
       } as typeof substanceForm)
@@ -429,7 +443,7 @@ export default function ReturnDetailPage() {
     taxReturn.returnType === "economic_substance" &&
     certificateResolution.unresolved;
   const isCertificateTwo =
-    certificateResolution.certificateType === "Certificate 2";
+    activeCertificateType === "Certificate 2";
   const visibleSections = FORM_SECTIONS.filter((section) => {
     if (!("conditional" in section) || !section.conditional) {
       return true;
@@ -439,6 +453,15 @@ export default function ReturnDetailPage() {
       (effectiveSubstanceForm ?? {}) as Partial<SubstanceFormData>,
     );
   });
+
+  useEffect(() => {
+    if (
+      localCertificateType &&
+      certificateResolution.certificateType === localCertificateType
+    ) {
+      setLocalCertificateType(null);
+    }
+  }, [localCertificateType, certificateResolution.certificateType]);
 
   const statusConfig = {
     pending: { bg: "bg-amber-500/10", text: "text-amber-600" },
@@ -681,7 +704,7 @@ export default function ReturnDetailPage() {
                       {setCertificateTypeMutation.isPending ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : null}
-                      {certificateResolution.certificateType ?? "Certificate 3"}
+                      {activeCertificateType ?? "Certificate 3"}
                       <ChevronDown className="ml-2 h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -1069,7 +1092,7 @@ export default function ReturnDetailPage() {
                                   {setCertificateTypeMutation.isPending ? (
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                   ) : null}
-                                  {certificateResolution.certificateType ?? "Certificate 3"}
+                                  {activeCertificateType ?? "Certificate 3"}
                                   <ChevronDown className="ml-2 h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
