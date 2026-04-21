@@ -1344,47 +1344,10 @@ export async function extractSubstanceFormFromFilesInternal(input: {
     });
   }
 
-  if (certificateResolution.certificateType === "Certificate 2") {
-    const certificateTwoDefaults = buildGuernseyCertificateTwoDefaults(
-      input.returnRecord.taxYear,
-    );
-    const merged = {
-      ...form,
-      ...certificateTwoDefaults,
-      certificateType: "Certificate 2" as const,
-      taxReferenceNumber: normalizeTaxReferenceNumber({
-        externalId: input.returnRecord.externalId,
-        taxYear: input.returnRecord.taxYear,
-      }),
-    } as Partial<SubstanceFormData>;
-    const missingFields = getMissingFields(merged);
-
-    const [updated] = await input.db
-      .update(substanceForms)
-      .set({
-        ...certificateTwoDefaults,
-        certificateType: "Certificate 2",
-        taxReferenceNumber: normalizeTaxReferenceNumber({
-          externalId: input.returnRecord.externalId,
-          taxYear: input.returnRecord.taxYear,
-        }),
-        missingFields,
-        isComplete: missingFields.length === 0,
-        aiExtractedAt: new Date(),
-        lastEditedAt: new Date(),
-        lastEditedBy: input.actorAccountId ?? undefined,
-      })
-      .where(eq(substanceForms.taxReturnId, input.taxReturnId))
-      .returning();
-
-    return {
-      form: updated ?? null,
-      extractedFields: Object.keys(certificateTwoDefaults),
-      warnings: validationIssues
-        .filter((issue) => issue.severity === "warning")
-        .map((issue) => issue.message),
-    };
-  }
+  const certificateTwoDefaults =
+    certificateResolution.certificateType === "Certificate 2"
+      ? buildGuernseyCertificateTwoDefaults(input.returnRecord.taxYear)
+      : null;
 
   const gateway = createGateway({
     apiKey,
@@ -1397,9 +1360,13 @@ export async function extractSubstanceFormFromFilesInternal(input: {
       ([activity, options]) => `${activity}:\n  - ${options.join("\n  - ")}`,
     )
     .join("\n\n");
-  const existingContextText = buildExistingExtractionContext(form);
+  const extractionContextForm = certificateTwoDefaults
+    ? ({ ...form, ...certificateTwoDefaults } as typeof form)
+    : form;
+  const existingContextText =
+    buildExistingExtractionContext(extractionContextForm);
 
-  const prompt = `You are extracting data for a Guernsey Economic Substance Register form for Certificate 3 filings.
+  const prompt = `You are extracting data for a Guernsey Economic Substance Register form for ${certificateResolution.certificateType} filings.
 
 Read all attached files and return values only when they are explicitly stated or clearly inferable.
 If a value is unknown, leave it empty.
@@ -1425,6 +1392,13 @@ Use these strict output rules:
 - activityGrossIncome should be the turnover or gross income from the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
 - adequacyExpenditureDetails should be the operating expenditure relating to the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
 - If the entity has no relevant activity ("None of the above"), leave adequacy, CIGA, employees, outsourcing, and beneficial ownership sections empty.
+${certificateTwoDefaults ? `
+
+IMPORTANT CERTIFICATE 2 RULES:
+- Certificate 2 filings do not require financial statements upload or financial-statement extraction.
+- Keep the static Certificate 2 defaults: accounting period 01-01 to 31-12 for the tax year, entity activity "Dormant", relevant activity "None of the above", no multiple relevant activities, no intellectual property holding, FATCA/CRS/IGOR "No", and CbCR constituent entity "No".
+- Still extract any useful non-financial details you can from the uploaded supporting documents, such as entity name, entity type, addresses, company number, and Guernsey incorporation status.
+` : ""}
 
 For CIGA, use these activity mappings:
 ${cigaOptionsText}
@@ -1480,6 +1454,10 @@ ${cigaOptionsText}
     taxYear: input.returnRecord.taxYear,
   });
 
+  if (certificateTwoDefaults) {
+    Object.assign(extractedData, certificateTwoDefaults);
+  }
+
   if (extractedData.totalProfit) {
     const num = parseFloat(extractedData.totalProfit.replace(/[^0-9.-]/g, ""));
     if (!isNaN(num) && num < 0) extractedData.totalProfit = "0";
@@ -1489,7 +1467,9 @@ ${cigaOptionsText}
     if (!isNaN(num) && num < 0) extractedData.netBookValue = "0";
   }
 
-  extractedData.profitAllocation ??= "Investment";
+  if (!certificateTwoDefaults) {
+    extractedData.profitAllocation ??= "Investment";
+  }
   extractedData.isGuernseyFiFatca ??= "No";
   extractedData.isGuernseyFiCrs ??= "No";
 
@@ -1528,25 +1508,27 @@ ${cigaOptionsText}
     ) ??
     normalizeEconomicClassificationCode(form.economicClassificationCode);
 
-  const contextualRelevantActivity = inferRelevantActivityFromContext(
-    extractedData.relevantActivity,
-    form.relevantActivity,
-    extractedData.entityActivity,
-    form.entityActivity,
-    extractedData.cigaPerformed,
-    extractedData.cigaDetails,
-    form.cigaPerformed,
-    form.cigaDetails,
-    ...extractedTextContext,
-  );
+  if (!certificateTwoDefaults) {
+    const contextualRelevantActivity = inferRelevantActivityFromContext(
+      extractedData.relevantActivity,
+      form.relevantActivity,
+      extractedData.entityActivity,
+      form.entityActivity,
+      extractedData.cigaPerformed,
+      extractedData.cigaDetails,
+      form.cigaPerformed,
+      form.cigaDetails,
+      ...extractedTextContext,
+    );
 
-  if (
-    !extractedData.relevantActivity ||
-    (extractedData.relevantActivity === "None of the above" &&
-      contextualRelevantActivity &&
-      contextualRelevantActivity !== "None of the above")
-  ) {
-    extractedData.relevantActivity = contextualRelevantActivity;
+    if (
+      !extractedData.relevantActivity ||
+      (extractedData.relevantActivity === "None of the above" &&
+        contextualRelevantActivity &&
+        contextualRelevantActivity !== "None of the above")
+    ) {
+      extractedData.relevantActivity = contextualRelevantActivity;
+    }
   }
 
   const merged = { ...form, ...extractedData } as SubstanceFormData;

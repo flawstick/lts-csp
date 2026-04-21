@@ -407,7 +407,6 @@ export default function ReturnWorkspacePage() {
   const handleRunAiExtraction = async () => {
     if (
       !selectedReturn ||
-      isCertificateTwo ||
       isGuernseyEsrLocked ||
       aiExtractionLockRef.current ||
       extractSubstanceFormMutation.isPending
@@ -986,7 +985,7 @@ export default function ReturnWorkspacePage() {
               isExtractPending={isAiExtractionPending}
               isAssignPending={assignDocumentRoleMutation.isPending}
               uploadedFileUrls={uploadedFileUrls}
-              showAiExtraction={!isCertificateTwo}
+              showAiExtraction
               uploadDescription={
                 isCertificateTwo
                   ? "Drop supporting documents here or browse. Certificate 2 filings do not require financial statements upload."
@@ -994,7 +993,7 @@ export default function ReturnWorkspacePage() {
               }
               uploadedFilesDescription={
                 isCertificateTwo
-                  ? "Review supporting return documents. AI extraction is not required for Certificate 2."
+                  ? "Review supporting return documents or run AI extraction. Certificate 2 filings do not require financial statements."
                   : undefined
               }
               isReadOnly={isGuernseyEsrLocked}

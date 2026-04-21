@@ -1131,13 +1131,13 @@ export default function ReturnDetailPage() {
                       ))}
                     </div>
                   )}
-                  {files.length > 0 && !isCertificateTwo && (
+                  {files.length > 0 && (
                     <div className="bg-muted/20 flex justify-end border-t p-4">
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={handleManualExtract}
-                        disabled={isExtracting || isCertificateTwo}
+                        disabled={isExtracting}
                       >
                         {isExtracting ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />

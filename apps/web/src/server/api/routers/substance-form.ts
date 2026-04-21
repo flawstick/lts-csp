@@ -1387,46 +1387,10 @@ export const substanceFormRouter = createTRPCRouter({
         form = newForm;
       }
 
-      if (certificateResolution.certificateType === "Certificate 2") {
-        const certificateTwoDefaults = buildGuernseyCertificateTwoDefaults(
-          taxReturn.taxYear,
-        );
-        const mergedData = {
-          ...form,
-          ...certificateTwoDefaults,
-          certificateType: "Certificate 2" as const,
-          taxReferenceNumber: normalizeTaxReferenceNumber({
-            externalId: taxReturn.externalId,
-            taxYear: taxReturn.taxYear,
-          }),
-        } as Partial<SubstanceFormData>;
-        const missingFields = getMissingFields(mergedData);
-
-        const [updated] = await ctx.db
-          .update(substanceForms)
-          .set({
-            ...certificateTwoDefaults,
-            certificateType: "Certificate 2",
-            taxReferenceNumber: normalizeTaxReferenceNumber({
-              externalId: taxReturn.externalId,
-              taxYear: taxReturn.taxYear,
-            }),
-            missingFields,
-            isComplete: missingFields.length === 0,
-            aiExtractedAt: new Date(),
-            lastEditedAt: new Date(),
-          })
-          .where(eq(substanceForms.taxReturnId, input.taxReturnId))
-          .returning();
-
-        return {
-          form: updated,
-          extractedFields: Object.keys(certificateTwoDefaults),
-          warnings: validationIssues
-            .filter((issue) => issue.severity === "warning")
-            .map((issue) => issue.message),
-        };
-      }
+      const certificateTwoDefaults =
+        certificateResolution.certificateType === "Certificate 2"
+          ? buildGuernseyCertificateTwoDefaults(taxReturn.taxYear)
+          : null;
 
       // Use Vercel AI Gateway with GPT-5.4
       const gateway = createGateway({
@@ -1446,9 +1410,13 @@ export const substanceFormRouter = createTRPCRouter({
             `${activity}:\n  - ${options.join("\n  - ")}`,
         )
         .join("\n\n");
-      const existingContextText = buildExistingExtractionContext(form);
+      const extractionContextForm = certificateTwoDefaults
+        ? ({ ...form, ...certificateTwoDefaults } as typeof form)
+        : form;
+      const existingContextText =
+        buildExistingExtractionContext(extractionContextForm);
 
-      const prompt = `You are an expert at extracting information from financial and corporate documents for Guernsey Certificate 3 Economic Substance Register reporting.
+      const prompt = `You are an expert at extracting information from financial and corporate documents for Guernsey ${certificateResolution.certificateType} Economic Substance Register reporting.
 
 Analyze the provided document(s) and extract all relevant information to fill out a Guernsey Economic Substance Register form.
 
@@ -1553,7 +1521,14 @@ IMPORTANT RULES:
 - allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey are helpful but not required. Extract them when the documents state them, otherwise leave them empty.
 - activityGrossIncome should be the turnover or gross income from the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
 - adequacyExpenditureDetails should be the operating expenditure relating to the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
-- If the entity has no relevant activity ("None of the above"), leave sections 6B, 7, 8, 9, and 10 empty.`;
+- If the entity has no relevant activity ("None of the above"), leave sections 6B, 7, 8, 9, and 10 empty.
+${certificateTwoDefaults ? `
+
+IMPORTANT CERTIFICATE 2 RULES:
+- Certificate 2 filings do not require financial statements upload or financial-statement extraction.
+- Keep the static Certificate 2 defaults: accounting period 01-01 to 31-12 for the tax year, entity activity "Dormant", relevant activity "None of the above", no multiple relevant activities, no intellectual property holding, FATCA/CRS/IGOR "No", and CbCR constituent entity "No".
+- Still extract any useful non-financial details you can from the uploaded supporting documents, such as entity name, entity type, addresses, company number, and Guernsey incorporation status.
+` : ""}`;
 
       console.log(
         "[AI Extraction] Calling generateObject with",
@@ -1603,16 +1578,20 @@ IMPORTANT RULES:
         result.object,
       ) as Partial<SubstanceFormData>;
 
-      // Apply defaults for fields that should have default values
-
       extractedData.certificateType = certificateResolution.certificateType;
       extractedData.taxReferenceNumber = normalizeTaxReferenceNumber({
         externalId: taxReturn.externalId,
         taxYear: taxReturn.taxYear,
       });
 
+      if (certificateTwoDefaults) {
+        Object.assign(extractedData, certificateTwoDefaults);
+      }
+
       // Default profitAllocation to "Investment" if not extracted
-      extractedData.profitAllocation ??= "Investment";
+      if (!certificateTwoDefaults) {
+        extractedData.profitAllocation ??= "Investment";
+      }
 
       // Clamp negative financial values to "0" — portal does not accept negatives
       if (extractedData.totalProfit) {
@@ -1673,23 +1652,25 @@ IMPORTANT RULES:
         ) ??
         normalizeEconomicClassificationCode(form.economicClassificationCode);
 
-      const contextualRelevantActivity = inferRelevantActivityFromContext(
-        extractedData.relevantActivity,
-        form.relevantActivity,
-        extractedData.entityActivity,
-        form.entityActivity,
-        extractedData.cigaPerformed,
-        extractedData.cigaDetails,
-        ...extractedTextContext,
-      );
+      if (!certificateTwoDefaults) {
+        const contextualRelevantActivity = inferRelevantActivityFromContext(
+          extractedData.relevantActivity,
+          form.relevantActivity,
+          extractedData.entityActivity,
+          form.entityActivity,
+          extractedData.cigaPerformed,
+          extractedData.cigaDetails,
+          ...extractedTextContext,
+        );
 
-      if (
-        !extractedData.relevantActivity ||
-        (extractedData.relevantActivity === "None of the above" &&
-          contextualRelevantActivity &&
-          contextualRelevantActivity !== "None of the above")
-      ) {
-        extractedData.relevantActivity = contextualRelevantActivity;
+        if (
+          !extractedData.relevantActivity ||
+          (extractedData.relevantActivity === "None of the above" &&
+            contextualRelevantActivity &&
+            contextualRelevantActivity !== "None of the above")
+        ) {
+          extractedData.relevantActivity = contextualRelevantActivity;
+        }
       }
 
       // Merge with existing data (AI data fills in gaps)
