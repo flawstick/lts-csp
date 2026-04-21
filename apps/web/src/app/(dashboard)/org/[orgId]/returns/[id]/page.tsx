@@ -63,6 +63,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { cn } from "@/lib/utils";
 
 type FileInfo = {
   url: string;
@@ -97,6 +98,65 @@ function isSupersededFiledReturnPdf(file: FileInfo): boolean {
 
 function isManagedFiledReturnPdf(file: FileInfo): boolean {
   return file.role === "filed_return_pdf" || isSupersededFiledReturnPdf(file);
+}
+
+function CertificateTypePicker(props: {
+  certificateType: "Certificate 2" | "Certificate 3" | null;
+  isUpdating: boolean;
+  disabled?: boolean;
+  align?: "start" | "center" | "end";
+  size?: "default" | "sm";
+  className?: string;
+  onSelect: (nextType: "Certificate 2" | "Certificate 3") => void;
+}) {
+  const {
+    certificateType,
+    isUpdating,
+    disabled,
+    align = "end",
+    size = "sm",
+    className,
+    onSelect,
+  } = props;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size={size}
+          disabled={disabled || isUpdating}
+          className={cn(
+            "w-[168px] justify-between gap-2",
+            size === "sm" ? "h-9" : "h-10",
+            className,
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+              {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            </span>
+            <span className="truncate">
+              {certificateType ?? "Certificate 3"}
+            </span>
+          </span>
+          <ChevronDown className="h-4 w-4 shrink-0" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align={align} className="w-44">
+        {(["Certificate 2", "Certificate 3"] as const).map((nextType) => (
+          <DropdownMenuItem
+            key={nextType}
+            onSelect={() => {
+              onSelect(nextType);
+            }}
+          >
+            Use {nextType}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 export default function ReturnDetailPage() {
@@ -777,33 +837,15 @@ export default function ReturnDetailPage() {
               </TabsList>
               {taxReturn.jurisdiction?.code === "GG" &&
               taxReturn.returnType === "economic_substance" ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={setCertificateTypeMutation.isPending}
-                    >
-                      {setCertificateTypeMutation.isPending ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : null}
-                      {activeCertificateType ?? "Certificate 3"}
-                      <ChevronDown className="ml-2 h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-44">
-                    {(["Certificate 2", "Certificate 3"] as const).map((nextType) => (
-                      <DropdownMenuItem
-                        key={nextType}
-                        onSelect={() => {
-                          void requestCertificateTypeChange(nextType);
-                        }}
-                      >
-                        Use {nextType}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <div className="shrink-0">
+                  <CertificateTypePicker
+                    certificateType={activeCertificateType}
+                    isUpdating={setCertificateTypeMutation.isPending}
+                    onSelect={(nextType) => {
+                      void requestCertificateTypeChange(nextType);
+                    }}
+                  />
+                </div>
               ) : null}
             </div>
 
@@ -1166,32 +1208,15 @@ export default function ReturnDetailPage() {
                         <div className="flex items-center justify-center gap-2">
                           {taxReturn.jurisdiction?.code === "GG" &&
                           taxReturn.returnType === "economic_substance" ? (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  disabled={setCertificateTypeMutation.isPending}
-                                >
-                                  {setCertificateTypeMutation.isPending ? (
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  ) : null}
-                                  {activeCertificateType ?? "Certificate 3"}
-                                  <ChevronDown className="ml-2 h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="center" className="w-44">
-                                {(["Certificate 2", "Certificate 3"] as const).map((nextType) => (
-                                  <DropdownMenuItem
-                                    key={nextType}
-                                    onSelect={() => {
-                                      void requestCertificateTypeChange(nextType);
-                                    }}
-                                  >
-                                    Use {nextType}
-                                  </DropdownMenuItem>
-                                ))}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                            <CertificateTypePicker
+                              certificateType={activeCertificateType}
+                              isUpdating={setCertificateTypeMutation.isPending}
+                              align="center"
+                              size="default"
+                              onSelect={(nextType) => {
+                                void requestCertificateTypeChange(nextType);
+                              }}
+                            />
                           ) : null}
                           <Button
                             onClick={handleCreateForm}
@@ -1357,6 +1382,18 @@ export default function ReturnDetailPage() {
                         );
                       })}
                     </div>
+                    {taxReturn.jurisdiction?.code === "GG" &&
+                    taxReturn.returnType === "economic_substance" ? (
+                      <div className="flex justify-end pt-2">
+                        <CertificateTypePicker
+                          certificateType={activeCertificateType}
+                          isUpdating={setCertificateTypeMutation.isPending}
+                          onSelect={(nextType) => {
+                            void requestCertificateTypeChange(nextType);
+                          }}
+                        />
+                      </div>
+                    ) : null}
                   </>
                 )}
               </div>
