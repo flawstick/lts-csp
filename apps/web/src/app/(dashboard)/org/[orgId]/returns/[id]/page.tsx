@@ -53,6 +53,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type FileInfo = {
   url: string;
@@ -92,6 +102,10 @@ export default function ReturnDetailPage() {
   );
   const [editingSection, setEditingSection] = useState<SectionId | null>(null);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
+  const [pendingCertificateType, setPendingCertificateType] = useState<
+    "Certificate 2" | "Certificate 3" | null
+  >(null);
+  const [isCertificateDialogOpen, setIsCertificateDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const utils = api.useUtils();
@@ -253,46 +267,74 @@ export default function ReturnDetailPage() {
       taxReturn.returnType === "economic_substance" &&
       certificateResolution.unresolved
     ) {
-      await setCertificateTypeMutation.mutateAsync({
+      const initializedCertificateType =
+        await setCertificateTypeMutation.mutateAsync({
         taxReturnId: taxReturn.id,
         certificateType: "Certificate 3",
         overwriteExisting: false,
       });
+      utils.substanceForm.getByTaxReturnId.setData(
+        { taxReturnId: taxReturn.id },
+        initializedCertificateType,
+      );
     }
     await createFormMutation.mutateAsync({ taxReturnId: taxReturn.id });
+    router.refresh();
   }, [
     taxReturn,
     substanceFormData?.certificateType,
     createFormMutation,
     setCertificateTypeMutation,
+    utils.substanceForm.getByTaxReturnId,
+    router,
   ]);
 
   const handleSetCertificateType = useCallback(
-    async (nextCertificateType: "Certificate 2" | "Certificate 3") => {
+    async (
+      nextCertificateType: "Certificate 2" | "Certificate 3",
+      overwriteExisting: boolean,
+    ) => {
       if (!taxReturn) return;
 
+      const nextForm = await setCertificateTypeMutation.mutateAsync({
+        taxReturnId: taxReturn.id,
+        certificateType: nextCertificateType,
+        overwriteExisting,
+      });
+
+      utils.substanceForm.getByTaxReturnId.setData(
+        { taxReturnId: taxReturn.id },
+        nextForm,
+      );
+      setPendingCertificateType(null);
+      setIsCertificateDialogOpen(false);
+      router.refresh();
+    },
+    [
+      taxReturn,
+      setCertificateTypeMutation,
+      utils.substanceForm.getByTaxReturnId,
+      router,
+    ],
+  );
+
+  const requestCertificateTypeChange = useCallback(
+    async (nextCertificateType: "Certificate 2" | "Certificate 3") => {
       const overwriteExisting =
         substanceFormData != null &&
         hasMeaningfulGuernseyFormData(
           substanceFormData as Partial<SubstanceFormData>,
         );
 
-      if (
-        overwriteExisting &&
-        !window.confirm(
-          `Switching this return to ${nextCertificateType} will update the current Guernsey form defaults while preserving existing shared answers where possible. Continue?`,
-        )
-      ) {
+      if (overwriteExisting) {
+        setPendingCertificateType(nextCertificateType);
+        setIsCertificateDialogOpen(true);
         return;
       }
 
-      await setCertificateTypeMutation.mutateAsync({
-        taxReturnId: taxReturn.id,
-        certificateType: nextCertificateType,
-        overwriteExisting,
-      });
+      await handleSetCertificateType(nextCertificateType, false);
     },
-    [taxReturn, setCertificateTypeMutation, substanceFormData],
+    [handleSetCertificateType, substanceFormData],
   );
 
   const handleSaveSection = useCallback(
@@ -364,7 +406,6 @@ export default function ReturnDetailPage() {
   const assignedFinancialStatementsFile =
     files.find((file) => file.role === "financial_statements") ?? null;
   const substanceForm = substanceFormData;
-  const missingFields = (substanceForm?.missingFields as string[]) ?? [];
   const certificateResolution = resolveGuernseyCertificateType({
     metadata:
       taxReturn.metadata && typeof taxReturn.metadata === "object"
@@ -372,6 +413,17 @@ export default function ReturnDetailPage() {
         : null,
     savedCertificateType: substanceForm?.certificateType ?? null,
   });
+  const effectiveSubstanceForm = substanceForm
+    ? ({
+        ...substanceForm,
+        certificateType:
+          certificateResolution.certificateType ??
+          substanceForm.certificateType ??
+          undefined,
+      } as typeof substanceForm)
+    : null;
+  const missingFields =
+    (effectiveSubstanceForm?.missingFields as string[]) ?? [];
   const isGuernseyCertificateUnresolved =
     taxReturn.jurisdiction?.code === "GG" &&
     taxReturn.returnType === "economic_substance" &&
@@ -383,7 +435,9 @@ export default function ReturnDetailPage() {
       return true;
     }
 
-    return section.conditional((substanceForm ?? {}) as Partial<SubstanceFormData>);
+    return section.conditional(
+      (effectiveSubstanceForm ?? {}) as Partial<SubstanceFormData>,
+    );
   });
 
   const statusConfig = {
@@ -408,6 +462,49 @@ export default function ReturnDetailPage() {
 
   return (
     <DirectionalTransition>
+      <AlertDialog
+        open={isCertificateDialogOpen}
+        onOpenChange={(open) => {
+          setIsCertificateDialogOpen(open);
+          if (!open) {
+            setPendingCertificateType(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch certificate type?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingCertificateType
+                ? `Switching this return to ${pendingCertificateType} will update the Guernsey form defaults while preserving shared answers where possible.`
+                : "Switching the certificate type will update the Guernsey form defaults."}{" "}
+              Review the form after switching in case any certificate-specific answers need adjustment.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={setCertificateTypeMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={
+                !pendingCertificateType || setCertificateTypeMutation.isPending
+              }
+              onClick={(event) => {
+                event.preventDefault();
+                if (!pendingCertificateType) {
+                  return;
+                }
+                void handleSetCertificateType(pendingCertificateType, true);
+              }}
+            >
+              {setCertificateTypeMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Switch
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <PageHeader>
         <Breadcrumb>
           <BreadcrumbList>
@@ -540,27 +637,8 @@ export default function ReturnDetailPage() {
                       key={certificateType}
                       variant={certificateType === "Certificate 2" ? "outline" : "default"}
                       disabled={setCertificateTypeMutation.isPending}
-                      onClick={async () => {
-                        const overwriteExisting =
-                          substanceForm != null &&
-                          hasMeaningfulGuernseyFormData(
-                            substanceForm as Partial<SubstanceFormData>,
-                          );
-
-                        if (
-                          overwriteExisting &&
-                          !window.confirm(
-                            `Switching this return to ${certificateType} will overwrite the current Guernsey form defaults. Continue?`,
-                          )
-                        ) {
-                          return;
-                        }
-
-                        await setCertificateTypeMutation.mutateAsync({
-                          taxReturnId: taxReturn.id,
-                          certificateType,
-                          overwriteExisting,
-                        });
+                      onClick={() => {
+                        void requestCertificateTypeChange(certificateType);
                       }}
                     >
                       {setCertificateTypeMutation.isPending ? (
@@ -582,14 +660,46 @@ export default function ReturnDetailPage() {
             }
             defaultValue="form"
           >
-            <TabsList>
-              <TabsTrigger value="form">Substance Form</TabsTrigger>
-              <TabsTrigger value="files">Files & Documents</TabsTrigger>
-              <TabsTrigger value="automation">
-                <Bot className="h-4 w-4" />
-                Automation
-              </TabsTrigger>
-            </TabsList>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <TabsList>
+                <TabsTrigger value="form">Substance Form</TabsTrigger>
+                <TabsTrigger value="files">Files & Documents</TabsTrigger>
+                <TabsTrigger value="automation">
+                  <Bot className="h-4 w-4" />
+                  Automation
+                </TabsTrigger>
+              </TabsList>
+              {taxReturn.jurisdiction?.code === "GG" &&
+              taxReturn.returnType === "economic_substance" ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={setCertificateTypeMutation.isPending}
+                    >
+                      {setCertificateTypeMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : null}
+                      {certificateResolution.certificateType ?? "Certificate 3"}
+                      <ChevronDown className="ml-2 h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    {(["Certificate 2", "Certificate 3"] as const).map((nextType) => (
+                      <DropdownMenuItem
+                        key={nextType}
+                        onSelect={() => {
+                          void requestCertificateTypeChange(nextType);
+                        }}
+                      >
+                        Use {nextType}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+            </div>
 
             <TabsContent value="automation">
               <div className="space-y-6">
@@ -968,7 +1078,7 @@ export default function ReturnDetailPage() {
                                   <DropdownMenuItem
                                     key={nextType}
                                     onSelect={() => {
-                                      void handleSetCertificateType(nextType);
+                                      void requestCertificateTypeChange(nextType);
                                     }}
                                   >
                                     Use {nextType}
@@ -1052,44 +1162,14 @@ export default function ReturnDetailPage() {
                       </div>
                     </div>
 
-                    {taxReturn.jurisdiction?.code === "GG" &&
-                    taxReturn.returnType === "economic_substance" ? (
-                      <div className="flex justify-end">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="outline"
-                              disabled={setCertificateTypeMutation.isPending}
-                            >
-                              {setCertificateTypeMutation.isPending ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              ) : null}
-                              {certificateResolution.certificateType ?? "Certificate 3"}
-                              <ChevronDown className="ml-2 h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-44">
-                            {(["Certificate 2", "Certificate 3"] as const).map((nextType) => (
-                              <DropdownMenuItem
-                                key={nextType}
-                                onSelect={() => {
-                                  void handleSetCertificateType(nextType);
-                                }}
-                              >
-                                Use {nextType}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    ) : null}
-
                     {/* Sections Grid */}
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                       {visibleSections.map((section) => {
                         const filledFields = section.fields.filter((f) => {
                           const val =
-                            substanceForm[f as keyof typeof substanceForm];
+                            effectiveSubstanceForm?.[
+                              f as keyof typeof effectiveSubstanceForm
+                            ];
                           return (
                             val !== undefined && val !== null && val !== ""
                           );
@@ -1125,8 +1205,8 @@ export default function ReturnDetailPage() {
                                 <div className="space-y-1.5 border-t pt-3">
                                   {section.fields.slice(0, 3).map((field) => {
                                     const value =
-                                      substanceForm[
-                                        field as keyof typeof substanceForm
+                                      effectiveSubstanceForm?.[
+                                        field as keyof typeof effectiveSubstanceForm
                                       ];
                                     if (
                                       value === undefined ||
@@ -1180,10 +1260,10 @@ export default function ReturnDetailPage() {
       </div>
 
       {/* Section Editor Dialog */}
-      {editingSection && substanceForm && (
+      {editingSection && effectiveSubstanceForm && (
         <SubstanceFormEditor
           sectionId={editingSection}
-          formData={substanceForm as Partial<SubstanceFormData>}
+          formData={effectiveSubstanceForm as Partial<SubstanceFormData>}
           open={!!editingSection}
           onOpenChange={(open) => !open && setEditingSection(null)}
           onSave={handleSaveSection}
