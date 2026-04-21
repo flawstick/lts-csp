@@ -22,7 +22,7 @@ import {
   Bot,
   MoreHorizontal,
 } from "@/lib/icons";
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -76,6 +76,17 @@ type FileInfo = {
 
 type SectionId = (typeof FORM_SECTIONS)[number]["id"];
 
+function readPersistedCertificateType(
+  storageKey: string,
+): "Certificate 2" | "Certificate 3" | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const value = window.sessionStorage.getItem(storageKey);
+  return value === "Certificate 2" || value === "Certificate 3" ? value : null;
+}
+
 function isSupersededFiledReturnPdf(file: FileInfo): boolean {
   return (
     file.role !== "filed_return_pdf" &&
@@ -94,6 +105,7 @@ export default function ReturnDetailPage() {
   const navigateWithTransition = useNavigateWithTransition();
   const orgId = params?.orgId as string;
   const id = params.id as string;
+  const certificateStorageKey = `guernsey-certificate-type:${id}`;
 
   const [isUploading, setIsUploading] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
@@ -108,7 +120,7 @@ export default function ReturnDetailPage() {
   const [isCertificateDialogOpen, setIsCertificateDialogOpen] = useState(false);
   const [localCertificateType, setLocalCertificateType] = useState<
     "Certificate 2" | "Certificate 3" | null
-  >(null);
+  >(() => readPersistedCertificateType(certificateStorageKey));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const utils = api.useUtils();
@@ -124,6 +136,41 @@ export default function ReturnDetailPage() {
       { taxReturnId: id },
       { enabled: !!id },
     );
+
+  const certificateResolution = resolveGuernseyCertificateType({
+    metadata:
+      taxReturn?.metadata && typeof taxReturn.metadata === "object"
+        ? (taxReturn.metadata as Record<string, unknown>)
+        : null,
+    savedCertificateType: substanceFormData?.certificateType ?? null,
+  });
+  const activeCertificateType =
+    localCertificateType ?? certificateResolution.certificateType;
+
+  useEffect(() => {
+    const persisted = readPersistedCertificateType(certificateStorageKey);
+    if (persisted && persisted !== localCertificateType) {
+      setLocalCertificateType(persisted);
+    }
+  }, [certificateStorageKey, localCertificateType]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (
+      localCertificateType &&
+      certificateResolution.certificateType === localCertificateType
+    ) {
+      window.sessionStorage.removeItem(certificateStorageKey);
+      setLocalCertificateType(null);
+    }
+  }, [
+    certificateResolution.certificateType,
+    certificateStorageKey,
+    localCertificateType,
+  ]);
 
   const addFileMutation = api.taxReturn.addFile.useMutation({
     onSuccess: () => utils.taxReturn.getById.invalidate({ id }),
@@ -265,6 +312,12 @@ export default function ReturnDetailPage() {
       taxReturn.returnType === "economic_substance" &&
       certificateResolution.unresolved
     ) {
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(
+          certificateStorageKey,
+          "Certificate 3",
+        );
+      }
       setLocalCertificateType("Certificate 3");
       const initializedCertificateType =
         await setCertificateTypeMutation.mutateAsync({
@@ -302,6 +355,7 @@ export default function ReturnDetailPage() {
     }
     await createFormMutation.mutateAsync({ taxReturnId: taxReturn.id });
   }, [
+    certificateStorageKey,
     id,
     taxReturn,
     substanceFormData?.certificateType,
@@ -320,6 +374,12 @@ export default function ReturnDetailPage() {
 
       setPendingCertificateType(null);
       setIsCertificateDialogOpen(false);
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(
+          certificateStorageKey,
+          nextCertificateType,
+        );
+      }
       setLocalCertificateType(nextCertificateType);
 
       try {
@@ -362,6 +422,7 @@ export default function ReturnDetailPage() {
       }
     },
     [
+      certificateStorageKey,
       id,
       taxReturn,
       setCertificateTypeMutation,
@@ -458,15 +519,6 @@ export default function ReturnDetailPage() {
   const assignedFinancialStatementsFile =
     files.find((file) => file.role === "financial_statements") ?? null;
   const substanceForm = substanceFormData;
-  const certificateResolution = resolveGuernseyCertificateType({
-    metadata:
-      taxReturn.metadata && typeof taxReturn.metadata === "object"
-        ? (taxReturn.metadata as Record<string, unknown>)
-        : null,
-    savedCertificateType: substanceForm?.certificateType ?? null,
-  });
-  const activeCertificateType =
-    localCertificateType ?? certificateResolution.certificateType;
   const effectiveSubstanceForm = substanceForm
     ? ({
         ...substanceForm,

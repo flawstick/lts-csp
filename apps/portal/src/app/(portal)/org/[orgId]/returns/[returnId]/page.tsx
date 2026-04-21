@@ -47,10 +47,22 @@ import {
   type WorkspaceTab,
 } from "./_components/return-workspace-shared";
 
+function readPersistedCertificateType(
+  storageKey: string,
+): "Certificate 2" | "Certificate 3" | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const value = window.sessionStorage.getItem(storageKey);
+  return value === "Certificate 2" || value === "Certificate 3" ? value : null;
+}
+
 export default function ReturnWorkspacePage() {
   const params = useParams<{ orgId: string; returnId: string }>();
   const orgId = params.orgId;
   const returnId = params.returnId;
+  const certificateStorageKey = `portal-guernsey-certificate-type:${returnId}`;
   const navigate = useNavigateWithTransition();
 
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("form");
@@ -68,7 +80,7 @@ export default function ReturnWorkspacePage() {
   const [isCertificateDialogOpen, setIsCertificateDialogOpen] = useState(false);
   const [localCertificateType, setLocalCertificateType] = useState<
     "Certificate 2" | "Certificate 3" | null
-  >(null);
+  >(() => readPersistedCertificateType(certificateStorageKey));
   const [uploadedFileUrls, setUploadedFileUrls] = useState<Array<{
     name: string;
     url: string;
@@ -232,6 +244,31 @@ export default function ReturnWorkspacePage() {
       }),
     [effectiveDraftForm],
   );
+
+  useEffect(() => {
+    const persisted = readPersistedCertificateType(certificateStorageKey);
+    if (persisted && persisted !== localCertificateType) {
+      setLocalCertificateType(persisted);
+    }
+  }, [certificateStorageKey, localCertificateType]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (
+      localCertificateType &&
+      certificateResolution.certificateType === localCertificateType
+    ) {
+      window.sessionStorage.removeItem(certificateStorageKey);
+      setLocalCertificateType(null);
+    }
+  }, [
+    certificateResolution.certificateType,
+    certificateStorageKey,
+    localCertificateType,
+  ]);
 
   useEffect(() => {
     if (visibleSections.some((section) => section.id === activeSectionId)) {
@@ -494,6 +531,12 @@ export default function ReturnWorkspacePage() {
         selectedReturn?.returnType === "economic_substance" &&
         certificateResolution.unresolved
       ) {
+        if (typeof window !== "undefined") {
+          window.sessionStorage.setItem(
+            certificateStorageKey,
+            "Certificate 3",
+          );
+        }
         setLocalCertificateType("Certificate 3");
         const initializedCertificateType =
           await setCertificateTypeMutation.mutateAsync({
@@ -554,6 +597,12 @@ export default function ReturnWorkspacePage() {
 
     setPendingCertificateType(null);
     setIsCertificateDialogOpen(false);
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem(
+        certificateStorageKey,
+        nextCertificateType,
+      );
+    }
     setLocalCertificateType(nextCertificateType);
 
     try {
