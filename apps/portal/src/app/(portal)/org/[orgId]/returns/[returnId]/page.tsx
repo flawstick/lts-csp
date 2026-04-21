@@ -67,6 +67,9 @@ export default function ReturnWorkspacePage() {
     "Certificate 2" | "Certificate 3" | null
   >(null);
   const [isCertificateDialogOpen, setIsCertificateDialogOpen] = useState(false);
+  const [localCertificateType, setLocalCertificateType] = useState<
+    "Certificate 2" | "Certificate 3" | null
+  >(null);
   const [uploadedFileUrls, setUploadedFileUrls] = useState<Array<{
     name: string;
     url: string;
@@ -209,15 +212,25 @@ export default function ReturnWorkspacePage() {
       }),
     [selectedReturn?.metadata, substanceFormQuery.data?.certificateType],
   );
+  const activeCertificateType =
+    localCertificateType ?? certificateResolution.certificateType;
   const isGuernseyCertificateUnresolved = Boolean(
     selectedReturn?.jurisdictionCode === "GG" &&
       selectedReturn?.returnType === "economic_substance" &&
       certificateResolution.unresolved,
   );
   const isCertificateTwo =
-    certificateResolution.certificateType === "Certificate 2";
+    activeCertificateType === "Certificate 2";
   const requiresFinancialStatements =
     selectedReturn?.jurisdictionCode === "GG" && !isCertificateTwo;
+  const effectiveDraftForm = useMemo(
+    () => ({
+      ...draftForm,
+      certificateType:
+        activeCertificateType ?? draftForm.certificateType ?? undefined,
+    }),
+    [activeCertificateType, draftForm],
+  );
 
   const visibleSections = useMemo(
     () =>
@@ -225,9 +238,9 @@ export default function ReturnWorkspacePage() {
         if (!("conditional" in section) || !section.conditional) {
           return true;
         }
-        return section.conditional(draftForm);
+        return section.conditional(effectiveDraftForm);
       }),
-    [draftForm],
+    [effectiveDraftForm],
   );
 
   useEffect(() => {
@@ -258,9 +271,18 @@ export default function ReturnWorkspacePage() {
   const guernseyLockMessage =
     "This Guernsey ESR is locked because the return is already completed in the Guernsey Tax Portal.";
   const draftMissingFields = useMemo(
-    () => getMissingFields(draftForm),
-    [draftForm],
+    () => getMissingFields(effectiveDraftForm),
+    [effectiveDraftForm],
   );
+
+  useEffect(() => {
+    if (
+      localCertificateType &&
+      certificateResolution.certificateType === localCertificateType
+    ) {
+      setLocalCertificateType(null);
+    }
+  }, [localCertificateType, certificateResolution.certificateType]);
 
   const showMessage = (message: string) => {
     const isError =
@@ -491,6 +513,7 @@ export default function ReturnWorkspacePage() {
         selectedReturn?.returnType === "economic_substance" &&
         certificateResolution.unresolved
       ) {
+        setLocalCertificateType("Certificate 3");
         const initializedCertificateType =
           await setCertificateTypeMutation.mutateAsync({
             orgId,
@@ -528,26 +551,33 @@ export default function ReturnWorkspacePage() {
   ) => {
     if (!selectedReturn) return;
 
-    const nextForm = await setCertificateTypeMutation.mutateAsync({
-      orgId,
-      taxReturnId: selectedReturn.id,
-      certificateType: nextCertificateType,
-      overwriteExisting,
-    });
-
-    utils.portalReturns.getSubstanceForm.setData(
-      {
-        orgId,
-        taxReturnId: selectedReturn.id,
-      },
-      nextForm,
-    );
-    setDraftForm(sanitizeFormData(nextForm));
     setPendingCertificateType(null);
     setIsCertificateDialogOpen(false);
-    router.refresh();
+    setLocalCertificateType(nextCertificateType);
 
-    showMessage(`Switched to ${nextCertificateType}.`);
+    try {
+      const nextForm = await setCertificateTypeMutation.mutateAsync({
+        orgId,
+        taxReturnId: selectedReturn.id,
+        certificateType: nextCertificateType,
+        overwriteExisting,
+      });
+
+      utils.portalReturns.getSubstanceForm.setData(
+        {
+          orgId,
+          taxReturnId: selectedReturn.id,
+        },
+        nextForm,
+      );
+      setDraftForm(sanitizeFormData(nextForm));
+      showMessage(`Switched to ${nextCertificateType}.`);
+    } catch (error) {
+      setLocalCertificateType(null);
+      throw error;
+    } finally {
+      router.refresh();
+    }
   };
 
   const requestCertificateTypeChange = async (
@@ -816,12 +846,12 @@ export default function ReturnWorkspacePage() {
 
               <div className="flex flex-wrap items-start justify-end gap-3">
                 {selectedReturn.jurisdictionCode === "GG" &&
-                certificateResolution.certificateType ? (
+                activeCertificateType ? (
                   <div className="space-y-1 text-right">
                     <span className="inline-flex items-center rounded-full border border-border/70 bg-background px-3 py-1 text-xs font-medium">
-                      {certificateResolution.certificateType}
+                      {activeCertificateType}
                     </span>
-                    {certificateResolution.certificateType === "Certificate 2" ? (
+                    {activeCertificateType === "Certificate 2" ? (
                       <p className="text-muted-foreground text-[11px]">
                         No accounts upload or AI extraction
                       </p>
@@ -854,7 +884,7 @@ export default function ReturnWorkspacePage() {
               readOnlyMessage={guernseyLockMessage}
               certificateType={
                 selectedReturn.jurisdictionCode === "GG"
-                  ? (certificateResolution.certificateType ?? "Certificate 3")
+                  ? (activeCertificateType ?? "Certificate 3")
                   : null
               }
               showCertificateTypeControl={
