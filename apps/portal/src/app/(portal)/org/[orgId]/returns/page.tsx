@@ -678,7 +678,8 @@ export default function OrgReturnsPage() {
                     const requiresFinancialStatementsForRow =
                       (row.jurisdictionCode === "GG" && !isRowCertificateTwo) ||
                       isJerseyCompanyRow;
-                    const isMarkedReady = Boolean(row.readyForSubmissionAt);
+                    const isMarkedReady =
+                      Boolean(row.readyForSubmissionAt) || status === "completed";
                     const isSubmittable =
                       Boolean(row.isSubstanceComplete) &&
                       (!requiresFinancialStatementsForRow ||
@@ -723,7 +724,7 @@ export default function OrgReturnsPage() {
                         <td className="px-4 py-3">
                           <span
                             className={cn(
-                              "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-medium",
+                              "inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border px-2 py-1 text-xs font-medium",
                               isMarkedReady
                                 ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                                 : isSubmittable
@@ -743,7 +744,7 @@ export default function OrgReturnsPage() {
                               ? "Ready"
                               : isSubmittable
                                 ? "Ready to submit"
-                                : "Awaiting submission"}
+                                : "Awaiting"}
                           </span>
                         </td>
                         <td className="text-muted-foreground px-4 py-3">

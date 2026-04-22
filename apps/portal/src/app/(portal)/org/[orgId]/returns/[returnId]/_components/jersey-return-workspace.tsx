@@ -49,7 +49,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -72,6 +71,9 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -248,6 +250,9 @@ export function JerseyReturnWorkspace({
     Array<{ name: string; url: string; type: string }> | null
   >(null);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+  const [isDismissDialogOpen, setIsDismissDialogOpen] = useState(false);
+  const canDismiss = selectedStatus !== "completed" && Boolean(onDismiss);
+  const canRestore = selectedStatus === "dismissed" && Boolean(onUndismiss);
 
   const portalFormQuery = api.portalReturns.getJerseyCompanyReturnForm.useQuery(
     {
@@ -849,42 +854,6 @@ export function JerseyReturnWorkspace({
                   Revert submission
                 </Button>
               ) : null}
-              {selectedStatus === "dismissed" && onUndismiss ? (
-                <Button
-                  variant="outline"
-                  onClick={onUndismiss}
-                  disabled={isDismissing}
-                >
-                  <RotateCcw className="size-4" />
-                  Restore
-                </Button>
-              ) : selectedStatus !== "completed" && onDismiss ? (
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="destructive" disabled={isDismissing}>
-                      <XCircle className="size-4" />
-                      Dismiss
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Dismiss this return?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will mark the return as dismissed. You can restore it later from the returns list.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        className={buttonVariants({ variant: "destructive" })}
-                        onClick={onDismiss}
-                      >
-                        Dismiss
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              ) : null}
               {selectedReturn.link ? (
                 <Button variant="outline" asChild>
                   <a
@@ -939,20 +908,74 @@ export function JerseyReturnWorkspace({
                 </HoverCardContent>
               </HoverCard>
               {!isClientAccessMode ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon-sm" className="size-9">
-                      <EllipsisVertical className="size-4" />
-                      <span className="sr-only">Actions</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <PortalClientAccessMenuSection
-                      taxReturnId={selectedReturn.id}
-                      entityName={selectedReturn.entityName}
-                    />
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <AlertDialog
+                  open={isDismissDialogOpen}
+                  onOpenChange={setIsDismissDialogOpen}
+                >
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon-sm" className="size-9">
+                        <EllipsisVertical className="size-4" />
+                        <span className="sr-only">Actions</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <PortalClientAccessMenuSection
+                        taxReturnId={selectedReturn.id}
+                        entityName={selectedReturn.entityName}
+                      />
+                      {canRestore || canDismiss ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel>Return actions</DropdownMenuLabel>
+                          {canRestore ? (
+                            <DropdownMenuItem
+                              onSelect={(event) => {
+                                event.preventDefault();
+                                onUndismiss?.();
+                              }}
+                              disabled={isDismissing}
+                            >
+                              <RotateCcw className="size-4" />
+                              Restore
+                            </DropdownMenuItem>
+                          ) : null}
+                          {canDismiss ? (
+                            <DropdownMenuItem
+                              variant="destructive"
+                              disabled={isDismissing}
+                              onSelect={(event) => {
+                                event.preventDefault();
+                                setIsDismissDialogOpen(true);
+                              }}
+                            >
+                              <XCircle className="size-4" />
+                              Dismiss
+                            </DropdownMenuItem>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Dismiss this return?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will mark the return as dismissed. You can
+                        restore it later from the returns list.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        className={buttonVariants({ variant: "destructive" })}
+                        onClick={() => onDismiss?.()}
+                      >
+                        Dismiss
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               ) : null}
             </div>
           </div>
