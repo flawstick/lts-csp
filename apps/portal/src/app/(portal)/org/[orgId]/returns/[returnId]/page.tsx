@@ -110,6 +110,33 @@ export default function ReturnWorkspacePage() {
     },
   });
 
+  const myMembershipsQuery = api.portalAccess.getMyMemberships.useQuery();
+  const isAdmin = useMemo(() => {
+    const memberships = myMembershipsQuery.data?.memberships ?? [];
+    return memberships.some(
+      (membership) =>
+        membership.orgId === orgId && membership.role === "admin",
+    );
+  }, [myMembershipsQuery.data?.memberships, orgId]);
+
+  const markReadyMutation =
+    api.portalReturns.markReadyForSubmission.useMutation({
+      onSuccess: () => {
+        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        toast.success("Return marked ready for filing.");
+      },
+      onError: (error) => toast.error(error.message),
+    });
+
+  const revertReadyMutation =
+    api.portalReturns.revertReadyForSubmission.useMutation({
+      onSuccess: () => {
+        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        toast.success("Submission reverted.");
+      },
+      onError: (error) => toast.error(error.message),
+    });
+
   const selectedReturn = useMemo(
     () => (returnsQuery.data ?? []).find((row) => row.id === returnId) ?? null,
     [returnId, returnsQuery.data],
@@ -207,8 +234,10 @@ export default function ReturnWorkspacePage() {
     () =>
       resolveGuernseyCertificateType({
         metadata:
-          selectedReturn?.metadata && typeof selectedReturn.metadata === "object"
-            ? (selectedReturn.metadata as Record<string, unknown>)
+          selectedReturn?.metadata &&
+          typeof selectedReturn.metadata === "object" &&
+          !Array.isArray(selectedReturn.metadata)
+            ? selectedReturn.metadata
             : null,
         savedCertificateType: substanceFormQuery.data?.certificateType ?? null,
       }),
@@ -554,7 +583,7 @@ export default function ReturnWorkspacePage() {
                     ...(row.metadata &&
                     typeof row.metadata === "object" &&
                     !Array.isArray(row.metadata)
-                      ? (row.metadata as Record<string, unknown>)
+                      ? row.metadata
                       : {}),
                     certificateTypeHint: "Certificate 3",
                     certificateTypeSource: "manual_override",
@@ -622,7 +651,7 @@ export default function ReturnWorkspacePage() {
                   ...(row.metadata &&
                   typeof row.metadata === "object" &&
                   !Array.isArray(row.metadata)
-                    ? (row.metadata as Record<string, unknown>)
+                    ? row.metadata
                     : {}),
                   certificateTypeHint: nextCertificateType,
                   certificateTypeSource: "manual_override",
@@ -764,6 +793,36 @@ export default function ReturnWorkspacePage() {
             undismissMutation.mutate({ orgId, taxReturnId: selectedReturn.id })
           }
           isDismissing={dismissMutation.isPending || undismissMutation.isPending}
+          isAdmin={isAdmin}
+          readyForSubmissionAt={selectedReturn.readyForSubmissionAt ?? null}
+          isSubmittable={
+            Boolean(selectedReturn.isSubstanceComplete) &&
+            selectedFiles.some((f) => f.role === "financial_statements")
+          }
+          submittabilityBlockReason={
+            !selectedReturn.isSubstanceComplete
+              ? "Complete every required field in the Jersey return first."
+              : !selectedFiles.some(
+                    (f) => f.role === "financial_statements",
+                  )
+                ? "Attach the signed financial statements before marking this return ready."
+                : null
+          }
+          onMarkReadyForSubmission={() =>
+            markReadyMutation.mutate({
+              orgId,
+              taxReturnId: selectedReturn.id,
+            })
+          }
+          onRevertReadyForSubmission={() =>
+            revertReadyMutation.mutate({
+              orgId,
+              taxReturnId: selectedReturn.id,
+            })
+          }
+          isTogglingReadyForSubmission={
+            markReadyMutation.isPending || revertReadyMutation.isPending
+          }
         />
       </DirectionalTransition>
     );
@@ -868,6 +927,32 @@ export default function ReturnWorkspacePage() {
           }
           isDismissing={
             dismissMutation.isPending || undismissMutation.isPending
+          }
+          isAdmin={isAdmin}
+          readyForSubmissionAt={selectedReturn.readyForSubmissionAt ?? null}
+          isSubmittable={
+            Boolean(selectedReturn.isSubstanceComplete) &&
+            (!requiresFinancialStatements ||
+              selectedFiles.some((f) => f.role === "financial_statements"))
+          }
+          submittabilityBlockReason={
+            !selectedReturn.isSubstanceComplete
+              ? "Complete every required field in the substance form first."
+              : requiresFinancialStatements &&
+                  !selectedFiles.some(
+                    (f) => f.role === "financial_statements",
+                  )
+                ? "Attach the signed financial statements before marking this Certificate 3 ready."
+                : null
+          }
+          onMarkReadyForSubmission={() =>
+            markReadyMutation.mutate({ orgId, taxReturnId: returnId })
+          }
+          onRevertReadyForSubmission={() =>
+            revertReadyMutation.mutate({ orgId, taxReturnId: returnId })
+          }
+          isTogglingReadyForSubmission={
+            markReadyMutation.isPending || revertReadyMutation.isPending
           }
         />
       </div>

@@ -1009,6 +1009,23 @@ async function assertActiveMembership(ctx: {
   return membership;
 }
 
+async function assertAdminMembership(ctx: {
+  db: TRPCContext["db"];
+  accountId: string;
+  orgId: string;
+}) {
+  const membership = await assertActiveMembership(ctx);
+
+  if (membership.role !== "admin") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Only admins can perform this action.",
+    });
+  }
+
+  return membership;
+}
+
 type PortalDemoModeMap = Map<
   string,
   ReturnType<typeof parseOrgDemoModeSettings>
@@ -1954,6 +1971,8 @@ export const portalReturnsRouter = createTRPCRouter({
           pdfUrl: taxReturns.pdfUrl,
           files: taxReturns.files,
           metadata: taxReturns.metadata,
+          readyForSubmissionAt: taxReturns.readyForSubmissionAt,
+          readyForSubmissionBy: taxReturns.readyForSubmissionBy,
           updatedAt: taxReturns.updatedAt,
           jurisdictionCode: jurisdictions.code,
           jurisdictionName: jurisdictions.name,
@@ -2923,6 +2942,171 @@ export const portalReturnsRouter = createTRPCRouter({
       await ctx.db
         .update(taxReturns)
         .set({ status: "pending", updatedAt: new Date() })
+        .where(eq(taxReturns.id, input.taxReturnId));
+
+      return { success: true };
+    }),
+
+  markReadyForSubmission: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        taxReturnId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertAdminMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
+      });
+
+      if (!returnRecord) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
+      }
+
+      if (returnRecord.status === "dismissed") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Restore the return before marking it ready for submission.",
+        });
+      }
+
+      // Verify the underlying form is complete for the return type.
+      if (returnRecord.returnType === "economic_substance") {
+        const substanceForm = await ctx.db.query.substanceForms.findFirst({
+          where: eq(substanceForms.taxReturnId, input.taxReturnId),
+        });
+
+        if (!substanceForm?.isComplete) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "The Guernsey ESR form still has required fields to complete.",
+          });
+        }
+
+        // Cert 3 requires financial statements to be attached. Cert 2 does not.
+        const certificateResolution = resolveGuernseyCertificateType({
+          metadata:
+            returnRecord.metadata &&
+            typeof returnRecord.metadata === "object" &&
+            !Array.isArray(returnRecord.metadata)
+              ? returnRecord.metadata
+              : null,
+          savedCertificateType: substanceForm.certificateType ?? null,
+        });
+
+        const isCertificateTwo =
+          certificateResolution.certificateType === "Certificate 2";
+
+        if (!isCertificateTwo) {
+          const files = Array.isArray(returnRecord.files)
+            ? returnRecord.files
+            : [];
+          const hasFinancialStatements = files.some(
+            (file) => file?.role === "financial_statements",
+          );
+
+          if (!hasFinancialStatements) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message:
+                "Attach the signed financial statements before marking Certificate 3 ready.",
+            });
+          }
+        }
+      } else if (returnRecord.returnType === "company") {
+        const jerseyForm =
+          await ctx.db.query.jerseyCompanyReturnForms.findFirst({
+            where: eq(jerseyCompanyReturnForms.taxReturnId, input.taxReturnId),
+          });
+
+        if (!jerseyForm?.isComplete) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "The Jersey company return still has required fields to complete.",
+          });
+        }
+
+        const files = Array.isArray(returnRecord.files)
+          ? returnRecord.files
+          : [];
+        const hasFinancialStatements = files.some(
+          (file) => file?.role === "financial_statements",
+        );
+
+        if (!hasFinancialStatements) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Attach the signed financial statements before marking this return ready.",
+          });
+        }
+      }
+
+      const now = new Date();
+      await ctx.db
+        .update(taxReturns)
+        .set({
+          readyForSubmissionAt: now,
+          readyForSubmissionBy: account.id,
+          updatedAt: now,
+        })
+        .where(eq(taxReturns.id, input.taxReturnId));
+
+      return {
+        success: true,
+        readyForSubmissionAt: now.toISOString(),
+        readyForSubmissionBy: account.id,
+      };
+    }),
+
+  revertReadyForSubmission: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        taxReturnId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertAdminMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      const returnRecord = await getPortalReturnForOrg({
+        db: ctx.db,
+        orgId: input.orgId,
+        taxReturnId: input.taxReturnId,
+      });
+
+      if (!returnRecord) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Return not found.",
+        });
+      }
+
+      await ctx.db
+        .update(taxReturns)
+        .set({
+          readyForSubmissionAt: null,
+          readyForSubmissionBy: null,
+          updatedAt: new Date(),
+        })
         .where(eq(taxReturns.id, input.taxReturnId));
 
       return { success: true };

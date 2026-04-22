@@ -1,0 +1,3 @@
+ALTER TABLE "lts_tax_return" ADD COLUMN "ready_for_submission_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "lts_tax_return" ADD COLUMN "ready_for_submission_by" uuid;--> statement-breakpoint
+ALTER TABLE "lts_tax_return" ADD CONSTRAINT "lts_tax_return_ready_for_submission_by_lts_account_id_fk" FOREIGN KEY ("ready_for_submission_by") REFERENCES "public"."lts_account"("id") ON DELETE set null ON UPDATE no action;

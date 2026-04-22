@@ -547,6 +547,13 @@ export const taxReturns = createTable(
       }>
     >(), // Attached files (Vercel Blob URLs)
     metadata: jsonb().$type<Record<string, unknown>>(),
+    readyForSubmissionAt: timestamp("ready_for_submission_at", {
+      withTimezone: true,
+    }),
+    readyForSubmissionBy: uuid("ready_for_submission_by").references(
+      () => accounts.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

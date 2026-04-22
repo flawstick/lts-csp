@@ -85,6 +85,13 @@
       "when": 1776249390317,
       "tag": "0011_breezy_thor_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1776818370177,
+      "tag": "0012_chunky_omega_sentinel",
+      "breakpoints": true
     }
   ]
 }

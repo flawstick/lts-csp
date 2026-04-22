@@ -1,7 +1,17 @@
 "use client";
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { ArrowUpDown, EllipsisVertical, ExternalLink, Search, ShieldCheck, XCircle } from "lucide-react";
+import {
+  ArrowUpDown,
+  CheckCircle2,
+  EllipsisVertical,
+  ExternalLink,
+  RotateCcw,
+  Search,
+  Send,
+  ShieldCheck,
+  XCircle,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
@@ -170,6 +180,33 @@ export default function OrgReturnsPage() {
     },
     onError: (error) => toast.error(error.message),
   });
+
+  const myMembershipsQuery = api.portalAccess.getMyMemberships.useQuery();
+  const isAdmin = useMemo(() => {
+    const memberships = myMembershipsQuery.data?.memberships ?? [];
+    return memberships.some(
+      (membership) =>
+        membership.orgId === orgId && membership.role === "admin",
+    );
+  }, [myMembershipsQuery.data?.memberships, orgId]);
+
+  const markReadyMutation =
+    api.portalReturns.markReadyForSubmission.useMutation({
+      onSuccess: () => {
+        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        toast.success("Return marked ready for filing.");
+      },
+      onError: (error) => toast.error(error.message),
+    });
+
+  const revertReadyMutation =
+    api.portalReturns.revertReadyForSubmission.useMutation({
+      onSuccess: () => {
+        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        toast.success("Submission reverted.");
+      },
+      onError: (error) => toast.error(error.message),
+    });
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -612,6 +649,41 @@ export default function OrgReturnsPage() {
                     const isDismissed = status === "dismissed";
                     const returnHref = `/org/${orgId}/returns/${row.id}`;
 
+                    const rowFiles = Array.isArray(row.files) ? row.files : [];
+                    const hasFinancialStatements = rowFiles.some(
+                      (file) =>
+                        (file as { role?: string })?.role ===
+                        "financial_statements",
+                    );
+                    const rowCertificateResolution =
+                      row.jurisdictionCode === "GG" &&
+                      row.returnType === "economic_substance"
+                        ? resolveGuernseyCertificateType({
+                            metadata:
+                              row.metadata &&
+                              typeof row.metadata === "object" &&
+                              !Array.isArray(row.metadata)
+                                ? row.metadata
+                                : null,
+                            savedCertificateType:
+                              row.substanceCertificateType ?? null,
+                          })
+                        : null;
+                    const isRowCertificateTwo =
+                      rowCertificateResolution?.certificateType ===
+                      "Certificate 2";
+                    const isJerseyCompanyRow =
+                      row.jurisdictionCode === "JE" &&
+                      row.returnType === "company";
+                    const requiresFinancialStatementsForRow =
+                      (row.jurisdictionCode === "GG" && !isRowCertificateTwo) ||
+                      isJerseyCompanyRow;
+                    const isMarkedReady = Boolean(row.readyForSubmissionAt);
+                    const isSubmittable =
+                      Boolean(row.isSubstanceComplete) &&
+                      (!requiresFinancialStatementsForRow ||
+                        hasFinancialStatements);
+
                     return (
                       <tr
                         key={row.id}
@@ -651,17 +723,27 @@ export default function OrgReturnsPage() {
                         <td className="px-4 py-3">
                           <span
                             className={cn(
-                              "inline-flex rounded-lg border px-2 py-1 text-xs font-medium",
-                              row.isSubstanceComplete
-                                ? "border-emerald-500/35 bg-emerald-500/10 text-emerald-700"
-                                : "border-violet-500/35 bg-violet-500/10 text-violet-700",
+                              "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-medium",
+                              isMarkedReady
+                                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                : isSubmittable
+                                  ? "border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                                  : "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
                             )}
+                            title={
+                              !isMarkedReady && missingCount > 0
+                                ? `${missingCount} missing field(s)`
+                                : undefined
+                            }
                           >
-                            {row.isSubstanceComplete
+                            {isMarkedReady ? (
+                              <CheckCircle2 className="size-3.5" />
+                            ) : null}
+                            {isMarkedReady
                               ? "Ready"
-                              : missingCount > 0
-                                ? `${missingCount} missing`
-                                : "Pending"}
+                              : isSubmittable
+                                ? "Ready to submit"
+                                : "Awaiting submission"}
                           </span>
                         </td>
                         <td className="text-muted-foreground px-4 py-3">
@@ -693,6 +775,43 @@ export default function OrgReturnsPage() {
                                   <ExternalLink className="size-3.5" />
                                   Open
                                 </DropdownMenuItem>
+                                {isAdmin && !isDismissed ? (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    {isMarkedReady ? (
+                                      <DropdownMenuItem
+                                        className="cursor-pointer gap-2"
+                                        disabled={revertReadyMutation.isPending}
+                                        onClick={() =>
+                                          revertReadyMutation.mutate({
+                                            orgId,
+                                            taxReturnId: row.id,
+                                          })
+                                        }
+                                      >
+                                        <RotateCcw className="size-3.5" />
+                                        Revert submission
+                                      </DropdownMenuItem>
+                                    ) : (
+                                      <DropdownMenuItem
+                                        className="cursor-pointer gap-2"
+                                        disabled={
+                                          !isSubmittable ||
+                                          markReadyMutation.isPending
+                                        }
+                                        onClick={() =>
+                                          markReadyMutation.mutate({
+                                            orgId,
+                                            taxReturnId: row.id,
+                                          })
+                                        }
+                                      >
+                                        <Send className="size-3.5" />
+                                        Submit for filing
+                                      </DropdownMenuItem>
+                                    )}
+                                  </>
+                                ) : null}
                                 <DropdownMenuSeparator />
                                 {isDismissed ? (
                                   <DropdownMenuItem

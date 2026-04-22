@@ -5,12 +5,14 @@ import { useNavigateWithTransition } from "@/lib/navigate-with-transition";
 import {
   Building2,
   CalendarClock,
+  CheckCircle2,
   EllipsisVertical,
   ExternalLink,
   Loader2,
   Plus,
   RotateCcw,
   Save,
+  Send,
   Sparkles,
   Trash2,
   XCircle,
@@ -75,6 +77,11 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { PortalClientAccessMenuSection } from "@/components/portal-client-access-actions";
 
@@ -97,6 +104,13 @@ type JerseyReturnWorkspaceProps = {
   isDismissing?: boolean;
   accessToken?: string;
   onNavigateToGuidedFinish?: () => void;
+  isAdmin?: boolean;
+  isSubmittable?: boolean;
+  readyForSubmissionAt?: string | Date | null;
+  submittabilityBlockReason?: string | null;
+  onMarkReadyForSubmission?: () => void;
+  onRevertReadyForSubmission?: () => void;
+  isTogglingReadyForSubmission?: boolean;
 };
 
 type SectionKey = keyof JerseyCompanyReturnFormData;
@@ -202,8 +216,25 @@ export function JerseyReturnWorkspace({
   isDismissing,
   accessToken,
   onNavigateToGuidedFinish,
+  isAdmin = false,
+  isSubmittable = false,
+  readyForSubmissionAt = null,
+  submittabilityBlockReason = null,
+  onMarkReadyForSubmission,
+  onRevertReadyForSubmission,
+  isTogglingReadyForSubmission = false,
 }: JerseyReturnWorkspaceProps) {
   const navigate = useNavigateWithTransition();
+  const isMarkedReady = Boolean(readyForSubmissionAt);
+  const readyTimestamp = readyForSubmissionAt
+    ? readyForSubmissionAt instanceof Date
+      ? readyForSubmissionAt
+      : new Date(readyForSubmissionAt)
+    : null;
+  const readyTimestampText =
+    readyTimestamp && !Number.isNaN(readyTimestamp.getTime())
+      ? readyTimestamp.toLocaleString()
+      : null;
   const utils = api.useUtils();
   const isClientAccessMode = Boolean(accessToken);
 
@@ -763,9 +794,61 @@ export function JerseyReturnWorkspace({
                 Complete the Jersey company return sections, attach signed
                 financial statements, and review before filing.
               </p>
+              {isMarkedReady ? (
+                <div className="flex max-w-2xl items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-900 dark:text-emerald-200">
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+                  <div className="space-y-0.5">
+                    <p className="font-medium">Ready for filing</p>
+                    <p className="text-xs text-emerald-800/90 dark:text-emerald-300/90">
+                      An admin signed off on this return
+                      {readyTimestampText ? ` on ${readyTimestampText}` : ""}.
+                      LTS Tax can now submit it on the client&apos;s behalf.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="flex items-center gap-2">
+              {isAdmin && !isClientAccessMode && !isMarkedReady && onMarkReadyForSubmission ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Button
+                        variant="default"
+                        onClick={onMarkReadyForSubmission}
+                        disabled={!isSubmittable || isTogglingReadyForSubmission}
+                      >
+                        {isTogglingReadyForSubmission ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <Send className="size-4" />
+                        )}
+                        Submit for filing
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {!isSubmittable && submittabilityBlockReason ? (
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      {submittabilityBlockReason}
+                    </TooltipContent>
+                  ) : null}
+                </Tooltip>
+              ) : null}
+              {isAdmin && !isClientAccessMode && isMarkedReady && onRevertReadyForSubmission ? (
+                <Button
+                  variant="outline"
+                  onClick={onRevertReadyForSubmission}
+                  disabled={isTogglingReadyForSubmission}
+                >
+                  {isTogglingReadyForSubmission ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="size-4" />
+                  )}
+                  Revert submission
+                </Button>
+              ) : null}
               {selectedStatus === "dismissed" && onUndismiss ? (
                 <Button
                   variant="outline"

@@ -1989,10 +1989,17 @@ ${prompt}
           columns: { status: true },
         });
         if (preUpdateJob?.status !== "cancelled") {
+          // prepare_only success means: the agent reached the review/submit page
+          // and left it ready for a human to click the Review/Submit button in the
+          // platform. The TASK itself is fully done (mark `completed` so the UI
+          // stops showing a running state), but the TAX RETURN still needs human
+          // review before final filing (hence `review_required`, which the portal
+          // already filters/badges). Full-submit mode completes both.
           const successTaxReturnStatus =
-            submissionMode === "prepare_only" ? "in_progress" : "completed";
-          const successTaskStatus =
-            submissionMode === "prepare_only" ? "in_progress" : "completed";
+            submissionMode === "prepare_only"
+              ? "review_required"
+              : "completed";
+          const successTaskStatus = "completed";
 
           await db
             .update(taxReturns)

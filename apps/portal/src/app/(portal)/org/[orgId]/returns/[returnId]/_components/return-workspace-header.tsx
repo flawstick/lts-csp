@@ -4,10 +4,13 @@ import {
   ArrowLeft,
   Building2,
   CalendarClock,
+  CheckCircle2,
   EllipsisVertical,
+  Loader2,
+  RotateCcw,
+  Send,
   Sparkles,
   XCircle,
-  RotateCcw,
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -30,6 +33,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { PortalClientAccessMenuSection } from "@/components/portal-client-access-actions";
 import { SharedElement } from "@/components/view-transitions";
 
@@ -50,6 +58,13 @@ type ReturnWorkspaceHeaderProps = {
   onDismiss?: () => void;
   onUndismiss?: () => void;
   isDismissing?: boolean;
+  isAdmin?: boolean;
+  isSubmittable?: boolean;
+  readyForSubmissionAt?: string | Date | null;
+  submittabilityBlockReason?: string | null;
+  onMarkReadyForSubmission?: () => void;
+  onRevertReadyForSubmission?: () => void;
+  isTogglingReadyForSubmission?: boolean;
 };
 
 export function ReturnWorkspaceHeader({
@@ -62,9 +77,26 @@ export function ReturnWorkspaceHeader({
   onDismiss,
   onUndismiss,
   isDismissing,
+  isAdmin = false,
+  isSubmittable = false,
+  readyForSubmissionAt = null,
+  submittabilityBlockReason = null,
+  onMarkReadyForSubmission,
+  onRevertReadyForSubmission,
+  isTogglingReadyForSubmission = false,
 }: ReturnWorkspaceHeaderProps) {
   const params = useParams<{ orgId: string }>();
   const navigate = useNavigateWithTransition();
+  const isMarkedReady = Boolean(readyForSubmissionAt);
+  const readyTimestamp = readyForSubmissionAt
+    ? readyForSubmissionAt instanceof Date
+      ? readyForSubmissionAt
+      : new Date(readyForSubmissionAt)
+    : null;
+  const readyTimestampText =
+    readyTimestamp && !Number.isNaN(readyTimestamp.getTime())
+      ? readyTimestamp.toLocaleString()
+      : null;
 
   return (
     <div className="px-6 py-6">
@@ -126,9 +158,65 @@ export function ReturnWorkspaceHeader({
               {readOnlyMessage}
             </p>
           ) : null}
+          {isMarkedReady ? (
+            <div className="flex max-w-2xl items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-900 dark:text-emerald-200">
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+              <div className="space-y-0.5">
+                <p className="font-medium">Ready for filing</p>
+                <p className="text-xs text-emerald-800/90 dark:text-emerald-300/90">
+                  An admin signed off on this return
+                  {readyTimestampText ? ` on ${readyTimestampText}` : ""}. LTS
+                  Tax can now submit it on the client&apos;s behalf.
+                </p>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2">
+          {isAdmin && !isMarkedReady && onMarkReadyForSubmission ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    variant="default"
+                    onClick={onMarkReadyForSubmission}
+                    disabled={
+                      !isSubmittable ||
+                      isTogglingReadyForSubmission ||
+                      isReadOnly
+                    }
+                  >
+                    {isTogglingReadyForSubmission ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Send className="size-4" />
+                    )}
+                    Submit for filing
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {!isSubmittable && submittabilityBlockReason ? (
+                <TooltipContent side="bottom" className="max-w-xs">
+                  {submittabilityBlockReason}
+                </TooltipContent>
+              ) : null}
+            </Tooltip>
+          ) : null}
+          {isAdmin && isMarkedReady && onRevertReadyForSubmission ? (
+            <Button
+              variant="outline"
+              onClick={onRevertReadyForSubmission}
+              disabled={isTogglingReadyForSubmission}
+            >
+              {isTogglingReadyForSubmission ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RotateCcw className="size-4" />
+              )}
+              Revert submission
+            </Button>
+          ) : null}
           {selectedStatus === "dismissed" && onUndismiss ? (
             <Button variant="outline" onClick={onUndismiss} disabled={isDismissing}>
               <RotateCcw className="size-4" />
