@@ -7,32 +7,59 @@ import {
   CheckCircle2,
   FileText,
   FolderOpen,
+  ShieldCheck,
   UploadCloud,
 } from "lucide-react";
 import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
 
 import { api } from "@/trpc/react";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
-function OverviewChecklist({ items }: { items: string[] }) {
+function Stepper({ steps }: { steps: string[] }) {
   return (
-    <div className="space-y-3">
-      {items.map((item, index) => (
-        <div
-          key={item}
-          className="rounded-2xl border border-border bg-background px-4 py-4"
-        >
-          <div className="flex items-start gap-3">
-            <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-card text-xs font-semibold text-muted-foreground">
+    <ol className="relative space-y-4">
+      {steps.map((step, index) => {
+        const isLast = index === steps.length - 1;
+        return (
+          <li key={step} className="relative flex gap-3">
+            {!isLast ? (
+              <span
+                className="absolute left-[14px] top-7 h-[calc(100%-4px)] w-px bg-border"
+                aria-hidden
+              />
+            ) : null}
+            <span className="relative z-10 flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-card text-xs font-semibold text-foreground">
               {index + 1}
             </span>
-            <div className="min-w-0">
-              <p className="text-sm font-medium">{item}</p>
-            </div>
-          </div>
-        </div>
-      ))}
+            <p className="pt-0.5 text-sm leading-relaxed text-foreground">
+              {step}
+            </p>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function CapabilityRow({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted/70 text-foreground">
+        <Icon className="size-4" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-foreground">{title}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      </div>
     </div>
   );
 }
@@ -43,7 +70,15 @@ export default function ClientAccessOverviewPage() {
   const accessQuery = api.clientAccess.getAccess.useQuery({ token });
 
   if (accessQuery.isLoading) {
-    return <Skeleton className="h-[420px] rounded-[1.75rem]" />;
+    return (
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+        <Skeleton className="h-[420px] rounded-xl" />
+        <div className="space-y-4">
+          <Skeleton className="h-[180px] rounded-xl" />
+          <Skeleton className="h-[220px] rounded-xl" />
+        </div>
+      </section>
+    );
   }
 
   if (accessQuery.error || !accessQuery.data) {
@@ -57,11 +92,12 @@ export default function ClientAccessOverviewPage() {
   const { return: returnRecord } = accessQuery.data;
   const isGuernsey = returnRecord.jurisdictionCode === "GG";
   const isJerseyCompany =
-    returnRecord.jurisdictionCode === "JE" && returnRecord.returnType === "company";
+    returnRecord.jurisdictionCode === "JE" &&
+    returnRecord.returnType === "company";
   const certificateResolution = resolveGuernseyCertificateType({
     metadata:
       returnRecord.metadata && typeof returnRecord.metadata === "object"
-        ? (returnRecord.metadata as Record<string, unknown>)
+        ? returnRecord.metadata
         : null,
     savedCertificateType: null,
   });
@@ -90,35 +126,36 @@ export default function ClientAccessOverviewPage() {
           "Use guided finish for a quick final review before submission.",
         ]
       : isGuernsey
-    ? [
-        "Upload the ESR, signed financial statements, and any supporting files.",
-        "Run AI extraction to prefill the Guernsey economic substance form.",
-        "Review the sections, fix anything missing, and finish the guided flow.",
-      ]
-    : [
-        "Upload signed financial statements and the documents needed for the Jersey return.",
-        "Review the return workspace and confirm the available company details.",
-        "Complete the guided form section by section and save progress as needed.",
-      ];
+        ? [
+            "Upload the ESR, signed financial statements, and any supporting files.",
+            "Run AI extraction to prefill the Guernsey economic substance form.",
+            "Review the sections, fix anything missing, and finish the guided flow.",
+          ]
+        : [
+            "Upload signed financial statements and the documents needed for the Jersey return.",
+            "Review the return workspace and confirm the available company details.",
+            "Complete the guided form section by section and save progress as needed.",
+          ];
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-      <div className="client-access-card">
-        <div className="space-y-2">
-          <p className="client-access-kicker">How to complete this return</p>
+    <section className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)]">
+      <article className="client-access-card">
+        <div className="space-y-1.5">
+          <p className="client-access-kicker">Getting started</p>
           <h2 className="text-xl font-semibold tracking-tight">
-            Everything you need is inside this secure workspace
+            Here&apos;s how to complete this return
           </h2>
           <p className="text-sm text-muted-foreground">
-            Upload files, complete the form, and return later using the same link.
+            Everything you need is in this secure workspace. You can close this
+            page and come back anytime using the same link.
           </p>
         </div>
 
-        <div className="mt-5">
-          <OverviewChecklist items={checklist} />
+        <div className="mt-6">
+          <Stepper steps={checklist} />
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-2">
+        <div className="mt-6 flex flex-wrap gap-2">
           <Button asChild>
             <Link href={`/client-access/${token}/workspace`}>
               Open workspace
@@ -128,57 +165,57 @@ export default function ClientAccessOverviewPage() {
           {guidedFinishHref && !isGuernseyCertificateUnresolved ? (
             <Button variant="outline" asChild>
               <Link href={guidedFinishHref}>
-                Open guided finish
                 <FolderOpen className="size-4" />
+                Open guided finish
               </Link>
             </Button>
           ) : null}
         </div>
-      </div>
+      </article>
 
-      <div className="space-y-4">
-        <section className="client-access-card">
-          <div className="client-access-stat-grid">
-            <div className="client-access-stat">
-              <p className="client-access-stat-label">Jurisdiction</p>
-              <p className="client-access-stat-value text-base">
-                {returnRecord.jurisdictionName}
-              </p>
+      <aside className="space-y-4">
+        <div className="client-access-card">
+          <p className="client-access-kicker">At a glance</p>
+          <dl className="mt-4 divide-y divide-border text-sm">
+            <div className="flex items-center justify-between py-2.5">
+              <dt className="text-muted-foreground">Jurisdiction</dt>
+              <dd className="font-medium">{returnRecord.jurisdictionName}</dd>
             </div>
-            <div className="client-access-stat">
-              <p className="client-access-stat-label">Tax year</p>
-              <p className="client-access-stat-value">{returnRecord.taxYear}</p>
+            <div className="flex items-center justify-between py-2.5">
+              <dt className="text-muted-foreground">Tax year</dt>
+              <dd className="font-medium">{returnRecord.taxYear}</dd>
             </div>
-            <div className="client-access-stat">
-              <p className="client-access-stat-label">Files</p>
-              <p className="client-access-stat-value">{returnRecord.files.length}</p>
+            <div className="flex items-center justify-between py-2.5">
+              <dt className="text-muted-foreground">Files uploaded</dt>
+              <dd className="font-medium">{returnRecord.files.length}</dd>
             </div>
-          </div>
-        </section>
+          </dl>
+        </div>
 
-        <section className="client-access-card">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <CheckCircle2 className="size-4" />
-              What this link allows
-            </div>
-            <div className="grid gap-2 text-sm text-muted-foreground">
-              <div className="flex items-start gap-2 rounded-xl border border-border bg-background px-3 py-3">
-                <UploadCloud className="mt-0.5 size-4 shrink-0 text-foreground" />
-                <span>Upload documents directly to this return.</span>
-              </div>
-              <div className="flex items-start gap-2 rounded-xl border border-border bg-background px-3 py-3">
-                <FileText className="mt-0.5 size-4 shrink-0 text-foreground" />
-                <span>Review and complete the return form.</span>
-              </div>
-              <div className="flex items-start gap-2 rounded-xl border border-border bg-background px-3 py-3">
-                <FolderOpen className="mt-0.5 size-4 shrink-0 text-foreground" />
-                <span>Use guided finish for the full step-by-step flow.</span>
-              </div>
-            </div>
+        <div className="client-access-card">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="size-4 text-muted-foreground" />
+            <p className="text-sm font-semibold">What this link lets you do</p>
           </div>
-        </section>
-      </div>
+          <div className="mt-4 space-y-3.5">
+            <CapabilityRow
+              icon={UploadCloud}
+              title="Upload documents"
+              description="Attach signed accounts, ESR files, and supporting material."
+            />
+            <CapabilityRow
+              icon={FileText}
+              title="Review & edit the return"
+              description="Work through the form section by section and save as you go."
+            />
+            <CapabilityRow
+              icon={CheckCircle2}
+              title="Finish with guided flow"
+              description="Walk through the full step-by-step completion when you're ready."
+            />
+          </div>
+        </div>
+      </aside>
     </section>
   );
 }

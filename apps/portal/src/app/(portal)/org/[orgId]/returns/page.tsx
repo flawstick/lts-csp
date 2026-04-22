@@ -685,6 +685,7 @@ export default function OrgReturnsPage() {
                                   taxReturnId={row.id}
                                   entityName={row.entityName}
                                 />
+                                <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                   className="cursor-pointer gap-2"
                                   onClick={() => navigate(returnHref, "nav-forward")}

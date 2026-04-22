@@ -3,10 +3,9 @@
 import { Copy, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
 import {
+  DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/trpc/react";
 
@@ -21,6 +20,8 @@ export function PortalClientAccessMenuSection({
 }: PortalClientAccessMenuSectionProps) {
   const sendMutation = api.portalAccess.sendClientAccessLink.useMutation();
   const copyMutation = api.portalAccess.sendClientAccessLink.useMutation();
+
+  const isBusy = sendMutation.isPending || copyMutation.isPending;
 
   const handleSend = async () => {
     try {
@@ -64,44 +65,34 @@ export function PortalClientAccessMenuSection({
   return (
     <>
       <DropdownMenuLabel>Client access</DropdownMenuLabel>
-      <div
-        className="grid grid-cols-2 gap-2 px-2 pb-1"
-        onClick={(event) => event.stopPropagation()}
-      >
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={copyMutation.isPending || sendMutation.isPending}
-        onClick={() => {
+      <DropdownMenuItem
+        disabled={isBusy}
+        onSelect={(event) => {
+          event.preventDefault();
           void handleCopy();
         }}
       >
         {copyMutation.isPending ? (
-          <Loader2 className="size-4 animate-spin" />
+          <Loader2 className="animate-spin" />
         ) : (
-          <Copy className="size-4" />
+          <Copy />
         )}
         Copy link
-      </Button>
-
-      <Button
-        type="button"
-        size="sm"
-        disabled={sendMutation.isPending || copyMutation.isPending}
-        onClick={() => {
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        disabled={isBusy}
+        onSelect={(event) => {
+          event.preventDefault();
           void handleSend();
         }}
       >
         {sendMutation.isPending ? (
-          <Loader2 className="size-4 animate-spin" />
+          <Loader2 className="animate-spin" />
         ) : (
-          <Mail className="size-4" />
+          <Mail />
         )}
-        Send
-      </Button>
-      </div>
-      <DropdownMenuSeparator />
+        Send to client
+      </DropdownMenuItem>
     </>
   );
 }

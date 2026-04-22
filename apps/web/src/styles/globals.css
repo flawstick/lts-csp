@@ -168,6 +168,13 @@
   from { filter: blur(3px); opacity: 0; }
   to { filter: blur(0); opacity: 1; }
 }
+/* Like `fade` but without the opacity change — lets an element smooth-in
+   visually without the "ghostly fade-in" effect on moving text. Paired with
+   `slide` so the incoming page slides into place at full opacity. */
+@keyframes soften {
+  from { filter: blur(3px); }
+  to { filter: blur(0); }
+}
 @keyframes slide {
   from { translate: var(--slide-offset); }
   to { translate: 0; }
@@ -203,29 +210,46 @@
 }
 
 /* ----- Directional page transitions (nav-forward / nav-back) -----
-   Tagged via `addTransitionType` inside useNavigateWithTransition. */
+   Tagged via `addTransitionType` inside useNavigateWithTransition.
+
+   Asymmetric by design (the skill explicitly allows this):
+   - OLD (outgoing) uses `fade` → blur + opacity fade-out, so it can cleanly
+     disappear at the end of the transition.
+   - NEW (incoming) uses `soften` → blur fade-in ONLY, no opacity change.
+     This is the fix for "moving text that changes opacity" — the incoming
+     page's text slides into place at full opacity, so characters don't
+     ghost-fade while they're in motion.
+
+   Without the opacity fade on NEW, both snapshots are visible at opacity 1
+   during the transition. Force OLD on top via z-index so the opaque NEW
+   page doesn't pop into view shifted by the slide offset at t=0; OLD hides
+   it until the fade-out reveals NEW in its final slide path. */
 ::view-transition-old(.nav-forward) {
   --slide-offset: -60px;
+  z-index: 2;
   animation:
     var(--duration-exit) ease-in both fade reverse,
     var(--duration-move) ease-in-out both slide reverse;
 }
 ::view-transition-new(.nav-forward) {
   --slide-offset: 60px;
+  z-index: 1;
   animation:
-    var(--duration-enter) ease-out var(--duration-exit) both fade,
+    var(--duration-enter) ease-out var(--duration-exit) both soften,
     var(--duration-move) ease-in-out both slide;
 }
 ::view-transition-old(.nav-back) {
   --slide-offset: 60px;
+  z-index: 2;
   animation:
     var(--duration-exit) ease-in both fade reverse,
     var(--duration-move) ease-in-out both slide reverse;
 }
 ::view-transition-new(.nav-back) {
   --slide-offset: -60px;
+  z-index: 1;
   animation:
-    var(--duration-enter) ease-out var(--duration-exit) both fade,
+    var(--duration-enter) ease-out var(--duration-exit) both soften,
     var(--duration-move) ease-in-out both slide;
 }
 
