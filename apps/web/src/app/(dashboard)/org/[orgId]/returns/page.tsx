@@ -87,6 +87,7 @@ type TaxReturnRow = {
   substanceCertificateType?: string | null
   isSubstanceComplete: boolean | null
   missingSubstanceFieldCount: number | null
+  readyForSubmissionAt: Date | string | null
   jurisdiction: { code: string } | null
 }
 
@@ -225,10 +226,22 @@ function createColumns(
       id: "readiness",
       header: "Readiness",
       cell: ({ row }) => {
-        if (row.original.isSubstanceComplete) {
+        const isMarkedReady =
+          Boolean(row.original.readyForSubmissionAt) ||
+          row.original.status === "completed"
+
+        if (isMarkedReady) {
           return (
             <span className="inline-flex rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400">
               Ready
+            </span>
+          )
+        }
+
+        if (row.original.isSubstanceComplete) {
+          return (
+            <span className="inline-flex rounded-lg border border-blue-500/50 bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-800 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-400">
+              Awaiting signoff
             </span>
           )
         }

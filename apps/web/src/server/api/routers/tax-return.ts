@@ -842,6 +842,7 @@ export const taxReturnRouter = createTRPCRouter({
           pdfUrl: taxReturns.pdfUrl,
           createdAt: taxReturns.createdAt,
           metadata: taxReturns.metadata,
+          readyForSubmissionAt: taxReturns.readyForSubmissionAt,
           substanceCertificateType: substanceForms.certificateType,
           isSubstanceComplete: sql<boolean | null>`
             CASE
