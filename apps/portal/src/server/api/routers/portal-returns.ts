@@ -1160,7 +1160,19 @@ export async function extractSubstanceFormFromFilesInternal(input: {
 
   type FileContent = { type: "file"; data: string; mediaType: string };
   type TextContent = { type: "text"; text: string };
+  type DocumentBlock = {
+    fileName: string;
+    /**
+     * Ordered content entries for a single source document, kept tightly
+     * paired so the model can cross-reference vision against parsed text
+     * within the same context window position.
+     */
+    contents: Array<FileContent | TextContent>;
+  };
 
+  const documentBlocks: DocumentBlock[] = [];
+  // Retained for downstream validation + certificate type inference. Not used
+  // for model input ordering anymore (see `documentBlocks`).
   const fileContents: FileContent[] = [];
   const textContents: TextContent[] = [];
   const taxReturnFiles = Array.isArray(input.returnRecord.files)
@@ -1191,7 +1203,9 @@ export async function extractSubstanceFormFromFilesInternal(input: {
     "application/vnd.ms-excel",
   ];
 
-  for (const url of input.fileUrls) {
+  for (let index = 0; index < input.fileUrls.length; index++) {
+    const url = input.fileUrls[index]!;
+    const displayName = sourceFileNames[index] ?? url;
     const response = await fetch(url);
     if (!response.ok) {
       continue;
@@ -1211,10 +1225,12 @@ export async function extractSubstanceFormFromFilesInternal(input: {
     if (isCsv) {
       const csvText = await response.text();
       if (csvText.trim().length > 0) {
-        textContents.push({
+        const text: TextContent = {
           type: "text",
-          text: `[CSV File Content]\n${csvText}`,
-        });
+          text: `=== FILE ${index + 1}: ${displayName} (CSV) ===\n${csvText}`,
+        };
+        textContents.push(text);
+        documentBlocks.push({ fileName: displayName, contents: [text] });
       }
       continue;
     }
@@ -1232,15 +1248,17 @@ export async function extractSubstanceFormFromFilesInternal(input: {
             continue;
           }
           const csv = XLSX.utils.sheet_to_csv(sheet);
-          csvParts.push(`=== Sheet: ${sheetName} ===\n${csv}`);
+          csvParts.push(`--- Sheet: ${sheetName} ---\n${csv}`);
         }
 
         const allCsv = csvParts.join("\n\n");
         if (allCsv.trim().length > 0) {
-          textContents.push({
+          const text: TextContent = {
             type: "text",
-            text: `[Excel File Content]\n${allCsv}`,
-          });
+            text: `=== FILE ${index + 1}: ${displayName} (Excel) ===\n${allCsv}`,
+          };
+          textContents.push(text);
+          documentBlocks.push({ fileName: displayName, contents: [text] });
         }
       } catch {
         // Ignore malformed spreadsheets and continue processing valid files.
@@ -1255,24 +1273,40 @@ export async function extractSubstanceFormFromFilesInternal(input: {
           normalizedMedia.startsWith(type.split("/")[0]!),
       )
     ) {
-      if (
+      const isPdf =
         normalizedMedia.includes("application/pdf") ||
-        url.toLowerCase().endsWith(".pdf")
-      ) {
-        const firecrawlMarkdown = await scrapePdfMarkdownWithFirecrawl(url);
-        if (firecrawlMarkdown) {
-          textContents.push({
-            type: "text",
-            text: `[Firecrawl PDF Parse]\n${firecrawlMarkdown}`,
-          });
-        }
-      }
+        url.toLowerCase().endsWith(".pdf");
+      const kind = isPdf ? "PDF" : "image";
+      const header: TextContent = {
+        type: "text",
+        text: `=== FILE ${index + 1}: ${displayName} (${kind}) ===`,
+      };
 
-      fileContents.push({
+      const file: FileContent = {
         type: "file",
         data: Buffer.from(buffer).toString("base64"),
         mediaType,
-      });
+      };
+      fileContents.push(file);
+
+      const block: DocumentBlock = {
+        fileName: displayName,
+        contents: [header, file],
+      };
+
+      if (isPdf) {
+        const firecrawlMarkdown = await scrapePdfMarkdownWithFirecrawl(url);
+        if (firecrawlMarkdown) {
+          const parsedText: TextContent = {
+            type: "text",
+            text: `--- Firecrawl parsed text for FILE ${index + 1}: ${displayName} ---\n${firecrawlMarkdown}`,
+          };
+          textContents.push(parsedText);
+          block.contents.push(parsedText);
+        }
+      }
+
+      documentBlocks.push(block);
     }
   }
 
@@ -1370,7 +1404,10 @@ export async function extractSubstanceFormFromFilesInternal(input: {
     apiKey,
     baseURL: "https://ai-gateway.vercel.sh/v3/ai",
   });
-  const model = gateway("openai/gpt-5.4");
+  // Gemini 3 Pro has stronger native PDF + image understanding than GPT on
+  // the AI Gateway. We combine its vision with the Firecrawl parsed text so
+  // the model can cross-check tables/stamps/handwriting against OCR.
+  const model = gateway("google/gemini-3-pro-preview");
 
   const cigaOptionsText = Object.entries(CIGA_BY_ACTIVITY)
     .map(
@@ -1385,9 +1422,13 @@ export async function extractSubstanceFormFromFilesInternal(input: {
 
   const prompt = `You are extracting data for a Guernsey Economic Substance Register form for ${certificateResolution.certificateType} filings.
 
-Read all attached files and return values only when they are explicitly stated or clearly inferable.
-If a value is unknown, leave it empty.
-Some attached PDFs may also include a Firecrawl OCR/text parse. Use that parsed text as additional extraction support, but prioritize the source documents when they are clearer.
+You are receiving ${documentBlocks.length} source document${documentBlocks.length === 1 ? "" : "s"} below. Each one is delimited by a "=== FILE N: <name> ===" header. For PDFs you will see BOTH:
+  1. The native PDF itself (use your vision to read it directly — tables, stamps, signatures, handwritten notes, coloured cells, scanned pages, chart axes, figures inside the text).
+  2. A "Firecrawl parsed text" block immediately after, which is a machine-extracted OCR/markdown rendering of the same PDF.
+
+Treat vision as the authoritative source. Use the parsed text only to cross-check spellings/numbers when the visual rendering is ambiguous, unclear, or low-resolution. If the parsed text and the visual PDF disagree, trust what you SEE in the PDF. Never hallucinate a value that is not visible in either source.
+
+Read all attached files carefully and return values only when they are explicitly stated or clearly inferable from the documents. If a value is unknown or uncertain, leave it empty — never guess.
 
 ${existingContextText ? `=== EXISTING FORM CONTEXT ===\n${existingContextText}\n` : ""}
 
@@ -1421,10 +1462,15 @@ For CIGA, use these activity mappings:
 ${cigaOptionsText}
 `;
 
+  // Pair each source document inline: "FILE N header → native file → parsed
+  // text". Keeping vision and OCR adjacent (rather than all files, then all
+  // text) gives Gemini a much cleaner cross-reference signal per document.
+  const pairedDocumentContent: Array<TextContent | FileContent> =
+    documentBlocks.flatMap((block) => block.contents);
+
   const messageContent: Array<TextContent | FileContent> = [
     { type: "text", text: prompt },
-    ...fileContents,
-    ...textContents,
+    ...pairedDocumentContent,
   ];
 
   const MAX_RETRIES = 2;
