@@ -220,7 +220,8 @@ ${
     ? `
 
 ## FILING CONTACT INFORMATION
-- If the portal asks for a contact email, use: ${contactEmail ?? "[MISSING - STOP if required]"}
+- The contact email is requested **at the end of the filing flow** (on the final contact / declaration step before the review and submit page), not on the earlier substance sections. Do not enter it into earlier fields, and do not go looking for it before you reach that step — keep going through the form and fill it in when that final contact field appears.
+- When the portal asks for a contact email at the end of the form, use: ${contactEmail ?? "[MISSING - STOP if required]"}
 - If the portal asks for a contact telephone number, use: ${contactPhone ?? "[MISSING - STOP if required]"}
 - Do not invent other contact details. If the portal requires more than email/phone and it is not already visible on the portal, STOP and report **REQUIRES_ATTENTION**.
 `
