@@ -196,6 +196,16 @@ If a material field is missing from the saved form and documents, STOP and repor
     ? "This run is allowed to fully submit once every section has been validated in this run."
     : 'This run is **PREPARE ONLY**. You are **NOT** allowed to legally file the return in this mode. Reaching the final review/submit page with the submit button visible is success. Clicking **Submit**, **Confirm**, **Print**, **Download**, or any final filing action is a task failure.'
 }
+${
+  submissionMode === "prepare_only"
+    ? `
+
+**PREPARE-ONLY REDIRECT / REFILL RULE:** If this run reaches the case page and a legitimate government action such as **Prepare** or **Go to tax return** redirects to another Guernsey Revenue Service form, follow that redirect and treat the final redirected form as the operative form for this Prepare-only run, even if its title or product differs from the original task label. Do **NOT** stop solely because the redirected form is labeled Corporate Tax Return instead of Economic Substance Register.
+
+If the redirected form already contains completed or pre-filled answers, still open the relevant sections and re-check/re-fill them using the task data below. Do not skip fields merely because they are already populated. Preserve correct existing values, but update any visible fields that should match the task data.
+`
+    : ""
+}
 
 **SUMMARY PAGE SAFETY:** ${
   submissionMode === "submit_and_capture_pdf"
