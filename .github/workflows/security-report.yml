@@ -27,10 +27,10 @@ jobs:
 
       - name: Run dependency audit
         run: |
-          if npm audit --json > audit.json 2>/dev/null; then
+          if bun audit --json > audit.json 2>/dev/null; then
+            echo "Used bun audit"
+          elif npm audit --json > audit.json 2>/dev/null; then
             echo "Used npm audit"
-          elif bun audit --json > audit.json 2>/dev/null; then
-            echo "Used bun audit (npm audit unavailable without package-lock.json)"
           else
             echo '{"error":{"summary":"Dependency audit command failed"}}' > audit.json
           fi
@@ -60,6 +60,7 @@ jobs:
         uses: zaproxy/action-baseline@v0.12.0
         with:
           target: ${{ steps.targets.outputs.web_url }}
+          artifact_name: zap-web-baseline
           fail_action: false
           allow_issue_writing: false
         continue-on-error: true
@@ -78,6 +79,7 @@ jobs:
         uses: zaproxy/action-baseline@v0.12.0
         with:
           target: ${{ steps.targets.outputs.portal_url }}
+          artifact_name: zap-portal-baseline
           fail_action: false
           allow_issue_writing: false
         continue-on-error: true
