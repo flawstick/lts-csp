@@ -12,7 +12,7 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
 
@@ -28,6 +28,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -157,6 +158,64 @@ function matchesCertificateFilter(
   return resolution.certificateType === certificateFilter;
 }
 
+type ReturnListRow = {
+  id: string;
+  status: string;
+  returnType: string | null;
+  jurisdictionCode: string;
+  metadata: unknown;
+  substanceCertificateType?: string | null;
+  isSubstanceComplete: boolean | null;
+  files: unknown;
+  readyForSubmissionAt?: Date | string | null;
+};
+
+function getRowSubmittability(row: ReturnListRow) {
+  const rowFiles = Array.isArray(row.files) ? row.files : [];
+  const hasFinancialStatements = rowFiles.some(
+    (file) => (file as { role?: string })?.role === "financial_statements",
+  );
+  const rowCertificateResolution =
+    row.jurisdictionCode === "GG" && row.returnType === "economic_substance"
+      ? resolveGuernseyCertificateType({
+          metadata:
+            row.metadata &&
+            typeof row.metadata === "object" &&
+            !Array.isArray(row.metadata)
+              ? row.metadata
+              : null,
+          savedCertificateType: row.substanceCertificateType ?? null,
+        })
+      : null;
+  const isRowCertificateTwo =
+    rowCertificateResolution?.certificateType === "Certificate 2";
+  const isJerseyCompanyRow =
+    row.jurisdictionCode === "JE" && row.returnType === "company";
+  const requiresFinancialStatementsForRow =
+    (row.jurisdictionCode === "GG" && !isRowCertificateTwo) ||
+    isJerseyCompanyRow;
+
+  return (
+    Boolean(row.isSubstanceComplete) &&
+    (!requiresFinancialStatementsForRow || hasFinancialStatements)
+  );
+}
+
+function canBulkSubmitRow(row: ReturnListRow) {
+  const status = normalizeStatus(row.status);
+  if (status === "dismissed") {
+    return false;
+  }
+
+  const isMarkedReady =
+    Boolean(row.readyForSubmissionAt) || status === "completed";
+  if (isMarkedReady) {
+    return false;
+  }
+
+  return getRowSubmittability(row);
+}
+
 export default function OrgReturnsPage() {
   const params = useParams<{ orgId: string }>();
   const orgId = params.orgId;
@@ -204,6 +263,36 @@ export default function OrgReturnsPage() {
       onSuccess: () => {
         void utils.portalReturns.listByOrg.invalidate({ orgId });
         toast.success("Submission reverted.");
+      },
+      onError: (error) => toast.error(error.message),
+    });
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const bulkMarkReadyMutation =
+    api.portalReturns.bulkMarkReadyForSubmission.useMutation({
+      onSuccess: (result) => {
+        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        clearSelection();
+
+        if (result.succeeded > 0 && result.skipped.length === 0) {
+          toast.success(
+            `${result.succeeded} return${result.succeeded === 1 ? "" : "s"} marked ready for filing.`,
+          );
+          return;
+        }
+
+        if (result.succeeded > 0) {
+          toast.success(
+            `${result.succeeded} marked ready. ${result.skipped.length} skipped.`,
+          );
+          return;
+        }
+
+        toast.error(`No returns marked ready. ${result.skipped.length} skipped.`);
       },
       onError: (error) => toast.error(error.message),
     });
@@ -347,6 +436,49 @@ export default function OrgReturnsPage() {
     return filtered.slice(start, start + PAGE_SIZE);
   }, [currentPage, filtered]);
 
+  const pageRowIds = useMemo(() => rows.map((row) => row.id), [rows]);
+  const allPageSelected =
+    pageRowIds.length > 0 &&
+    pageRowIds.every((id) => selectedIds.has(id));
+  const somePageSelected =
+    pageRowIds.some((id) => selectedIds.has(id)) && !allPageSelected;
+
+  const bulkEligibleIds = useMemo(() => {
+    return Array.from(selectedIds).filter((id) => {
+      const row = returns.find((item) => item.id === id);
+      return row ? canBulkSubmitRow(row) : false;
+    });
+  }, [returns, selectedIds]);
+
+  const toggleRowSelection = useCallback((id: string, checked: boolean) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleAllPageRows = useCallback(
+    (checked: boolean) => {
+      setSelectedIds((previous) => {
+        const next = new Set(previous);
+        for (const id of pageRowIds) {
+          if (checked) {
+            next.add(id);
+          } else {
+            next.delete(id);
+          }
+        }
+        return next;
+      });
+    },
+    [pageRowIds],
+  );
+
   const readyCount = useMemo(
     () => returns.filter((row) => row.isSubstanceComplete).length,
     [returns],
@@ -403,6 +535,7 @@ export default function OrgReturnsPage() {
               onChange={(event) => {
                 setQuery(event.target.value);
                 setPage(1);
+                clearSelection();
               }}
               placeholder="Search entity, jurisdiction, external ID, or year"
               className="h-9 pl-9"
@@ -414,6 +547,7 @@ export default function OrgReturnsPage() {
             onValueChange={(value) => {
               setStatusFilter(value as StatusFilter);
               setPage(1);
+              clearSelection();
             }}
           >
             <SelectTrigger
@@ -436,6 +570,7 @@ export default function OrgReturnsPage() {
             onValueChange={(value) => {
               setJurisdictionFilter(value);
               setPage(1);
+              clearSelection();
             }}
           >
             <SelectTrigger
@@ -458,6 +593,7 @@ export default function OrgReturnsPage() {
             onValueChange={(value) => {
               setTaxYearFilter(value as TaxYearFilter);
               setPage(1);
+              clearSelection();
             }}
           >
             <SelectTrigger
@@ -503,6 +639,7 @@ export default function OrgReturnsPage() {
                   onCheckedChange={() => {
                     setCertificateFilter(value);
                     setPage(1);
+                    clearSelection();
                   }}
                 >
                   {label}
@@ -520,6 +657,55 @@ export default function OrgReturnsPage() {
             <ArrowUpDown className="size-4" />
             Sort: {sortKey}
           </Button>
+
+          {isAdmin && selectedIds.size > 0 ? (
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-muted-foreground text-xs">
+                {selectedIds.size} selected
+              </span>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    size="sm"
+                    className="h-9 gap-1.5"
+                    disabled={
+                      bulkEligibleIds.length === 0 ||
+                      bulkMarkReadyMutation.isPending
+                    }
+                  >
+                    <Send className="size-4" />
+                    Submit for filing ({bulkEligibleIds.length})
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      Submit {bulkEligibleIds.length} return
+                      {bulkEligibleIds.length === 1 ? "" : "s"} for filing?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This marks the selected returns as ready for LTS to file on
+                      the client&apos;s behalf. Returns that are incomplete,
+                      dismissed, or already submitted will be skipped.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() =>
+                        bulkMarkReadyMutation.mutate({
+                          orgId,
+                          taxReturnIds: bulkEligibleIds,
+                        })
+                      }
+                    >
+                      Submit for filing
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          ) : null}
         </div>
 
         {returnsQuery.isLoading ? (
@@ -600,6 +786,20 @@ export default function OrgReturnsPage() {
               <table className="w-full min-w-[980px] text-sm">
                 <thead>
                   <tr className="text-muted-foreground border-b">
+                    {isAdmin ? (
+                      <th className="w-10 px-4 py-3 text-left font-medium">
+                        <Checkbox
+                          checked={
+                            allPageSelected ||
+                            (somePageSelected ? "indeterminate" : false)
+                          }
+                          onCheckedChange={(value) =>
+                            toggleAllPageRows(value === true)
+                          }
+                          aria-label="Select all returns on this page"
+                        />
+                      </th>
+                    ) : null}
                     <th className="px-4 py-3 text-left font-medium">
                       <button
                         className="inline-flex items-center gap-1"
@@ -648,42 +848,9 @@ export default function OrgReturnsPage() {
 
                     const isDismissed = status === "dismissed";
                     const returnHref = `/org/${orgId}/returns/${row.id}`;
-
-                    const rowFiles = Array.isArray(row.files) ? row.files : [];
-                    const hasFinancialStatements = rowFiles.some(
-                      (file) =>
-                        (file as { role?: string })?.role ===
-                        "financial_statements",
-                    );
-                    const rowCertificateResolution =
-                      row.jurisdictionCode === "GG" &&
-                      row.returnType === "economic_substance"
-                        ? resolveGuernseyCertificateType({
-                            metadata:
-                              row.metadata &&
-                              typeof row.metadata === "object" &&
-                              !Array.isArray(row.metadata)
-                                ? row.metadata
-                                : null,
-                            savedCertificateType:
-                              row.substanceCertificateType ?? null,
-                          })
-                        : null;
-                    const isRowCertificateTwo =
-                      rowCertificateResolution?.certificateType ===
-                      "Certificate 2";
-                    const isJerseyCompanyRow =
-                      row.jurisdictionCode === "JE" &&
-                      row.returnType === "company";
-                    const requiresFinancialStatementsForRow =
-                      (row.jurisdictionCode === "GG" && !isRowCertificateTwo) ||
-                      isJerseyCompanyRow;
+                    const isSubmittable = getRowSubmittability(row);
                     const isMarkedReady =
                       Boolean(row.readyForSubmissionAt) || status === "completed";
-                    const isSubmittable =
-                      Boolean(row.isSubstanceComplete) &&
-                      (!requiresFinancialStatementsForRow ||
-                        hasFinancialStatements);
 
                     return (
                       <tr
@@ -691,6 +858,20 @@ export default function OrgReturnsPage() {
                         className="border-b/60 hover:bg-muted/25 cursor-pointer transition"
                         onClick={() => navigate(returnHref, "nav-forward")}
                       >
+                        {isAdmin ? (
+                          <td
+                            className="px-4 py-3"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <Checkbox
+                              checked={selectedIds.has(row.id)}
+                              onCheckedChange={(value) =>
+                                toggleRowSelection(row.id, value === true)
+                              }
+                              aria-label={`Select ${row.entityName}`}
+                            />
+                          </td>
+                        ) : null}
                         <td className="px-4 py-3">
                           <div className="min-w-0">
                             <SharedElement name={`return-${row.id}`}>
@@ -861,7 +1042,7 @@ export default function OrgReturnsPage() {
                   {!rows.length ? (
                     <tr>
                       <td
-                        colSpan={7}
+                        colSpan={isAdmin ? 8 : 7}
                         className="text-muted-foreground px-4 py-10 text-center"
                       >
                         No returns match the current filters.
@@ -884,9 +1065,10 @@ export default function OrgReturnsPage() {
                   variant="outline"
                   size="sm"
                   disabled={currentPage <= 1}
-                  onClick={() =>
-                    setPage((previous) => Math.max(1, previous - 1))
-                  }
+                  onClick={() => {
+                    clearSelection();
+                    setPage((previous) => Math.max(1, previous - 1));
+                  }}
                 >
                   Prev
                 </Button>
@@ -897,9 +1079,10 @@ export default function OrgReturnsPage() {
                   variant="outline"
                   size="sm"
                   disabled={currentPage >= pageCount}
-                  onClick={() =>
-                    setPage((previous) => Math.min(pageCount, previous + 1))
-                  }
+                  onClick={() => {
+                    clearSelection();
+                    setPage((previous) => Math.min(pageCount, previous + 1));
+                  }}
                 >
                   Next
                 </Button>

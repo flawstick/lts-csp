@@ -1124,6 +1124,94 @@ export function assertGuernseyPortalReturnUnlocked(
   }
 }
 
+type PortalReturnRecord = NonNullable<
+  Awaited<ReturnType<typeof getPortalReturnForOrg>>
+>;
+
+async function validateReturnReadyForSubmission(ctx: {
+  db: TRPCContext["db"];
+  returnRecord: PortalReturnRecord;
+  taxReturnId: string;
+}) {
+  if (ctx.returnRecord.status === "dismissed") {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Restore the return before marking it ready for submission.",
+    });
+  }
+
+  if (ctx.returnRecord.returnType === "economic_substance") {
+    const substanceForm = await ctx.db.query.substanceForms.findFirst({
+      where: eq(substanceForms.taxReturnId, ctx.taxReturnId),
+    });
+
+    if (!substanceForm?.isComplete) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message:
+          "The Guernsey ESR form still has required fields to complete.",
+      });
+    }
+
+    const certificateResolution = resolveGuernseyCertificateType({
+      metadata:
+        ctx.returnRecord.metadata &&
+        typeof ctx.returnRecord.metadata === "object" &&
+        !Array.isArray(ctx.returnRecord.metadata)
+          ? ctx.returnRecord.metadata
+          : null,
+      savedCertificateType: substanceForm.certificateType ?? null,
+    });
+
+    const isCertificateTwo =
+      certificateResolution.certificateType === "Certificate 2";
+
+    if (!isCertificateTwo) {
+      const files = Array.isArray(ctx.returnRecord.files)
+        ? ctx.returnRecord.files
+        : [];
+      const hasFinancialStatements = files.some(
+        (file) => file?.role === "financial_statements",
+      );
+
+      if (!hasFinancialStatements) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Attach the signed financial statements before marking Certificate 3 ready.",
+        });
+      }
+    }
+  } else if (ctx.returnRecord.returnType === "company") {
+    const jerseyForm = await ctx.db.query.jerseyCompanyReturnForms.findFirst({
+      where: eq(jerseyCompanyReturnForms.taxReturnId, ctx.taxReturnId),
+    });
+
+    if (!jerseyForm?.isComplete) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message:
+          "The Jersey company return still has required fields to complete.",
+      });
+    }
+
+    const files = Array.isArray(ctx.returnRecord.files)
+      ? ctx.returnRecord.files
+      : [];
+    const hasFinancialStatements = files.some(
+      (file) => file?.role === "financial_statements",
+    );
+
+    if (!hasFinancialStatements) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message:
+          "Attach the signed financial statements before marking this return ready.",
+      });
+    }
+  }
+}
+
 export async function extractSubstanceFormFromFilesInternal(input: {
   db: TRPCContext["db"];
   orgId: string;
@@ -3021,85 +3109,11 @@ export const portalReturnsRouter = createTRPCRouter({
         });
       }
 
-      if (returnRecord.status === "dismissed") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Restore the return before marking it ready for submission.",
-        });
-      }
-
-      // Verify the underlying form is complete for the return type.
-      if (returnRecord.returnType === "economic_substance") {
-        const substanceForm = await ctx.db.query.substanceForms.findFirst({
-          where: eq(substanceForms.taxReturnId, input.taxReturnId),
-        });
-
-        if (!substanceForm?.isComplete) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message:
-              "The Guernsey ESR form still has required fields to complete.",
-          });
-        }
-
-        // Cert 3 requires financial statements to be attached. Cert 2 does not.
-        const certificateResolution = resolveGuernseyCertificateType({
-          metadata:
-            returnRecord.metadata &&
-            typeof returnRecord.metadata === "object" &&
-            !Array.isArray(returnRecord.metadata)
-              ? returnRecord.metadata
-              : null,
-          savedCertificateType: substanceForm.certificateType ?? null,
-        });
-
-        const isCertificateTwo =
-          certificateResolution.certificateType === "Certificate 2";
-
-        if (!isCertificateTwo) {
-          const files = Array.isArray(returnRecord.files)
-            ? returnRecord.files
-            : [];
-          const hasFinancialStatements = files.some(
-            (file) => file?.role === "financial_statements",
-          );
-
-          if (!hasFinancialStatements) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message:
-                "Attach the signed financial statements before marking Certificate 3 ready.",
-            });
-          }
-        }
-      } else if (returnRecord.returnType === "company") {
-        const jerseyForm =
-          await ctx.db.query.jerseyCompanyReturnForms.findFirst({
-            where: eq(jerseyCompanyReturnForms.taxReturnId, input.taxReturnId),
-          });
-
-        if (!jerseyForm?.isComplete) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "The Jersey company return still has required fields to complete.",
-          });
-        }
-
-        const files = Array.isArray(returnRecord.files)
-          ? returnRecord.files
-          : [];
-        const hasFinancialStatements = files.some(
-          (file) => file?.role === "financial_statements",
-        );
-
-        if (!hasFinancialStatements) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message:
-              "Attach the signed financial statements before marking this return ready.",
-          });
-        }
-      }
+      await validateReturnReadyForSubmission({
+        db: ctx.db,
+        returnRecord,
+        taxReturnId: input.taxReturnId,
+      });
 
       const now = new Date();
       await ctx.db
@@ -3115,6 +3129,83 @@ export const portalReturnsRouter = createTRPCRouter({
         success: true,
         readyForSubmissionAt: now.toISOString(),
         readyForSubmissionBy: account.id,
+      };
+    }),
+
+  bulkMarkReadyForSubmission: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        taxReturnIds: z.array(z.string().uuid()).min(1).max(50),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const account = await ensurePortalAccount(ctx);
+      await assertAdminMembership({
+        db: ctx.db,
+        accountId: account.id,
+        orgId: input.orgId,
+      });
+
+      const now = new Date();
+      const skipped: Array<{ taxReturnId: string; reason: string }> = [];
+      const idsToUpdate: string[] = [];
+
+      for (const taxReturnId of input.taxReturnIds) {
+        const returnRecord = await getPortalReturnForOrg({
+          db: ctx.db,
+          orgId: input.orgId,
+          taxReturnId,
+        });
+
+        if (!returnRecord) {
+          skipped.push({ taxReturnId, reason: "Return not found." });
+          continue;
+        }
+
+        if (
+          returnRecord.readyForSubmissionAt ||
+          returnRecord.status === "completed"
+        ) {
+          skipped.push({
+            taxReturnId,
+            reason: "Already marked ready for submission.",
+          });
+          continue;
+        }
+
+        try {
+          await validateReturnReadyForSubmission({
+            db: ctx.db,
+            returnRecord,
+            taxReturnId,
+          });
+          idsToUpdate.push(taxReturnId);
+        } catch (error) {
+          skipped.push({
+            taxReturnId,
+            reason:
+              error instanceof TRPCError
+                ? error.message
+                : "Unable to mark return ready for submission.",
+          });
+        }
+      }
+
+      if (idsToUpdate.length > 0) {
+        await ctx.db
+          .update(taxReturns)
+          .set({
+            readyForSubmissionAt: now,
+            readyForSubmissionBy: account.id,
+            updatedAt: now,
+          })
+          .where(inArray(taxReturns.id, idsToUpdate));
+      }
+
+      return {
+        succeeded: idsToUpdate.length,
+        skipped,
       };
     }),
 
