@@ -1,0 +1,123 @@
+name: Security Report
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  security-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run dependency audit
+        run: |
+          if npm audit --json > audit.json 2>/dev/null; then
+            echo "Used npm audit"
+          elif bun audit --json > audit.json 2>/dev/null; then
+            echo "Used bun audit (npm audit unavailable without package-lock.json)"
+          else
+            echo '{"error":{"summary":"Dependency audit command failed"}}' > audit.json
+          fi
+          exit 0
+
+      - name: Resolve scan targets
+        id: targets
+        env:
+          WEB_PREVIEW_URL: ${{ secrets.WEB_PREVIEW_URL }}
+          PORTAL_PREVIEW_URL: ${{ secrets.PORTAL_PREVIEW_URL }}
+          PREVIEW_URL: ${{ secrets.PREVIEW_URL }}
+        run: |
+          WEB_URL="${WEB_PREVIEW_URL:-$PREVIEW_URL}"
+          PORTAL_URL="${PORTAL_PREVIEW_URL}"
+
+          if [ -z "$WEB_URL" ] && [ -z "$PORTAL_URL" ]; then
+            echo "Set WEB_PREVIEW_URL and/or PORTAL_PREVIEW_URL (or PREVIEW_URL for web only)."
+            exit 1
+          fi
+
+          mkdir -p zap-reports/web zap-reports/portal
+          echo "web_url=$WEB_URL" >> "$GITHUB_OUTPUT"
+          echo "portal_url=$PORTAL_URL" >> "$GITHUB_OUTPUT"
+
+      - name: OWASP ZAP baseline — Web (staff dashboard)
+        if: steps.targets.outputs.web_url != ''
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ steps.targets.outputs.web_url }}
+          fail_action: false
+          allow_issue_writing: false
+        continue-on-error: true
+
+      - name: Store Web ZAP report
+        if: steps.targets.outputs.web_url != ''
+        run: |
+          for file in report_md.html report_json.json report_html.zip; do
+            if [ -f "$file" ]; then
+              mv "$file" "zap-reports/web/$file"
+            fi
+          done
+
+      - name: OWASP ZAP baseline — Portal (client portal)
+        if: steps.targets.outputs.portal_url != ''
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ steps.targets.outputs.portal_url }}
+          fail_action: false
+          allow_issue_writing: false
+        continue-on-error: true
+
+      - name: Store Portal ZAP report
+        if: steps.targets.outputs.portal_url != ''
+        run: |
+          for file in report_md.html report_json.json report_html.zip; do
+            if [ -f "$file" ]; then
+              mv "$file" "zap-reports/portal/$file"
+            fi
+          done
+
+      - name: Install Puppeteer for PDF export
+        run: |
+          npm install --prefix scripts --ignore-scripts --no-audit --no-fund
+          npx --prefix scripts puppeteer browsers install chrome
+
+      - name: Build merged security report PDF
+        env:
+          REPO_NAME: ${{ github.repository }}
+          REPORT_DATE: ${{ github.run_started_at }}
+          AUDIT_JSON: audit.json
+          ZAP_TARGETS_JSON: >-
+            [
+              {"name":"Web (Staff Dashboard)","url":"${{ steps.targets.outputs.web_url }}","html":"zap-reports/web/report_md.html","json":"zap-reports/web/report_json.json"},
+              {"name":"Portal (Client Portal)","url":"${{ steps.targets.outputs.portal_url }}","html":"zap-reports/portal/report_md.html","json":"zap-reports/portal/report_json.json"}
+            ]
+          OUTPUT_HTML: security-report.html
+          OUTPUT_PDF: security-report.pdf
+        run: node scripts/build-report.js
+
+      - name: Upload security report PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: |
+            security-report.pdf
+            security-report.html
+            audit.json
+            zap-reports/**
+          if-no-files-found: warn
+          retention-days: 90

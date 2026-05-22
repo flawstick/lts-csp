@@ -1,0 +1,7 @@
+{
+  "name": "security-report-deps",
+  "private": true,
+  "dependencies": {
+    "puppeteer": "^24.10.0"
+  }
+}
