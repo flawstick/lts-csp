@@ -30,6 +30,10 @@ pnpm-debug.log*
 
 # Testing
 coverage
+security-report-output/
+security-report.pdf
+security-report.html
+audit.json
 
 # Docker
 *.local.dockerfile
