@@ -204,14 +204,14 @@ function summarizeZap(zapJson) {
   const summary = { ...empty, alerts };
 
   for (const alert of alerts) {
-    const risk = String(alert.riskdesc ?? alert.risk ?? "").toLowerCase();
+    const riskCode = String(alert.riskcode ?? "");
     summary.total += 1;
 
-    if (risk.includes("high")) {
+    if (riskCode === "3") {
       summary.high += 1;
-    } else if (risk.includes("medium")) {
+    } else if (riskCode === "2") {
       summary.medium += 1;
-    } else if (risk.includes("low")) {
+    } else if (riskCode === "1") {
       summary.low += 1;
     } else {
       summary.informational += 1;

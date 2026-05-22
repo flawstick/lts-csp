@@ -27,14 +27,14 @@ jobs:
 
       - name: Run dependency audit
         run: |
-          if bun audit --json > audit.json 2>/dev/null; then
-            echo "Used bun audit"
-          elif npm audit --json > audit.json 2>/dev/null; then
-            echo "Used npm audit"
-          else
-            echo '{"error":{"summary":"Dependency audit command failed"}}' > audit.json
+          bun audit --json > audit.json 2>/dev/null || true
+          if [ ! -s audit.json ]; then
+            echo '{"error":{"summary":"Dependency audit produced no output"}}' > audit.json
           fi
-          exit 0
+
+      - name: Set report date
+        id: report
+        run: echo "date=$(date -u +'%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
 
       - name: Resolve scan targets
         id: targets
@@ -101,7 +101,7 @@ jobs:
       - name: Build merged security report PDF
         env:
           REPO_NAME: ${{ github.repository }}
-          REPORT_DATE: ${{ github.run_started_at }}
+          REPORT_DATE: ${{ steps.report.outputs.date }}
           AUDIT_JSON: audit.json
           ZAP_TARGETS_JSON: >-
             [

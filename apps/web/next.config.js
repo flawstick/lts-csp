@@ -3,12 +3,21 @@
  * for Docker builds.
  */
 import "./src/env.js";
+import { getSecurityHeaders } from "../../packages/shared/security-headers.js";
 
 /** @type {import("next").NextConfig} */
 const config = {
   transpilePackages: ["@repo/database", "@repo/redis"],
   experimental: {
     viewTransition: true,
+  },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: getSecurityHeaders(),
+      },
+    ];
   },
   eslint: {
     // Warning: This allows production builds to successfully complete even if
