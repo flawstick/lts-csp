@@ -127,6 +127,7 @@ export function buildSubstanceFormPrompt(
     certificateType,
     relevantActivity: substanceForm.relevantActivity ?? null,
   });
+  const isPrepareOnly = submissionMode === "prepare_only";
   const missingFields = Array.isArray(substanceForm.missingFields)
     ? substanceForm.missingFields
     : [];
@@ -139,7 +140,11 @@ export function buildSubstanceFormPrompt(
 
   // Header and navigation
   sections.push(`
-# TASK: Complete Guernsey Economic Substance Register Form
+# TASK: ${
+    isPrepareOnly
+      ? "Prepare Guernsey return reached from case flow"
+      : "Complete Guernsey Economic Substance Register Form"
+  }
 
 ## LOGIN CREDENTIALS
 If you need to log in to the portal, use:
@@ -153,7 +158,11 @@ If prompted for CSP or secret credentials:
 
 ## NAVIGATION
 1. Go to: ${returnLink || portalUrl}
-2. You should see the Economic Substance Register form for: ${taxReturn.entityName}
+2. ${
+    isPrepareOnly
+      ? `Use the government return reached from this case as the operative form for ${taxReturn.entityName}. If the case view shows **Prepare**, **Go to tax return**, **Continue**, section names, or a review summary, follow those controls into the active return.`
+      : `You should see the Economic Substance Register form for: ${taxReturn.entityName}`
+  }
 3. Tax Year: ${taxReturn.taxYear}
 
 ## CASE ASSIGNMENT — DO THIS BEFORE PROCESSING THE RETURN
@@ -197,10 +206,12 @@ If a material field is missing from the saved form and documents, STOP and repor
     : 'This run is **PREPARE ONLY**. You are **NOT** allowed to legally file the return in this mode. Reaching the final review/submit page with the submit button visible is success. Clicking **Submit**, **Confirm**, **Print**, **Download**, or any final filing action is a task failure.'
 }
 ${
-  submissionMode === "prepare_only"
+  isPrepareOnly
     ? `
 
-**PREPARE-ONLY REDIRECT / REFILL RULE:** If this run reaches the case page and a legitimate government action such as **Prepare** or **Go to tax return** redirects to another Guernsey Revenue Service form, follow that redirect and treat the final redirected form as the operative form for this Prepare-only run, even if its title or product differs from the original task label. Do **NOT** stop solely because the redirected form is labeled Corporate Tax Return instead of Economic Substance Register.
+**PREPARE-ONLY REDIRECT / REFILL RULE:** The user explicitly confirms that the case page's **Prepare**, **Go to tax return**, review-summary section buttons, and section-name links are expected navigation for this task. If one of those controls opens **revenueservice.gov.gg/company-tax-ui** or another Guernsey Revenue Service host, treat that destination as the operative government form for this Prepare-only run. Do **NOT** stop solely because the host, product title, or section schema differs from the saved form schema.
+
+If the redirected form opens on **reviewAndSubmit/summary**, the section rows/buttons are the way back into the form. Click the relevant in-page section controls such as **Entity Information**, **Corporate Substance**, **Employee Information**, **Country By Country Reporting**, **Financial Institutions**, **Review and Submit**, or adjacent **Change/Edit/View** actions. These are not bad links or unsafe external substitutions; they are the required portal navigation for rechecking the draft.
 
 If the redirected form already contains completed or pre-filled answers, still open the relevant sections and re-check/re-fill them using the task data below. Do not skip fields merely because they are already populated. Preserve correct existing values, but update any visible fields that should match the task data.
 `

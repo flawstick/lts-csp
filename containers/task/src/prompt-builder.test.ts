@@ -96,9 +96,16 @@ describe("buildSubstanceFormPrompt", () => {
     });
 
     expect(preparePrompt).toContain("PREPARE-ONLY REDIRECT / REFILL RULE");
+    expect(preparePrompt).toContain("# TASK: Prepare Guernsey return reached from case flow");
     expect(preparePrompt).toContain("Go to tax return");
+    expect(preparePrompt).toContain("Entity Information");
+    expect(preparePrompt).toContain("Corporate Substance");
+    expect(preparePrompt).toContain("These are not bad links");
     expect(preparePrompt).toContain("Do not skip fields merely because they are already populated");
+    expect(preparePrompt).not.toContain("# TASK: Complete Guernsey Economic Substance Register Form");
+    expect(submitPrompt).toContain("# TASK: Complete Guernsey Economic Substance Register Form");
     expect(submitPrompt).not.toContain("PREPARE-ONLY REDIRECT / REFILL RULE");
+    expect(submitPrompt).not.toContain("These are not bad links");
     expect(submitPrompt).not.toContain("Do not skip fields merely because they are already populated");
   });
 });

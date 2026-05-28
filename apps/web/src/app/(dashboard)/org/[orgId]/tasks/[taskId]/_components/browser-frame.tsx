@@ -14,8 +14,17 @@ type BrowserFrameProps = {
 function useThemedUrl(url: string | null) {
   const { resolvedTheme } = useTheme();
   if (!url) return null;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}theme=${resolvedTheme === "dark" ? "dark" : "light"}`;
+
+  try {
+    const themedUrl = new URL(url);
+    themedUrl.searchParams.set(
+      "theme",
+      resolvedTheme === "dark" ? "dark" : "light",
+    );
+    return themedUrl.toString();
+  } catch {
+    return url;
+  }
 }
 
 export function BrowserFrame({
@@ -28,9 +37,7 @@ export function BrowserFrame({
 }: BrowserFrameProps) {
   const themedUrl = useThemedUrl(liveUrl);
 
-  const isTerminal = jobStatus === "completed" || jobStatus === "failed" || jobStatus === "cancelled";
-
-  if (themedUrl && !isTerminal) {
+  if (themedUrl) {
     return (
       <div className="relative min-h-0 flex-1 bg-neutral-900 dark:bg-neutral-950">
         <iframe

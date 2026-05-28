@@ -5,6 +5,7 @@ export function getSecurityHeaders() {
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'self'",
+    "frame-src 'self' https://live.browser-use.com",
     "object-src 'none'",
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:",
     "style-src 'self' 'unsafe-inline' https:",
