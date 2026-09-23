@@ -34,7 +34,7 @@ Main stack:
 - Realtime: Redis pub/sub + SSE endpoint.
 - Storage: Vercel Blob.
 - Background compute: AWS ECS Fargate.
-- AI extraction: Vercel AI Gateway + Gemini model.
+- AI extraction: Vercel AI Gateway + DeepSeek V4 Flash.
 
 Key integration boundaries:
 - Web app launches ECS tasks through `src/lib/ecs.ts`.

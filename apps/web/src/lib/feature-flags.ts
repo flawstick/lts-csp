@@ -77,7 +77,7 @@ export const FEATURE_FLAGS: Record<FeatureFlagKey, FeatureFlag> = {
   },
   ai_extraction_model: {
     key: "ai_extraction_model",
-    defaultValue: "gemini-3-pro-preview",
+    defaultValue: "deepseek/deepseek-v4-flash",
     description: "AI model to use for document extraction",
     category: "ai",
   },

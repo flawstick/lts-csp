@@ -33,6 +33,10 @@ import {
 } from "@/lib/schemas/substance-form";
 
 const DEFAULT_CERTIFICATE_TYPE = "Certificate 3";
+const EXTRACTION_MODEL_CANDIDATES = [
+  { id: "deepseek/deepseek-v4-flash", textOnly: true },
+  { id: "openai/gpt-5.4", textOnly: false },
+] as const;
 
 function normalizeTaxReferenceNumber(input: {
   taxReferenceNumber?: string | null;
@@ -1218,6 +1222,7 @@ export const substanceFormRouter = createTRPCRouter({
       type TextContent = { type: "text"; text: string };
       const fileContents: FileContent[] = [];
       const textContents: TextContent[] = [];
+      let hasTextForEveryDocument = true;
       const taxReturnFiles = Array.isArray(taxReturn.files)
         ? taxReturn.files
         : [];
@@ -1274,6 +1279,7 @@ export const substanceFormRouter = createTRPCRouter({
               text: `[Excel File Content]\n${fullCsv}`,
             });
           } catch (err) {
+            hasTextForEveryDocument = false;
             console.error(
               `[AI Extraction] Failed to convert Excel to CSV:`,
               err,
@@ -1298,7 +1304,11 @@ export const substanceFormRouter = createTRPCRouter({
                 type: "text" as const,
                 text: `[Firecrawl PDF Parse]\n${firecrawlMarkdown}`,
               });
+            } else {
+              hasTextForEveryDocument = false;
             }
+          } else {
+            hasTextForEveryDocument = false;
           }
 
           const base64 = Buffer.from(buffer).toString("base64");
@@ -1392,16 +1402,12 @@ export const substanceFormRouter = createTRPCRouter({
           ? buildGuernseyCertificateTwoDefaults(taxReturn.taxYear)
           : null;
 
-      // Use Vercel AI Gateway with GPT-5.4
+      // Prefer DeepSeek V4 Flash for parsed text, retaining GPT-5.4 for native
+      // PDF/image input when OCR is unavailable.
       const gateway = createGateway({
         apiKey,
         baseURL: "https://ai-gateway.vercel.sh/v3/ai",
       });
-      const model = gateway("openai/gpt-5.4");
-
-      console.log(
-        "[AI Extraction] Gateway configured, model: openai/gpt-5.4",
-      );
 
       // Build CIGA options string for the prompt
       const cigaOptionsText = Object.entries(CIGA_BY_ACTIVITY)
@@ -1538,36 +1544,71 @@ IMPORTANT CERTIFICATE 2 RULES:
         "text content(s)",
       );
 
+      const nativeMessageContent: (TextContent | FileContent)[] = [
+        { type: "text" as const, text: prompt },
+        ...fileContents,
+        ...textContents,
+      ];
+      const textOnlyMessageContent: TextContent[] = [
+        { type: "text" as const, text: prompt },
+        ...textContents,
+      ];
+      let modelIndex = hasTextForEveryDocument ? 0 : 1;
+      let usedModelId = EXTRACTION_MODEL_CANDIDATES[modelIndex]!.id;
       let result;
-      try {
-        // Build message content: prompt + file contents + text contents (CSV from Excel)
-        const messageContent: (TextContent | FileContent)[] = [
-          { type: "text" as const, text: prompt },
-          ...fileContents,
-          ...textContents,
-        ];
 
-        result = await generateObject({
-          model,
-          output: "object",
-          schema: aiExtractionSchema,
-          schemaName: "GuernseySubstanceForm",
-          schemaDescription:
-            "Guernsey Economic Substance Register form data extracted from corporate documents",
-          messages: [
-            {
-              role: "user",
-              content: messageContent,
-            },
-          ],
-        });
-      } catch (error) {
-        console.error("[AI Extraction] generateObject failed:", error);
-        console.error(
-          "[AI Extraction] Error details:",
-          JSON.stringify(error, Object.getOwnPropertyNames(error), 2),
+      if (!hasTextForEveryDocument) {
+        console.warn(
+          "[AI Extraction] Skipping text-only DeepSeek V4 because at least one source file has no parsed text; using the native-file fallback",
         );
-        throw error;
+      }
+
+      for (;;) {
+        const candidate = EXTRACTION_MODEL_CANDIDATES[modelIndex]!;
+        try {
+          result = await generateObject({
+            model: gateway(candidate.id),
+            providerOptions: {
+              gateway: {
+                sort: "tps",
+              },
+            },
+            output: "object",
+            schema: aiExtractionSchema,
+            schemaName: "GuernseySubstanceForm",
+            schemaDescription:
+              "Guernsey Economic Substance Register form data extracted from corporate documents",
+            messages: [
+              {
+                role: "user",
+                content: candidate.textOnly
+                  ? textOnlyMessageContent
+                  : nativeMessageContent,
+              },
+            ],
+          });
+          usedModelId = candidate.id;
+          break;
+        } catch (error) {
+          if (
+            candidate.textOnly &&
+            modelIndex < EXTRACTION_MODEL_CANDIDATES.length - 1
+          ) {
+            console.warn(
+              `[AI Extraction] Model ${candidate.id} failed; falling back to ${EXTRACTION_MODEL_CANDIDATES[modelIndex + 1]!.id}`,
+              error,
+            );
+            modelIndex += 1;
+            continue;
+          }
+
+          console.error("[AI Extraction] generateObject failed:", error);
+          console.error(
+            "[AI Extraction] Error details:",
+            JSON.stringify(error, Object.getOwnPropertyNames(error), 2),
+          );
+          throw error;
+        }
       }
 
       console.log(
@@ -1703,7 +1744,7 @@ IMPORTANT CERTIFICATE 2 RULES:
           success: true,
           fieldsExtracted: extractedFieldsCount,
           extractionTimeMs: Date.now() - extractionStartTime,
-          model: "openai/gpt-5.4",
+          model: usedModelId,
         },
       });
 

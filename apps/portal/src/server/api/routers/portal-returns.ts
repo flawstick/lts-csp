@@ -89,6 +89,10 @@ type ValidationIssue = ReturnType<typeof validateGuernseySourceDocuments>[number
 const ECONOMIC_CLASSIFICATION_CODE_PATTERN = /\b\d{1,3}(?:\.\d{1,3})+\b/;
 const ECONOMIC_CLASSIFICATION_CODE_CONTEXT_PATTERN =
   /\b\d{1,3}(?:\.\d{1,3}){2,}\b/;
+const PORTAL_EXTRACTION_MODEL_CANDIDATES = [
+  { id: "deepseek/deepseek-v4-flash", textOnly: true },
+  { id: "openai/gpt-5.4", textOnly: false },
+] as const;
 const FIRECRAWL_PDF_MAX_PAGES = 50;
 const FIRECRAWL_PDF_MAX_CHARS = 120_000;
 
@@ -1492,10 +1496,7 @@ export async function extractSubstanceFormFromFilesInternal(input: {
     apiKey,
     baseURL: "https://ai-gateway.vercel.sh/v3/ai",
   });
-  // Gemini 3 Pro has stronger native PDF + image understanding than GPT on
-  // the AI Gateway. We combine its vision with the Firecrawl parsed text so
-  // the model can cross-check tables/stamps/handwriting against OCR.
-  const model = gateway("google/gemini-3-pro-preview");
+  const modelCandidates = PORTAL_EXTRACTION_MODEL_CANDIDATES;
 
   const cigaOptionsText = Object.entries(CIGA_BY_ACTIVITY)
     .map(
@@ -1552,23 +1553,56 @@ ${cigaOptionsText}
 
   // Pair each source document inline: "FILE N header → native file → parsed
   // text". Keeping vision and OCR adjacent (rather than all files, then all
-  // text) gives Gemini a much cleaner cross-reference signal per document.
+  // text) gives the model a clean cross-reference signal per document.
   const pairedDocumentContent: Array<TextContent | FileContent> =
     documentBlocks.flatMap((block) => block.contents);
 
-  const messageContent: Array<TextContent | FileContent> = [
+  const nativeMessageContent: Array<TextContent | FileContent> = [
     { type: "text", text: prompt },
     ...pairedDocumentContent,
   ];
+  const textOnlyMessageContent: TextContent[] = [
+    { type: "text", text: prompt },
+    ...pairedDocumentContent.filter(
+      (content): content is TextContent => content.type === "text",
+    ),
+  ];
+  const hasTextForEveryDocument = documentBlocks.every((block) => {
+    const hasNativeFile = block.contents.some(
+      (content) => content.type === "file",
+    );
+    if (!hasNativeFile) return true;
+
+    return block.contents.some(
+      (content) =>
+        content.type === "text" &&
+        content.text.includes("Firecrawl parsed text for FILE"),
+    );
+  });
 
   const MAX_RETRIES = 2;
   let result: Awaited<
     ReturnType<typeof generateObject<typeof aiExtractionSchema>>
   >;
+  let modelIndex = hasTextForEveryDocument ? 0 : 1;
+  let usedModelId = modelCandidates[modelIndex]!.id;
+
+  if (!hasTextForEveryDocument) {
+    console.warn(
+      "[AI Extraction] Skipping text-only DeepSeek V4 because at least one source file has no parsed text; using the native-file fallback",
+    );
+  }
+
   for (let attempt = 0; ; attempt++) {
+    const candidate = modelCandidates[modelIndex]!;
     try {
       result = await generateObject({
-        model,
+        model: gateway(candidate.id),
+        providerOptions: {
+          gateway: {
+            sort: "tps",
+          },
+        },
         output: "object",
         schema: aiExtractionSchema,
         schemaName: "PortalGuernseySubstanceForm",
@@ -1577,13 +1611,28 @@ ${cigaOptionsText}
         messages: [
           {
             role: "user",
-            content: messageContent,
+            content: candidate.textOnly
+              ? textOnlyMessageContent
+              : nativeMessageContent,
           },
         ],
       });
+      usedModelId = candidate.id;
       break;
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
+      if (
+        candidate.textOnly &&
+        modelIndex < modelCandidates.length - 1
+      ) {
+        console.warn(
+          `[AI Extraction] Model ${candidate.id} failed; falling back to ${modelCandidates[modelIndex + 1]!.id}`,
+          error,
+        );
+        modelIndex += 1;
+        attempt = -1;
+        continue;
+      }
       const isTransient =
         message.includes("input stream") ||
         message.includes("ECONNRESET") ||
@@ -1594,6 +1643,7 @@ ${cigaOptionsText}
       await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
     }
   }
+  console.log(`[AI Extraction] Extraction completed with model ${usedModelId}`);
 
   const extractedData = stripNullishStructuredValue(
     result.object,
