@@ -123,7 +123,7 @@ export async function POST(request: Request) {
 
       const fromEmail = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev"
 
-      await resend.emails.send({
+      const { error } = await resend.emails.send({
         from: fromEmail,
         to: [email],
         subject: "You've been invited to join LTS Tax",
@@ -189,6 +189,10 @@ export async function POST(request: Request) {
           </html>
         `,
       })
+
+      if (error) {
+        throw new Error(`Resend rejected invitation email: ${error.message}`)
+      }
     } catch (emailError) {
       console.error("Failed to send invitation email:", emailError)
       await db.delete(pendingInvitations).where(eq(pendingInvitations.id, invitation.id))

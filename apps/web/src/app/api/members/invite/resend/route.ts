@@ -76,7 +76,7 @@ export async function POST(request: Request) {
 
       const fromEmail = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev"
 
-      await resend.emails.send({
+      const { error } = await resend.emails.send({
         from: fromEmail,
         to: [invitation.email],
         subject: "You've been invited to join LTS Tax",
@@ -142,6 +142,10 @@ export async function POST(request: Request) {
           </html>
         `,
       })
+
+      if (error) {
+        throw new Error(`Resend rejected invitation email: ${error.message}`)
+      }
 
       return NextResponse.json({
         success: true,
