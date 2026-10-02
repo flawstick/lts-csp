@@ -7,7 +7,6 @@ type CookieToSet = { name: string; value: string; options?: Partial<ResponseCook
 const PUBLIC_ROUTES = [
   "/login",
   "/signup",
-  "/accept-invite",
   "/waiting-for-invite",
   "/client-access",
   "/api/client-upload",
@@ -44,8 +43,11 @@ export async function updateSession(request: NextRequest) {
   const isPublicRoute = PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
 
   if (!user && !isPublicRoute) {
+    const destination = `${pathname}${request.nextUrl.search}`;
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    url.search = "";
+    url.searchParams.set("next", destination);
     return NextResponse.redirect(url);
   }
 

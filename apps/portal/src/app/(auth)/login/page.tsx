@@ -80,7 +80,13 @@ export default function PortalLoginPage() {
       return;
     }
 
-    router.push("/");
+    const requestedDestination = new URLSearchParams(window.location.search).get("next");
+    const destination =
+      requestedDestination?.startsWith("/") && !requestedDestination.startsWith("//")
+        ? requestedDestination
+        : "/";
+
+    router.push(destination);
     router.refresh();
   };
 
