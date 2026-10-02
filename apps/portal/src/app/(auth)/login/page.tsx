@@ -48,14 +48,16 @@ export default function PortalLoginPage() {
     setLoading(true);
     setMessage(null);
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: true },
+    const response = await fetch("/api/auth/send-otp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
     });
+    const result = (await response.json()) as { error?: string };
 
     setLoading(false);
-    if (error) {
-      setMessage(error.message);
+    if (!response.ok) {
+      setMessage(result.error ?? "Unable to send a login code.");
       return;
     }
 
