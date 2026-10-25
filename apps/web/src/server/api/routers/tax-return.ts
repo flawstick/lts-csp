@@ -29,6 +29,7 @@ import {
 import * as cheerio from "cheerio";
 import { decryptPortalCredentials } from "@repo/database/portal-credentials";
 import { launchBrowserTask } from "@/lib/ecs";
+import { getBrowserJobStaleReason } from "@/lib/browser-job-status";
 import { triggerTaxSync } from "@/lib/tax-sync-launcher";
 import {
   jerseyCompanyReturnFormSchema,
@@ -48,8 +49,6 @@ type TaxReturnFileRecord = {
   role?: z.infer<typeof taxReturnFileRoleEnum>;
   metadata?: Record<string, unknown>;
 };
-
-const BROWSER_HEARTBEAT_STALE_MS = 60_000;
 
 function getResultDataRecord(
   resultData: unknown,
@@ -170,45 +169,10 @@ function getTaskDisplayStatus(
   return taskStatus;
 }
 
-function getBrowserJobStaleReason(job: {
-  status: string;
-  createdAt: Date | string;
-  startedAt?: Date | string | null;
-  updatedAt?: Date | string | null;
-  resultData?: unknown;
-}): string | null {
-  const now = Date.now();
-
-  if (job.status === "starting") {
-    const startupStartedAt =
-      getResultDataNumber(job.resultData, "startupStartedAt") ??
-      (job.startedAt ? new Date(job.startedAt).getTime() : undefined) ??
-      (job.updatedAt ? new Date(job.updatedAt).getTime() : undefined) ??
-      new Date(job.createdAt).getTime();
-
-    if (now - startupStartedAt > env.BROWSER_STARTUP_TIMEOUT_MS) {
-      return "Browser Use session failed to initialize";
-    }
-  }
-
-  if (job.status === "running" || job.status === "paused") {
-    const lastHeartbeatAt =
-      getResultDataNumber(job.resultData, "lastHeartbeatAt") ??
-      (job.updatedAt ? new Date(job.updatedAt).getTime() : undefined) ??
-      (job.startedAt ? new Date(job.startedAt).getTime() : undefined);
-
-    if (lastHeartbeatAt && now - lastHeartbeatAt > BROWSER_HEARTBEAT_STALE_MS) {
-      return "Browser worker heartbeat lost";
-    }
-  }
-
-  return null;
-}
-
 async function maybeMarkBrowserJobStale<
   T extends {
     id: string;
-    status: string;
+    status: typeof jobs.$inferSelect.status;
     createdAt: Date | string;
     startedAt?: Date | string | null;
     updatedAt?: Date | string | null;
@@ -224,7 +188,9 @@ async function maybeMarkBrowserJobStale<
     taxReturnId?: string | null;
   },
 ): Promise<T> {
-  const reason = getBrowserJobStaleReason(job);
+  const reason = getBrowserJobStaleReason(job, {
+    startupTimeoutMs: env.BROWSER_STARTUP_TIMEOUT_MS,
+  });
   if (!reason) {
     return job;
   }
@@ -235,7 +201,8 @@ async function maybeMarkBrowserJobStale<
     staleFailureReason: reason,
   };
 
-  await dbClient
+  // A worker may have claimed the job since this request read it.
+  const [failedJob] = await dbClient
     .update(jobs)
     .set({
       status: "failed",
@@ -243,7 +210,12 @@ async function maybeMarkBrowserJobStale<
       errorMessage: reason,
       resultData: nextResultData,
     })
-    .where(eq(jobs.id, job.id));
+    .where(and(eq(jobs.id, job.id), eq(jobs.status, job.status)))
+    .returning({ id: jobs.id });
+
+  if (!failedJob) {
+    return job;
+  }
 
   if (ids?.taskId) {
     await dbClient
