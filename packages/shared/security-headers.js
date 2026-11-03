@@ -26,7 +26,6 @@ export function getSecurityHeaders() {
       value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
     },
     { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-    { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
     { key: "Cross-Origin-Resource-Policy", value: "same-site" },
     {
       key: "Strict-Transport-Security",

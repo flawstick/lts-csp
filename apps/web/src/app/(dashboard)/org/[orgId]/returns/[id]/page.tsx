@@ -64,6 +64,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { hasManagerSignoff } from "@repo/database/return-readiness";
+import { toast } from "sonner";
 
 type FileInfo = {
   url: string;
@@ -258,7 +260,10 @@ export default function ReturnDetailPage() {
   });
 
   const extractMutation = api.substanceForm.extractFromFiles.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
+      for (const warning of data?.warnings ?? []) {
+        toast.warning(warning);
+      }
       utils.taxReturn.getById.invalidate({ id });
       utils.substanceForm.getByTaxReturnId.invalidate({ taxReturnId: id });
       setActiveTab("form");
@@ -282,6 +287,11 @@ export default function ReturnDetailPage() {
         });
       } catch (err) {
         console.error("Extraction error:", err);
+        toast.error(
+          err instanceof Error
+            ? `AI extraction failed: ${err.message}`
+            : "AI extraction failed. Please try again.",
+        );
       } finally {
         setIsExtracting(false);
       }
@@ -876,11 +886,28 @@ export default function ReturnDetailPage() {
                       Substance form is incomplete. The AI may need to pause for
                       missing information.
                     </div>
+                  ) : !hasManagerSignoff(substanceForm) ? (
+                    <div className="mb-4 text-sm text-amber-600">
+                      <AlertCircle className="mr-1 inline h-4 w-4" />
+                      Substance form is complete but awaiting manager signoff.
+                      A draft can be prepared for review; submission requires
+                      the manager&apos;s name and sign-off date under
+                      Finalising the Return, then client signoff.
+                    </div>
+                  ) : !taxReturn.readyForSubmissionAt ? (
+                    <div className="mb-4 text-sm text-blue-600">
+                      <AlertCircle className="mr-1 inline h-4 w-4" />
+                      Substance form is complete but awaiting client signoff.
+                      A draft can be prepared for review; submission requires
+                      an authorised signatory to mark it ready in the client
+                      portal.
+                    </div>
                   ) : (
                     <div className="mb-4 text-sm text-green-600">
                       <CheckCircle className="mr-1 inline h-4 w-4" />
-                      Substance form is complete. Ready to create automation
-                      task.
+                      Substance form is complete and signed off by the manager
+                      and the client.
+                      Ready to create automation task.
                     </div>
                   )}
 
@@ -1266,7 +1293,7 @@ export default function ReturnDetailPage() {
                           }`}
                         >
                           {substanceForm.isComplete
-                            ? "All required fields have been filled. Ready for submission."
+                            ? "All required fields have been filled. Submission still requires the manager's and client's signoff."
                             : `${((substanceForm.missingFields as string[]) || []).length} fields are missing information.`}
                         </p>
 

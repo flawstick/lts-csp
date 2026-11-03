@@ -506,7 +506,10 @@ export default function ClientAccessWorkspacePage() {
 
   const extractSubstanceFormMutation =
     api.clientAccess.extractSubstanceFormFromFiles.useMutation({
-      onSuccess: () => {
+      onSuccess: (data) => {
+        for (const warning of data?.warnings ?? []) {
+          toast.warning(warning);
+        }
         void utils.clientAccess.getAccess.invalidate({ token });
         void utils.clientAccess.getSubstanceForm.invalidate({ token });
       },

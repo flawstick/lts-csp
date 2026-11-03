@@ -99,6 +99,28 @@ Important entities:
 - Upserts `tax_returns` records.
 - Updates `tax_sync_jobs`.
 
+### Browser worker deployment
+
+`scripts/browser-worker-stack.json` provisions the browser ECS service, ECR
+repository, outbound-only security group, execution role, and CloudWatch logs.
+The deployed stack is `lts-browser-worker` in `eu-west-2`. Worker credentials are
+in SSM SecureString parameters under `/lts/browser-worker/` (`DATABASE_URL`,
+`REDIS_URL`, `BROWSER_USE_API_KEY`, and `BLOB_READ_WRITE_TOKEN`); they are not baked
+into the image.
+
+Use the deployment profile, not the restricted application's AWS key:
+
+```bash
+aws login --profile lts --region eu-west-2
+AWS_PROFILE=lts bash scripts/deploy-task.sh
+```
+
+The web app normally uses `BROWSER_TASK_EXECUTION_MODE=ecs_service`. Queued
+jobs remain available until a worker claims them or a user cancels them; queue
+age alone never marks a job as failed. Startup and heartbeat timeouts apply
+after a worker claims a job. Redis publishing is best effort, so an event-service
+outage cannot block automation; the UI also polls durable job state from Postgres.
+
 ## 5) End-to-End Flows
 
 ### Flow A: Tax Sync

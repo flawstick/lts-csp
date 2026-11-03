@@ -167,6 +167,14 @@ export function isFieldRequired(
     return true;
   }
 
+  if (
+    field === "isIncorporatedInGuernsey" &&
+    Boolean(data.entityType) &&
+    data.entityType !== "Partnership"
+  ) {
+    return true;
+  }
+
   if (field === "totalBoardMeetings" && isGuernseySubstanceInScope(data)) {
     return true;
   }

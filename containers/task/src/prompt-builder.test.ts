@@ -108,4 +108,40 @@ describe("buildSubstanceFormPrompt", () => {
     expect(submitPrompt).not.toContain("These are not bad links");
     expect(submitPrompt).not.toContain("Do not skip fields merely because they are already populated");
   });
+
+  it("files with the LTS contact and replaces pre-filled signatory details", () => {
+    const prompt = buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: {
+        certificateType: "Certificate 3",
+        entityName: "Franove Limited",
+        relevantActivity: "None of the above",
+      } as any,
+      portalUrl: "https://my.gov.gg",
+      contactName: "Jonny Woodgate",
+      contactEmail: "taxenquiries@lts-tax.com",
+      contactPhone: "+44 1481 755862",
+    });
+
+    expect(prompt).toContain("use: Jonny Woodgate");
+    expect(prompt).toContain("use: taxenquiries@lts-tax.com");
+    expect(prompt).toContain("REPLACE any pre-filled contact");
+    expect(prompt).toContain("NOT a director, authorised signatory");
+  });
+
+  it("does not let the agent infer Guernsey incorporation", () => {
+    const prompt = buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: {
+        certificateType: "Certificate 3",
+        entityName: "Eaton Place Properties Limited",
+        registeredAddress: "PO Box 1, St Peter Port, Guernsey",
+        relevantActivity: "None of the above",
+      } as any,
+      portalUrl: "https://my.gov.gg",
+    });
+
+    expect(prompt).toContain("Do NOT infer it from the registered address");
+    expect(prompt).not.toContain("leave the portal default unchanged");
+  });
 });

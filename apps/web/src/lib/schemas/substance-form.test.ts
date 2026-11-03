@@ -35,4 +35,28 @@ describe("web Guernsey substance form schema", () => {
     expect(visibleSectionIds).not.toContain("relevantActivities");
     expect(visibleSectionIds).not.toContain("beneficialOwnership");
   });
+
+  it("requires Guernsey incorporation for companies but not partnerships", () => {
+    expect(
+      getMissingFields({
+        certificateType: "Certificate 3",
+        entityType: "Company",
+      }),
+    ).toContain("isIncorporatedInGuernsey");
+
+    expect(
+      getMissingFields({
+        certificateType: "Certificate 3",
+        entityType: "Company",
+        isIncorporatedInGuernsey: "No",
+      }),
+    ).not.toContain("isIncorporatedInGuernsey");
+
+    expect(
+      getMissingFields({
+        certificateType: "Certificate 3",
+        entityType: "Partnership",
+      }),
+    ).not.toContain("isIncorporatedInGuernsey");
+  });
 });

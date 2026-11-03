@@ -20,7 +20,7 @@ import { trackServer } from "./analytics";
 export type FeatureFlagKey =
   // AI & Automation Features
   | "ai_extraction_enabled"
-  | "ai_extraction_model" // "gemini-3-pro" | "gemini-2-flash" | "claude-3-5-sonnet"
+  | "ai_extraction_model" // Vercel AI Gateway model id
   | "auto_approve_enabled"
   | "agent_pause_detection"
 

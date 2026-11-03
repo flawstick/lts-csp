@@ -16,6 +16,10 @@ import {
   hasMeaningfulGuernseyFormData,
   resolveGuernseyCertificateType,
 } from "@repo/database/guernsey-filing";
+import {
+  hasManagerSignoff,
+  MANAGER_SIGNOFF_REQUIRED_MESSAGE,
+} from "@repo/database/return-readiness";
 import { api } from "@/trpc/react";
 import { ReturnWorkspacePageSkeleton } from "@/components/return-workspace-skeleton";
 import { Button } from "@/components/ui/button";
@@ -190,7 +194,10 @@ export default function ReturnWorkspacePage() {
 
   const extractSubstanceFormMutation =
     api.portalReturns.extractSubstanceFormFromFiles.useMutation({
-      onSuccess: () => {
+      onSuccess: (data) => {
+        for (const warning of data?.warnings ?? []) {
+          toast.warning(warning);
+        }
         void utils.portalReturns.listByOrg.invalidate({ orgId });
         if (!selectedReturn) return;
         void utils.portalReturns.getSubstanceForm.invalidate({
@@ -245,6 +252,8 @@ export default function ReturnWorkspacePage() {
   );
   const activeCertificateType =
     localCertificateType ?? certificateResolution.certificateType;
+  // The CSP manager signs off the drafted ESR before an admin approves it.
+  const isManagerSignedOff = hasManagerSignoff(substanceFormQuery.data);
   const isGuernseyCertificateUnresolved = Boolean(
     selectedReturn?.jurisdictionCode === "GG" &&
       selectedReturn?.returnType === "economic_substance" &&
@@ -930,20 +939,24 @@ export default function ReturnWorkspacePage() {
           }
           isAdmin={isAdmin}
           readyForSubmissionAt={selectedReturn.readyForSubmissionAt ?? null}
+          managerSignoffMissing={!isManagerSignedOff}
           isSubmittable={
             Boolean(selectedReturn.isSubstanceComplete) &&
+            isManagerSignedOff &&
             (!requiresFinancialStatements ||
               selectedFiles.some((f) => f.role === "financial_statements"))
           }
           submittabilityBlockReason={
             !selectedReturn.isSubstanceComplete
               ? "Complete every required field in the substance form first."
-              : requiresFinancialStatements &&
-                  !selectedFiles.some(
-                    (f) => f.role === "financial_statements",
-                  )
-                ? "Attach the signed financial statements before marking this Certificate 3 ready."
-                : null
+              : !isManagerSignedOff
+                ? MANAGER_SIGNOFF_REQUIRED_MESSAGE
+                : requiresFinancialStatements &&
+                    !selectedFiles.some(
+                      (f) => f.role === "financial_statements",
+                    )
+                  ? "Attach the signed financial statements before marking this Certificate 3 ready."
+                  : null
           }
           onMarkReadyForSubmission={() =>
             markReadyMutation.mutate({ orgId, taxReturnId: returnId })
@@ -985,7 +998,9 @@ export default function ReturnWorkspacePage() {
                       )}
                     >
                       {Boolean(substanceFormQuery.data?.isComplete)
-                        ? "Complete"
+                        ? isManagerSignedOff
+                          ? "Complete"
+                          : "Complete · awaiting manager signoff"
                         : "In progress"}
                     </span>
                   ) : null}

@@ -45,6 +45,10 @@
     "./guernsey-filing": {
       "types": "./src/guernsey-filing.ts",
       "default": "./src/guernsey-filing.ts"
+    },
+    "./return-readiness": {
+      "types": "./src/return-readiness.ts",
+      "default": "./src/return-readiness.ts"
     }
   },
   "scripts": {

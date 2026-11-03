@@ -1,9 +1,10 @@
 import { db, schema } from "@repo/database";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { syncGuernseyReturns } from "./guernsey";
 import { createTaxSyncJobLogger } from "./job-logger";
 import { syncJerseyReturns } from "./jersey";
 import { combineLoggers, createLogger } from "./logger";
+import { mergedMetadataSql, syncedStatusSql } from "./sync-merge";
 import type { SyncedTaxReturn, SyncedReturnType, SyncLogger } from "./types";
 
 export interface EnsureTaxSyncJobInput {
@@ -221,13 +222,10 @@ export async function runTaxSyncJob(
           ],
           set: {
             entityName: syncedReturn.entityName,
-            status: sql`CASE
-              WHEN ${schema.taxReturns.status} = 'dismissed' THEN ${schema.taxReturns.status}
-              ELSE ${syncedReturn.status}
-            END`,
+            status: syncedStatusSql(syncedReturn.status),
             link: syncedReturn.link,
             pdfUrl: syncedReturn.pdfUrl ?? null,
-            metadata: syncedReturn.metadata,
+            metadata: mergedMetadataSql(syncedReturn.metadata),
             updatedAt: new Date(),
           },
         });

@@ -9,10 +9,9 @@ import {
   taxReturns,
   jobs,
   tasks,
-  orgSettings,
   eq,
   sql,
-  resolveOrgPortalContactInfo,
+  GUERNSEY_FILING_CONTACT_INFO,
   type TaxReturnFileCategory,
   type TaxReturnFileRole,
 } from "@repo/database";
@@ -24,6 +23,12 @@ import {
   type BrowserUseSessionStatus,
 } from "./browser-use-client";
 import { buildSubstanceFormPrompt } from "./prompt-builder";
+import {
+  classifyRunOutcome,
+  getTaxReturnStatusForOutcome,
+  shouldCaptureFiledReturnPdf,
+  type SubmissionMode,
+} from "./run-outcome";
 
 // ============================================================================
 // Configuration
@@ -65,45 +70,6 @@ const MAX_RUNTIME_MS = 30 * 60 * 1000;
 const PAUSE_CHECK_INTERVAL_MS = 5000;
 const MAX_PAUSE_DURATION_MS = 10 * 60 * 1000; // 10 minutes max pause
 
-// Keywords that indicate the agent needs user intervention
-const REQUIRES_ATTENTION_KEYWORDS = [
-  "login",
-  "sign in",
-  "sign-in",
-  "authentication",
-  "credentials",
-  "password",
-  "cannot proceed",
-  "unable to proceed",
-  "requires attention",
-  "need to log in",
-  "need to login",
-];
-
-const PREPARE_ONLY_READY_MARKERS = [
-  "ready_for_manual_submission",
-  "ready for manual submission",
-];
-
-const PREPARE_ONLY_SUBMISSION_MARKERS = [
-  "submitted successfully",
-  "successfully submitted",
-  "submission complete",
-  "submission completed",
-  "filing complete",
-  "filing completed",
-  "post-submission confirmation",
-  "confirmation page",
-  "downloaded completion pdf",
-  "downloaded the pdf",
-  "downloaded the receipt",
-];
-
-const REQUIRES_ATTENTION_OUTPUT_MARKERS = [
-  "requires_attention",
-  "requires attention",
-];
-
 const DETACHED_BROWSER_RECOVERY_PATTERNS = [
   "cdp still not connected",
   "target may have detached",
@@ -142,8 +108,6 @@ type BrowserSessionInputFile = {
   category?: TaxReturnFileCategory;
   role?: TaxReturnFileRole;
 };
-
-type SubmissionMode = "prepare_only" | "submit_and_capture_pdf";
 
 type BrowserFileSource = "session" | "workspace";
 
@@ -436,27 +400,6 @@ function normalizeBrowserUseOutput(output: unknown): string {
   } catch {
     return String(output);
   }
-}
-
-function isPrepareOnlyReadyOutput(output: string): boolean {
-  const normalized = output.toLowerCase();
-  return PREPARE_ONLY_READY_MARKERS.some((marker) =>
-    normalized.includes(marker),
-  );
-}
-
-function isPrepareOnlyLikelySubmittedOutput(output: string): boolean {
-  const normalized = output.toLowerCase();
-  return PREPARE_ONLY_SUBMISSION_MARKERS.some((marker) =>
-    normalized.includes(marker),
-  );
-}
-
-function hasRequiresAttentionOutputMarker(output: string): boolean {
-  const normalized = output.toLowerCase();
-  return REQUIRES_ATTENTION_OUTPUT_MARKERS.some((marker) =>
-    normalized.includes(marker),
-  );
 }
 
 function isDetachedBrowserRecoveryError(message: {
@@ -776,6 +719,65 @@ function buildCompletionPdfCandidates(params: {
 
     return left.path.localeCompare(right.path);
   });
+}
+
+const COMPLETION_PDF_CAPTURE_ATTEMPTS = 4;
+const COMPLETION_PDF_CAPTURE_RETRY_MS = 5_000;
+
+/**
+ * Browser Use can report the run as finished before a download triggered on
+ * the confirmation page has landed in the session/workspace files, so a
+ * single lookup can miss the filed return. Retry briefly before giving up.
+ */
+async function captureCompletionPdfWithRetry(
+  params: Parameters<typeof captureCompletionPdf>[0],
+): Promise<CompletionPdfIngestionResult> {
+  let result: CompletionPdfIngestionResult = {
+    status: "missing",
+    error: "Completion PDF capture did not run.",
+  };
+
+  for (let attempt = 1; attempt <= COMPLETION_PDF_CAPTURE_ATTEMPTS; attempt++) {
+    result = await captureCompletionPdf(params);
+    if (result.status !== "missing") {
+      break;
+    }
+
+    if (attempt < COMPLETION_PDF_CAPTURE_ATTEMPTS) {
+      await params.logFn("Completion PDF not found yet - retrying", {
+        attempt,
+        retryInMs: COMPLETION_PDF_CAPTURE_RETRY_MS,
+      });
+      await sleep(COMPLETION_PDF_CAPTURE_RETRY_MS);
+    }
+  }
+
+  return result;
+}
+
+async function recordMissingFiledReturnPdf(params: {
+  taxReturnId: string;
+  sessionId: string;
+  workspaceId: string | null;
+  completionPdf: CompletionPdfIngestionResult;
+}) {
+  const filedReturnPdf = {
+    status: params.completionPdf.status,
+    error: params.completionPdf.error ?? null,
+    jobId: currentJobId(),
+    browserUseSessionId: params.sessionId,
+    browserUseWorkspaceId: params.workspaceId,
+    browserUsePath: params.completionPdf.browserUsePath ?? null,
+    recordedAt: new Date().toISOString(),
+  };
+
+  await db
+    .update(taxReturns)
+    .set({
+      metadata: sql`coalesce(${taxReturns.metadata}, '{}'::jsonb) || ${JSON.stringify({ filedReturnPdf })}::jsonb`,
+      updatedAt: new Date(),
+    })
+    .where(eq(taxReturns.id, params.taxReturnId));
 }
 
 async function captureCompletionPdf(params: {
@@ -1279,6 +1281,49 @@ async function markActiveRuntimeFailed(errorMessage: string) {
     .where(eq(jobs.id, runtime.jobId));
 }
 
+/**
+ * A paused run (manual intervention / review) whose pause window expired.
+ * The browser run is over, but nothing failed on the return itself: it is
+ * waiting for a person, so the client sees "Review Required", not "Failed".
+ */
+async function markActiveRuntimeAwaitingReview(reason: string) {
+  const runtime = getRequiredRuntime();
+
+  const currentJob = await db.query.jobs.findFirst({
+    where: eq(jobs.id, runtime.jobId),
+    columns: { status: true },
+  });
+  if (currentJob?.status === "cancelled") {
+    return;
+  }
+
+  runtime.resultData = mergeResultData(runtime.resultData, {
+    pauseExpiredAt: Date.now(),
+    pauseExpiredReason: reason,
+    lastHeartbeatAt: Date.now(),
+  });
+
+  await db
+    .update(taxReturns)
+    .set({ status: "review_required" })
+    .where(eq(taxReturns.id, runtime.taxReturnId));
+
+  await db
+    .update(tasks)
+    .set({ status: "failed" })
+    .where(eq(tasks.id, runtime.taskId));
+
+  await db
+    .update(jobs)
+    .set({
+      status: "failed",
+      completedAt: new Date(),
+      errorMessage: `${reason}. The return has been left for review; start a new run to continue.`,
+      resultData: runtime.resultData,
+    })
+    .where(eq(jobs.id, runtime.jobId));
+}
+
 async function runBrowserJob(runtime: ActiveJobRuntime) {
   activeRuntime = runtime;
   const submissionMode = runtime.submissionMode;
@@ -1302,6 +1347,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       })
     | null = null;
   let workspaceId: string | null = null;
+  let retainWorkspaceForRecovery = false;
 
   try {
     await log("Fetching tax return data");
@@ -1317,15 +1363,10 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       throw new Error("Substance form not found");
     }
 
-    const portalContactSettings = await db.query.orgSettings.findFirst({
-      where: eq(orgSettings.orgId, taxReturn.orgId),
-      columns: {
-        settings: true,
-      },
-    });
-    const portalContactInfo = resolveOrgPortalContactInfo(
-      portalContactSettings?.settings,
-    );
+    // LTS files as agent, so the GRS final contact is always LTS. The org's
+    // client-portal contact settings are client-facing and may name the CSP's
+    // own signatory, so they must not be used for the filing contact.
+    const filingContactInfo = GUERNSEY_FILING_CONTACT_INFO;
 
     const taxReturnFiles = getTaxReturnFiles(taxReturn.files);
     const useProxy = process.env.USE_UK_PROXY !== "false";
@@ -1463,8 +1504,9 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       submissionMode,
       financialStatementsFile,
       financialStatementsUrl: financialStatementsFile?.url ?? null,
-      contactEmail: portalContactInfo.email,
-      contactPhone: portalContactInfo.phone,
+      contactName: filingContactInfo.name,
+      contactEmail: filingContactInfo.email,
+      contactPhone: filingContactInfo.phone,
     });
     const recoveryReturnUrl =
       taxReturn.link ||
@@ -1614,8 +1656,8 @@ ${prompt}
         });
         if (!resumed || finalCheck?.status !== "running") {
           if (finalCheck?.status === "paused") {
-            await log("Pause timeout - marking as failed");
-            await markActiveRuntimeFailed(
+            await log("Pause timeout - ending run, return needs review");
+            await markActiveRuntimeAwaitingReview(
               "Timed out waiting for user intervention",
             );
             terminalStateHandled = true;
@@ -1801,35 +1843,26 @@ ${prompt}
         const output = normalizeBrowserUseOutput(
           runResult?.output ?? browserSession.output,
         );
-        let success =
-          browserSession.status === "idle" &&
-          !output.toLowerCase().includes("cancelled") &&
-          (runResult?.isTaskSuccessful ??
-            browserSession.isTaskSuccessful ??
-            true);
-
-        const prepareOnlyReady =
-          submissionMode === "prepare_only" &&
-          isPrepareOnlyReadyOutput(output);
-        const prepareOnlyLikelySubmitted =
-          submissionMode === "prepare_only" &&
-          isPrepareOnlyLikelySubmittedOutput(output);
-        const explicitRequiresAttention = hasRequiresAttentionOutputMarker(output);
+        const outcome = classifyRunOutcome({
+          submissionMode,
+          sessionStatus: browserSession.status,
+          output,
+          isTaskSuccessful:
+            runResult?.isTaskSuccessful ?? browserSession.isTaskSuccessful,
+        });
+        const {
+          success,
+          prepareOnlyReady,
+          prepareOnlyLikelySubmitted,
+          needsAttention,
+        } = outcome;
 
         if (prepareOnlyLikelySubmitted) {
-          success = false;
           await log("Prepare-only run appears to have submitted anyway", {
             phase: "guardrail",
             output,
           });
         }
-
-        const needsAttention =
-          explicitRequiresAttention ||
-          (!success &&
-            REQUIRES_ATTENTION_KEYWORDS.some((keyword) =>
-              output.toLowerCase().includes(keyword.toLowerCase()),
-            ));
 
         if (needsAttention) {
           await log("Task requires user attention - pausing", { output });
@@ -1913,8 +1946,10 @@ ${prompt}
           });
 
           if (finalJobCheck?.status === "paused") {
-            await log("Pause timeout - marking as failed");
-            await markActiveRuntimeFailed("Timed out waiting for user intervention");
+            await log("Pause timeout - ending run, return needs review");
+            await markActiveRuntimeAwaitingReview(
+              "Timed out waiting for user intervention",
+            );
             terminalStateHandled = true;
             break;
           }
@@ -1930,14 +1965,13 @@ ${prompt}
             sessionStatus: browserSession.status,
             prepareOnlyReady,
             prepareOnlyLikelySubmitted,
-            explicitRequiresAttention,
           },
         );
 
         let completionPdf: CompletionPdfIngestionResult | undefined;
-        if (success && submissionMode === "submit_and_capture_pdf") {
+        if (shouldCaptureFiledReturnPdf(submissionMode, outcome)) {
           try {
-            completionPdf = await captureCompletionPdf({
+            completionPdf = await captureCompletionPdfWithRetry({
               client,
               sessionId: session.id,
               workspaceId,
@@ -1969,6 +2003,19 @@ ${prompt}
               error: error instanceof Error ? error.message : String(error),
             });
           }
+
+          if (completionPdf.status !== "uploaded") {
+            // The return may already be filed with GRS: keep the Browser Use
+            // workspace so the filed return can be recovered, and record the
+            // gap on the return instead of silently reporting success.
+            retainWorkspaceForRecovery = true;
+            await recordMissingFiledReturnPdf({
+              taxReturnId: runtime.taxReturnId,
+              sessionId: session.id,
+              workspaceId,
+              completionPdf,
+            });
+          }
         }
 
         await publishJobEvent({
@@ -1995,15 +2042,15 @@ ${prompt}
           // stops showing a running state), but the TAX RETURN still needs human
           // review before final filing (hence `review_required`, which the portal
           // already filters/badges). Full-submit mode completes both.
-          const successTaxReturnStatus =
-            submissionMode === "prepare_only"
-              ? "review_required"
-              : "completed";
+          const taxReturnStatus = getTaxReturnStatusForOutcome(
+            submissionMode,
+            outcome,
+          );
           const successTaskStatus = "completed";
 
           await db
             .update(taxReturns)
-            .set({ status: success ? successTaxReturnStatus : "failed" })
+            .set({ status: taxReturnStatus })
             .where(eq(taxReturns.id, runtime.taxReturnId));
           await db
             .update(tasks)
@@ -2075,7 +2122,11 @@ ${prompt}
       } catch {}
     }
 
-    if (workspaceId) {
+    if (workspaceId && retainWorkspaceForRecovery) {
+      await log("Workspace retained to recover the filed return PDF", {
+        workspaceId,
+      });
+    } else if (workspaceId) {
       try {
         await client.deleteWorkspace(workspaceId);
         await log("Workspace deleted", { workspaceId });

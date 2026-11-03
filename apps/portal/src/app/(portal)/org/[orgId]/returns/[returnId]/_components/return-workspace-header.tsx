@@ -64,6 +64,8 @@ type ReturnWorkspaceHeaderProps = {
   isAdmin?: boolean;
   isSubmittable?: boolean;
   readyForSubmissionAt?: string | Date | null;
+  /** Guernsey ESR: the manager has not recorded their signoff on the form. */
+  managerSignoffMissing?: boolean;
   submittabilityBlockReason?: string | null;
   onMarkReadyForSubmission?: () => void;
   onRevertReadyForSubmission?: () => void;
@@ -83,6 +85,7 @@ export function ReturnWorkspaceHeader({
   isAdmin = false,
   isSubmittable = false,
   readyForSubmissionAt = null,
+  managerSignoffMissing = false,
   submittabilityBlockReason = null,
   onMarkReadyForSubmission,
   onRevertReadyForSubmission,
@@ -164,7 +167,18 @@ export function ReturnWorkspaceHeader({
               {readOnlyMessage}
             </p>
           ) : null}
-          {isMarkedReady ? (
+          {isMarkedReady && managerSignoffMissing ? (
+            <div className="max-w-2xl rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+              <p className="font-medium">Awaiting manager signoff</p>
+              <p className="text-xs">
+                An admin marked this return ready
+                {readyTimestampText ? ` on ${readyTimestampText}` : ""}, but the
+                manager has not signed off the form. It will not be submitted
+                until the manager&apos;s name and sign-off date are recorded
+                under Finalising the Return and an admin marks it ready again.
+              </p>
+            </div>
+          ) : isMarkedReady ? (
             <div className="flex max-w-2xl items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-900 dark:text-emerald-200">
               <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
               <div className="space-y-0.5">
