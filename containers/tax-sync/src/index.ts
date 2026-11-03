@@ -1,8 +1,9 @@
 import { db, schema } from "@repo/database";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { syncGuernseyReturns } from "./guernsey";
 import { syncJerseyReturns } from "./jersey";
 import { createLogger } from "./logger";
+import { mergedMetadataSql, syncedStatusSql } from "./sync-merge";
 import type { SyncedTaxReturn, SyncedReturnType } from "./types";
 
 const JOB_ID = process.env.TAX_SYNC_JOB_ID || "";
@@ -143,14 +144,10 @@ async function main() {
           ],
           set: {
             entityName: syncedReturn.entityName,
-            // Don't regress returns that were dismissed or touched by automation.
-            status: sql`CASE
-              WHEN ${schema.taxReturns.status} IN ('dismissed', 'completed', 'failed', 'review_required') THEN ${schema.taxReturns.status}
-              ELSE ${syncedReturn.status}
-            END`,
+            status: syncedStatusSql(syncedReturn.status),
             link: syncedReturn.link,
             pdfUrl: syncedReturn.pdfUrl ?? null,
-            metadata: syncedReturn.metadata,
+            metadata: mergedMetadataSql(syncedReturn.metadata),
             updatedAt: new Date(),
           },
         });

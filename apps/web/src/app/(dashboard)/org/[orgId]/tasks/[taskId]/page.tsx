@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { toast } from "sonner";
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   ResizablePanelGroup,
@@ -77,6 +78,9 @@ export default function TaskDetailPage() {
         },
       ]);
       refetch();
+    },
+    onError: (error) => {
+      toast.error(error.message);
     },
   });
 

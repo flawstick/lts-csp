@@ -4,12 +4,14 @@ import { z } from "zod";
 
 import {
   createEmptyJerseyCompanyReturnFormData,
+  getChangedFormFields,
   getJerseyCompanyReturnMissingFields,
   isJerseyCompanyReturnComplete,
   jerseyCompanyReturnForms,
   orgSettings,
   resolveOrgPortalContactInfo,
   substanceForms,
+  syncTaxReturnAfterFormChange,
   taxReturnFileCategories,
   taxReturnFileRoles,
   taxReturns,
@@ -241,6 +243,8 @@ export const clientAccessRouter = createTRPCRouter({
         : { ...existing, ...input.data };
       const missingFields = getMissingFields(merged);
 
+      const changedFields = getChangedFormFields(existing, updateData);
+
       const [updated] = await ctx.db
         .update(substanceForms)
         .set({
@@ -252,6 +256,14 @@ export const clientAccessRouter = createTRPCRouter({
         })
         .where(eq(substanceForms.taxReturnId, returnRecord.id))
         .returning();
+
+      await syncTaxReturnAfterFormChange({
+        db: ctx.db,
+        taxReturnId: returnRecord.id,
+        changedFields,
+        actor: { source: "portal" },
+        confirmFinancialFigures: !input.clearForm,
+      });
 
       return updated ?? null;
     }),

@@ -68,11 +68,22 @@ import { SyncJobsDialog } from "@/components/sync-jobs-dialog"
 import { DirectionalTransition } from "@/components/view-transition"
 import { useNavigateWithTransition } from "@/lib/navigate-with-transition"
 import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing"
+import {
+  getReturnReadinessState,
+  hasManagerSignoff,
+  requiresManagerSignoff,
+} from "@repo/database/return-readiness"
 
 type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | "dismissed" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
 type TaxYearFilter = "all" | `${number}`
-type ReadinessFilter = "all" | "ready" | "missing" | "needs_form"
+type ReadinessFilter =
+  | "all"
+  | "ready"
+  | "awaiting_manager_signoff"
+  | "awaiting_signoff"
+  | "missing"
+  | "needs_form"
 type CertificateFilter = "all" | "Certificate 2" | "Certificate 3" | "unresolved"
 
 type TaxReturnRow = {
@@ -88,7 +99,25 @@ type TaxReturnRow = {
   isSubstanceComplete: boolean | null
   missingSubstanceFieldCount: number | null
   readyForSubmissionAt: Date | string | null
+  managerSignOff?: string | null
+  managerSignOffDate?: string | null
   jurisdiction: { code: string } | null
+}
+
+/**
+ * Approval stage: draft (needs form / missing fields), awaiting the CSP
+ * manager's signoff on the form (Guernsey ESR), awaiting the client admin's
+ * signoff in the client portal, or signed off and ready to file.
+ */
+function getRowReadiness(row: TaxReturnRow) {
+  return getReturnReadinessState({
+    status: row.status,
+    readyForSubmissionAt: row.readyForSubmissionAt,
+    isFormComplete: row.isSubstanceComplete,
+    missingFieldCount: row.missingSubstanceFieldCount,
+    requiresManagerSignoff: requiresManagerSignoff(row),
+    hasManagerSignoff: hasManagerSignoff(row),
+  })
 }
 
 function matchesCertificateFilter(
@@ -212,7 +241,9 @@ function createColumns(
       header: "Status",
       cell: ({ row }) => {
         const status = row.original.status
-        const isReadyForAutomation = Boolean(row.original.isSubstanceComplete)
+        // Only signed-off returns are ready for automation; a complete form
+        // still needs the manager's and client signatory's approval first.
+        const isReadyForAutomation = getRowReadiness(row.original) === "signed_off"
         const cls = statusBadgeStyles[status] ?? statusBadgeStyles.pending
         const label = statusLabels[status] ?? (isReadyForAutomation ? "Awaiting Automation" : "Pending")
         return (
@@ -226,27 +257,33 @@ function createColumns(
       id: "readiness",
       header: "Readiness",
       cell: ({ row }) => {
-        const isMarkedReady =
-          Boolean(row.original.readyForSubmissionAt) ||
-          row.original.status === "completed"
+        const readiness = getRowReadiness(row.original)
 
-        if (isMarkedReady) {
+        if (readiness === "signed_off") {
           return (
             <span className="inline-flex rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400">
-              Ready
+              Signed off
             </span>
           )
         }
 
-        if (row.original.isSubstanceComplete) {
+        if (readiness === "awaiting_manager_signoff") {
+          return (
+            <span className="inline-flex rounded-lg border border-amber-500/50 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400">
+              Awaiting manager signoff
+            </span>
+          )
+        }
+
+        if (readiness === "awaiting_signoff") {
           return (
             <span className="inline-flex rounded-lg border border-blue-500/50 bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-800 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-400">
-              Awaiting signoff
+              Awaiting client signoff
             </span>
           )
         }
 
-        if ((row.original.missingSubstanceFieldCount ?? 0) > 0) {
+        if (readiness === "missing_fields") {
           return (
             <span className="inline-flex rounded-lg border border-violet-500/50 bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-800 dark:border-violet-500/35 dark:bg-violet-500/10 dark:text-violet-400">
               {row.original.missingSubstanceFieldCount} Missing
@@ -496,9 +533,12 @@ export default function ReturnsPage() {
     if (readinessFilter === "all") return returns
     return returns.filter((r) => {
       if (!matchesCertificateFilter(r, certificateFilter)) return false
-      if (readinessFilter === "ready") return r.isSubstanceComplete === true
-      if (readinessFilter === "missing") return (r.missingSubstanceFieldCount ?? 0) > 0 && !r.isSubstanceComplete
-      if (readinessFilter === "needs_form") return !r.isSubstanceComplete && (r.missingSubstanceFieldCount ?? 0) === 0
+      const readiness = getRowReadiness(r)
+      if (readinessFilter === "ready") return readiness === "signed_off"
+      if (readinessFilter === "awaiting_manager_signoff") return readiness === "awaiting_manager_signoff"
+      if (readinessFilter === "awaiting_signoff") return readiness === "awaiting_signoff"
+      if (readinessFilter === "missing") return readiness === "missing_fields"
+      if (readinessFilter === "needs_form") return readiness === "needs_form"
       return true
     })
   }, [certificateFilter, data?.returns, readinessFilter])
@@ -765,7 +805,9 @@ export default function ReturnsPage() {
                       <DropdownMenuSeparator />
                       {([
                         ["all", "All"],
-                        ["ready", "Ready"],
+                        ["ready", "Signed Off"],
+                        ["awaiting_manager_signoff", "Awaiting Manager"],
+                        ["awaiting_signoff", "Awaiting Client"],
                         ["missing", "Missing Fields"],
                         ["needs_form", "Needs Form"],
                       ] as const).map(([value, label]) => (

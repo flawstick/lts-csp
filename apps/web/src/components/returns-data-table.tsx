@@ -4,6 +4,11 @@ import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
+  getReturnReadinessState,
+  hasManagerSignoff,
+  requiresManagerSignoff,
+} from "@repo/database/return-readiness"
+import {
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
@@ -65,7 +70,20 @@ type TaxReturn = {
   link: string | null
   isSubstanceComplete: boolean | null
   missingSubstanceFieldCount: number
+  managerSignOff?: string | null
+  managerSignOffDate?: string | null
   jurisdiction: { code: string } | null
+}
+
+function getRowReadiness(row: TaxReturn) {
+  return getReturnReadinessState({
+    status: row.status,
+    readyForSubmissionAt: row.readyForSubmissionAt,
+    isFormComplete: row.isSubstanceComplete,
+    missingFieldCount: row.missingSubstanceFieldCount,
+    requiresManagerSignoff: requiresManagerSignoff(row),
+    hasManagerSignoff: hasManagerSignoff(row),
+  })
 }
 
 const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
@@ -136,7 +154,9 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
     header: "Status",
     cell: ({ row }) => {
       const status = row.original.status
-      const isReadyForAutomation = Boolean(row.original.isSubstanceComplete)
+      // Only signed-off returns are ready for automation; a complete form
+      // still needs the manager's and client signatory's approval first.
+      const isReadyForAutomation = getRowReadiness(row.original) === "signed_off"
       const styles: Record<string, string> = {
         completed: "border-emerald-500/50 bg-emerald-500/15 text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400",
         in_progress: "border-blue-500/50 bg-blue-500/15 text-blue-800 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-400",
@@ -166,27 +186,33 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
     id: "readiness",
     header: "Readiness",
     cell: ({ row }) => {
-      const isMarkedReady =
-        Boolean(row.original.readyForSubmissionAt) ||
-        row.original.status === "completed"
+      const readiness = getRowReadiness(row.original)
 
-      if (isMarkedReady) {
+      if (readiness === "signed_off") {
         return (
           <span className="inline-flex rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400">
-            Ready
+            Signed off
           </span>
         )
       }
 
-      if (row.original.isSubstanceComplete) {
+      if (readiness === "awaiting_manager_signoff") {
+        return (
+          <span className="inline-flex rounded-lg border border-amber-500/50 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400">
+            Awaiting manager signoff
+          </span>
+        )
+      }
+
+      if (readiness === "awaiting_signoff") {
         return (
           <span className="inline-flex rounded-lg border border-blue-500/50 bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-800 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-400">
-            Awaiting signoff
+            Awaiting client signoff
           </span>
         )
       }
 
-      if ((row.original.missingSubstanceFieldCount ?? 0) > 0) {
+      if (readiness === "missing_fields") {
         return (
           <span className="inline-flex rounded-lg border border-violet-500/50 bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-800 dark:border-violet-500/35 dark:bg-violet-500/10 dark:text-violet-400">
             {row.original.missingSubstanceFieldCount} Missing

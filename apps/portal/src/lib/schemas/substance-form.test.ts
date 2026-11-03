@@ -69,4 +69,38 @@ describe("portal Guernsey substance form schema", () => {
     expect(visibleSectionIds).toContain("companyInfo");
     expect(visibleSectionIds).not.toContain("partnershipInfo");
   });
+
+  it("shows the persisted Guernsey incorporation question in Company Information", () => {
+    const companyInfo = FORM_SECTIONS.find(
+      (section) => section.id === "companyInfo",
+    );
+
+    expect(companyInfo?.fields).toContain("isIncorporatedInGuernsey");
+    // Not a database column: answers to it were silently discarded.
+    expect(companyInfo?.fields).not.toContain("isGuernseyTaxResident");
+  });
+
+  it("requires Guernsey incorporation for companies but not partnerships", () => {
+    expect(
+      getMissingFields({
+        certificateType: "Certificate 3",
+        entityType: "Company",
+      }),
+    ).toContain("isIncorporatedInGuernsey");
+
+    expect(
+      getMissingFields({
+        certificateType: "Certificate 3",
+        entityType: "Company",
+        isIncorporatedInGuernsey: "No",
+      }),
+    ).not.toContain("isIncorporatedInGuernsey");
+
+    expect(
+      getMissingFields({
+        certificateType: "Certificate 3",
+        entityType: "Partnership",
+      }),
+    ).not.toContain("isIncorporatedInGuernsey");
+  });
 });

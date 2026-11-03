@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
 import type { Database } from "@repo/database";
-import { substanceForms, taxReturns } from "@repo/database";
+import {
+  getChangedFormFields,
+  resolveExtractedFinancialFigures,
+  stripManagerSignoffFields,
+  substanceForms,
+  syncTaxReturnAfterFormChange,
+  taxReturns,
+} from "@repo/database";
 import {
   mergeSubstanceAutofillValues,
   normalizeSubstanceAutofillEntityName,
@@ -37,6 +44,28 @@ const EXTRACTION_MODEL_CANDIDATES = [
   { id: "deepseek/deepseek-v4-flash", textOnly: true },
   { id: "openai/gpt-5.4", textOnly: false },
 ] as const;
+
+/**
+ * Normalise a financial figure extracted from accounts while preserving its sign.
+ * The GRS portal accepts negative figures, so losses and negative net book values
+ * must be kept. Accounting-style bracket notation "(12,345)" is converted to "-12345".
+ */
+function normalizeSignedFinancialValue(
+  value: string | null | undefined,
+): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const bracketed = /^\(.*\)$/.test(trimmed);
+  const isNegative =
+    bracketed || trimmed.startsWith("-") || trimmed.endsWith("-");
+  const digits = trimmed.replace(/[^0-9.]/g, "");
+  if (!digits || isNaN(parseFloat(digits))) return trimmed;
+  const magnitude = digits.replace(/^0+(?=\d)/, "");
+  const parsed = parseFloat(magnitude);
+  if (parsed === 0) return "0";
+  return isNegative ? `-${magnitude}` : magnitude;
+}
 
 function normalizeTaxReferenceNumber(input: {
   taxReferenceNumber?: string | null;
@@ -79,7 +108,9 @@ type ExtractionContextSource =
   | null
   | undefined;
 
-type ValidationIssue = ReturnType<typeof validateGuernseySourceDocuments>[number];
+type ValidationIssue = ReturnType<
+  typeof validateGuernseySourceDocuments
+>[number];
 
 const ECONOMIC_CLASSIFICATION_CODE_PATTERN = /\b\d{1,3}(?:\.\d{1,3})+\b/;
 const ECONOMIC_CLASSIFICATION_CODE_CONTEXT_PATTERN =
@@ -124,6 +155,10 @@ async function scrapePdfMarkdownWithFirecrawl(url: string) {
     });
 
     if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      console.warn(
+        `[AI Extraction] Firecrawl PDF parse failed (${response.status}) for ${url}: ${body.slice(0, 300)}`,
+      );
       return null;
     }
 
@@ -143,7 +178,11 @@ async function scrapePdfMarkdownWithFirecrawl(url: string) {
     }
 
     return truncateFirecrawlMarkdown(markdown);
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[AI Extraction] Firecrawl PDF parse errored for ${url}:`,
+      error,
+    );
     return null;
   }
 }
@@ -408,7 +447,7 @@ function sanitizeConstituentEntityAnswer(input: {
     return "No";
   }
 
-  return explicitYes ? "Yes" : input.existingValue ?? undefined;
+  return explicitYes ? "Yes" : (input.existingValue ?? undefined);
 }
 
 async function findPreviousSubstanceAutofillSource(
@@ -441,7 +480,7 @@ async function findPreviousSubstanceAutofillSource(
 
   const matchingSources: Array<{
     taxYear: number;
-    values: typeof candidates[number]["substanceForm"];
+    values: (typeof candidates)[number]["substanceForm"];
   }> = [];
 
   for (const candidate of candidates) {
@@ -461,8 +500,8 @@ async function findPreviousSubstanceAutofillSource(
     }
 
     if (
-      Object.keys(pickSubstanceAutofillValues(candidate.substanceForm)).length ===
-      0
+      Object.keys(pickSubstanceAutofillValues(candidate.substanceForm))
+        .length === 0
     ) {
       continue;
     }
@@ -552,10 +591,7 @@ async function setManualGuernseyCertificateType(params: {
     externalId?: string | null;
     metadata?: Record<string, unknown> | null;
   };
-  existingForm:
-    | (typeof substanceForms.$inferSelect)
-    | null
-    | undefined;
+  existingForm: typeof substanceForms.$inferSelect | null | undefined;
   certificateType: GuernseyCertificateType;
   overwriteExisting: boolean;
 }) {
@@ -669,7 +705,9 @@ const aiExtractionSchema = z.object({
   isIncorporatedInGuernsey: z
     .enum(["Yes", "No"])
     .nullable()
-    .describe("Is the entity incorporated in Guernsey?"),
+    .describe(
+      "Is the entity incorporated in Guernsey? Answer only when the documents explicitly state the place or law of incorporation (e.g. 'incorporated in Guernsey', 'registered under the Companies (Guernsey) Law, 2008', a Guernsey certificate of incorporation, or explicitly another jurisdiction). Never infer this from a registered office, administrator or address alone — return null instead.",
+    ),
   economicClassificationCode: z
     .string()
     .nullable()
@@ -710,15 +748,35 @@ const aiExtractionSchema = z.object({
     .describe(
       "Qualification of the accounts preparer/auditor (ACCA, ICAEW, etc.) — this is the accountant's qualification, not LTS",
     ),
+  financialStatementsCurrency: z
+    .string()
+    .nullable()
+    .describe(
+      "ISO 4217 code of the currency the financial statements are presented in (e.g. 'GBP', 'USD', 'EUR'), taken from the column headings or accounting policies note. Null if not stated.",
+    ),
   netBookValue: z
     .string()
     .nullable()
-    .describe("Net book value from Balance Sheet — if negative, return '0'"),
+    .describe(
+      "Net book value (net assets / total equity) from the Balance Sheet, exactly as presented in the financial statements' own currency — negative values are allowed, keep the sign (e.g. '-12345')",
+    ),
   totalProfit: z
     .string()
     .nullable()
     .describe(
-      "Total profit from Profit & Loss Account — if negative (a loss), return '0'",
+      "Profit or loss before tax from the Profit & Loss Account / Income Statement, exactly as presented in the financial statements' own currency. It may be labelled 'Profit/(loss) before taxation', 'Loss before tax', 'Loss on ordinary activities before taxation' or 'Loss for the year' when there is no tax line. A loss MUST be returned as a negative figure (e.g. '-12345'), never '0' and never null just because it is a loss.",
+    ),
+  netBookValueGbp: z
+    .string()
+    .nullable()
+    .describe(
+      "Only when the financial statements are NOT in GBP: the net book value in GBP if, and only if, a GBP amount is explicitly stated in the documents. Never convert it yourself. Null otherwise.",
+    ),
+  totalProfitGbp: z
+    .string()
+    .nullable()
+    .describe(
+      "Only when the financial statements are NOT in GBP: the profit/loss before tax in GBP if, and only if, a GBP amount is explicitly stated in the documents. Never convert it yourself. Null otherwise.",
     ),
   profitAllocation: z
     .enum(["Investment", "Business"])
@@ -963,13 +1021,6 @@ const aiExtractionSchema = z.object({
     )
     .nullable(),
 
-  // SECTION 12: DECLARATION
-  managerSignOff: z.string().nullable().describe("Manager who signed off"),
-  managerSignOffDate: z
-    .string()
-    .nullable()
-    .describe("Sign off date (YYYY-MM-DD)"),
-
   // SECTION 13: COUNTRY BY COUNTRY REPORTING
   isConstituentEntity: z
     .enum(["Yes", "No"])
@@ -1145,6 +1196,8 @@ export const substanceFormRouter = createTRPCRouter({
       const missingFields = getMissingFields(currentData);
       const isComplete = missingFields.length === 0;
 
+      const changedFields = getChangedFormFields(existing, input.data);
+
       const [updated] = await ctx.db
         .update(substanceForms)
         .set({
@@ -1155,6 +1208,16 @@ export const substanceFormRouter = createTRPCRouter({
         })
         .where(eq(substanceForms.taxReturnId, input.taxReturnId))
         .returning();
+
+      // LTS can always correct filing data, but a change to a signed-off return
+      // revokes the signoff so the client signatory re-approves before filing.
+      await syncTaxReturnAfterFormChange({
+        db: ctx.db,
+        taxReturnId: input.taxReturnId,
+        changedFields,
+        actor: { source: "web" },
+        confirmFinancialFigures: true,
+      });
 
       return updated;
     }),
@@ -1308,6 +1371,8 @@ export const substanceFormRouter = createTRPCRouter({
               hasTextForEveryDocument = false;
             }
           } else {
+            // DeepSeek V4 Flash is text-only; images require the native-file
+            // fallback unless an OCR representation is added in the future.
             hasTextForEveryDocument = false;
           }
 
@@ -1402,8 +1467,8 @@ export const substanceFormRouter = createTRPCRouter({
           ? buildGuernseyCertificateTwoDefaults(taxReturn.taxYear)
           : null;
 
-      // Prefer DeepSeek V4 Flash for parsed text, retaining GPT-5.4 for native
-      // PDF/image input when OCR is unavailable.
+      // Prefer DeepSeek V4 Flash for parsed text, with GPT-5.4 retaining the
+      // native PDF/image path when OCR is unavailable.
       const gateway = createGateway({
         apiKey,
         baseURL: "https://ai-gateway.vercel.sh/v3/ai",
@@ -1419,8 +1484,9 @@ export const substanceFormRouter = createTRPCRouter({
       const extractionContextForm = certificateTwoDefaults
         ? ({ ...form, ...certificateTwoDefaults } as typeof form)
         : form;
-      const existingContextText =
-        buildExistingExtractionContext(extractionContextForm);
+      const existingContextText = buildExistingExtractionContext(
+        extractionContextForm,
+      );
 
       const prompt = `You are an expert at extracting information from financial and corporate documents for Guernsey ${certificateResolution.certificateType} Economic Substance Register reporting.
 
@@ -1448,8 +1514,9 @@ SECTION 3: PARTNERSHIP INFORMATION (if applicable)
 SECTION 4: FINANCIAL STATEMENTS
 - Are statements consolidated?
 - Accounts preparer name and qualification — this is the ACCOUNTANT/AUDITOR who prepared the financial accounts, NOT "LTS Tax Limited" (LTS prepares the ESR form, not the accounts)
-- Net book value (from Balance Sheet) — if negative, return "0"
-- Total profit (from Profit & Loss Account) — if negative (a loss), return "0"
+- Currency the financial statements are presented in
+- Net book value (from Balance Sheet) — negative values are allowed, keep the sign
+- Profit or loss before tax (from Profit & Loss Account) — if the accounts show a loss, return the negative figure (e.g. "-12345")
 - Profit allocation — REQUIRED, always pick "Investment" or "Business"
 
 SECTION 5: FINANCIAL INSTITUTIONS
@@ -1495,9 +1562,6 @@ SECTION 11: DIRECTED AND MANAGED IN GUERNSEY
 - Directors list (name, initials)
 - Board meeting details (date, attendees, location, agenda points)
 
-SECTION 12: DECLARATION
-- Manager sign off, date
-
 SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)
 - Is the entity a constituent entity for CbCR purposes? (Yes/No) — REQUIRED for 2025 returns, default to "No" if not specified
 
@@ -1517,8 +1581,12 @@ Some attached PDFs may also include a Firecrawl OCR/text parse. Use that parsed 
 
 IMPORTANT RULES:
 - accountingPeriodStart and accountingPeriodEnd are the entity's actual accounting period dates, not the Guernsey tax year. Extract them only if the documents clearly state them. If they are not stated, leave them empty.
-- If total profit is negative (a loss), return "0". The portal does not accept negative values.
-- If net book value is negative, return "0".
+- The portal accepts negative values. If total profit is a loss, return the negative figure with a leading minus sign (e.g. "-12345"). Never convert a loss to "0".
+- If net book value is negative, return the negative figure with a leading minus sign. Never convert it to "0".
+- Treat figures shown in brackets in the accounts, e.g. "(12,345)", as negative.
+- totalProfit is the profit OR LOSS before tax. Losses are common for holding and property companies — when the accounts show "Loss before taxation" (or similar), return it as a negative figure.
+- financialStatementsCurrency: report the currency the accounts are presented in. totalProfit and netBookValue must be the figures as presented in that currency. The Guernsey ESR is filed in GBP: if the accounts are not in GBP, also fill totalProfitGbp / netBookValueGbp only when a GBP amount is explicitly stated in the documents. Never perform a currency conversion yourself and never label a USD/EUR/other figure as GBP.
+- isIncorporatedInGuernsey: answer only from an explicit statement of the place or law of incorporation. A Guernsey registered office or administrator address is NOT evidence of Guernsey incorporation — leave it empty if incorporation is not explicitly stated.
 - profitAllocation is REQUIRED — always pick "Investment" or "Business" based on the entity's income type.
 - economicClassificationCode is REQUIRED for 2025 returns. It usually looks like a dotted numeric code such as "10.5.4". Look specifically for dot-separated numeric codes near labels like "Economic Classification Code" or "Company Activity Code", and return only the dotted code.
 - isConstituentEntity (CbCR) is REQUIRED for 2025 returns — default to "No" if not stated.
@@ -1528,13 +1596,17 @@ IMPORTANT RULES:
 - activityGrossIncome should be the turnover or gross income from the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
 - adequacyExpenditureDetails should be the operating expenditure relating to the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
 - If the entity has no relevant activity ("None of the above"), leave sections 6B, 7, 8, 9, and 10 empty.
-${certificateTwoDefaults ? `
+${
+  certificateTwoDefaults
+    ? `
 
 IMPORTANT CERTIFICATE 2 RULES:
 - Certificate 2 filings do not require financial statements upload or financial-statement extraction.
 - Keep the static Certificate 2 defaults: accounting period 01-01 to 31-12 for the tax year, entity activity "Dormant", relevant activity "None of the above", no multiple relevant activities, no intellectual property holding, FATCA/CRS/IGOR "No", and CbCR constituent entity "No".
 - Still extract any useful non-financial details you can from the uploaded supporting documents, such as entity name, entity type, addresses, company number, and Guernsey incorporation status.
-` : ""}`;
+`
+    : ""
+}`;
 
       console.log(
         "[AI Extraction] Calling generateObject with",
@@ -1618,6 +1690,8 @@ IMPORTANT CERTIFICATE 2 RULES:
       const extractedData = stripNullishStructuredValue(
         result.object,
       ) as Partial<SubstanceFormData>;
+      // A manager signoff is an approval a person records, never an extracted value.
+      stripManagerSignoffFields(extractedData);
 
       extractedData.certificateType = certificateResolution.certificateType;
       extractedData.taxReferenceNumber = normalizeTaxReferenceNumber({
@@ -1634,23 +1708,55 @@ IMPORTANT CERTIFICATE 2 RULES:
         extractedData.profitAllocation ??= "Investment";
       }
 
-      // Clamp negative financial values to "0" — portal does not accept negatives
-      if (extractedData.totalProfit) {
-        const numericProfit = parseFloat(
-          extractedData.totalProfit.replace(/[^0-9.-]/g, ""),
-        );
-        if (!isNaN(numericProfit) && numericProfit < 0) {
-          extractedData.totalProfit = "0";
-        }
-      }
-      if (extractedData.netBookValue) {
-        const numericNbv = parseFloat(
-          extractedData.netBookValue.replace(/[^0-9.-]/g, ""),
-        );
-        if (!isNaN(numericNbv) && numericNbv < 0) {
-          extractedData.netBookValue = "0";
-        }
-      }
+      // Negative financial values (losses / negative net book value) are kept as-is.
+      // The GRS portal accepts negative figures since Aug 2026, so we no longer clamp to "0".
+      // Normalise accounting-style bracket notation, e.g. "(12,345)" -> "-12345".
+      const extractedFinancials = extractedData as Partial<SubstanceFormData> & {
+        financialStatementsCurrency?: string;
+        totalProfitGbp?: string;
+        netBookValueGbp?: string;
+      };
+      const financialFigures = certificateTwoDefaults
+        ? null
+        : resolveExtractedFinancialFigures({
+            currency: extractedFinancials.financialStatementsCurrency,
+            totalProfit: normalizeSignedFinancialValue(
+              extractedData.totalProfit,
+            ),
+            netBookValue: normalizeSignedFinancialValue(
+              extractedData.netBookValue,
+            ),
+            totalProfitGbp: normalizeSignedFinancialValue(
+              extractedFinancials.totalProfitGbp,
+            ),
+            netBookValueGbp: normalizeSignedFinancialValue(
+              extractedFinancials.netBookValueGbp,
+            ),
+            existing: {
+              totalProfit: form.totalProfit,
+              netBookValue: form.netBookValue,
+            },
+            previousMetadata: taxReturn.metadata,
+          });
+      delete extractedFinancials.financialStatementsCurrency;
+      delete extractedFinancials.totalProfitGbp;
+      delete extractedFinancials.netBookValueGbp;
+      // `null` clears a stale foreign-currency figure; `undefined` keeps the saved value.
+      const financialFigurePatch = financialFigures
+        ? {
+            totalProfit: financialFigures.totalProfit,
+            netBookValue: financialFigures.netBookValue,
+          }
+        : {
+            totalProfit: normalizeSignedFinancialValue(
+              extractedData.totalProfit,
+            ),
+            netBookValue: normalizeSignedFinancialValue(
+              extractedData.netBookValue,
+            ),
+          };
+      delete extractedData.totalProfit;
+      delete extractedData.netBookValue;
 
       // FATCA/CRS defaults — "No" when not a financial institution
       extractedData.isGuernseyFiFatca ??= "No";
@@ -1669,18 +1775,20 @@ IMPORTANT CERTIFICATE 2 RULES:
       }
 
       // CbCR — default to "No" for 2025 returns
-      extractedData.isConstituentEntity = sanitizeConstituentEntityAnswer({
-        existingValue:
-          form.isConstituentEntity === "Yes" || form.isConstituentEntity === "No"
-            ? form.isConstituentEntity
-            : null,
-        nextValue:
-          extractedData.isConstituentEntity === "Yes" ||
-          extractedData.isConstituentEntity === "No"
-            ? extractedData.isConstituentEntity
-            : null,
-        textContexts: extractedTextContext,
-      }) ?? "No";
+      extractedData.isConstituentEntity =
+        sanitizeConstituentEntityAnswer({
+          existingValue:
+            form.isConstituentEntity === "Yes" ||
+            form.isConstituentEntity === "No"
+              ? form.isConstituentEntity
+              : null,
+          nextValue:
+            extractedData.isConstituentEntity === "Yes" ||
+            extractedData.isConstituentEntity === "No"
+              ? extractedData.isConstituentEntity
+              : null,
+          textContexts: extractedTextContext,
+        }) ?? "No";
 
       extractedData.economicClassificationCode =
         normalizeEconomicClassificationCode(
@@ -1714,16 +1822,22 @@ IMPORTANT CERTIFICATE 2 RULES:
         }
       }
 
+      const formPatch: Record<string, unknown> = { ...extractedData };
+      for (const [field, value] of Object.entries(financialFigurePatch)) {
+        if (value !== undefined) formPatch[field] = value;
+      }
+
       // Merge with existing data (AI data fills in gaps)
-      const mergedData = { ...form, ...extractedData };
+      const mergedData = { ...form, ...formPatch };
       const missingFields = getMissingFields(mergedData as SubstanceFormData);
       const isComplete = missingFields.length === 0;
+      const changedFields = getChangedFormFields(form, formPatch);
 
       // Update form with extracted data
       const [updated] = await ctx.db
         .update(substanceForms)
         .set({
-          ...extractedData,
+          ...formPatch,
           missingFields,
           isComplete,
           aiExtractedAt: new Date(),
@@ -1732,9 +1846,18 @@ IMPORTANT CERTIFICATE 2 RULES:
         .where(eq(substanceForms.taxReturnId, input.taxReturnId))
         .returning();
 
-      const extractedFieldsCount = Object.keys(extractedData).filter(
-        (k) => extractedData[k as keyof typeof extractedData] !== undefined,
-      ).length;
+      await syncTaxReturnAfterFormChange({
+        db: ctx.db,
+        taxReturnId: input.taxReturnId,
+        changedFields,
+        actor: { source: "ai_extraction" },
+        financialFiguresMetadata: financialFigures?.metadata ?? null,
+      });
+
+      const extractedFields = Object.keys(formPatch).filter(
+        (k) => formPatch[k] !== undefined && formPatch[k] !== null,
+      );
+      const extractedFieldsCount = extractedFields.length;
 
       // Track AI extraction completion
       await trackServer({
@@ -1750,12 +1873,13 @@ IMPORTANT CERTIFICATE 2 RULES:
 
       return {
         form: updated,
-        extractedFields: Object.keys(extractedData).filter(
-          (k) => extractedData[k as keyof typeof extractedData] !== undefined,
-        ),
-        warnings: validationIssues
-          .filter((issue) => issue.severity === "warning")
-          .map((issue) => issue.message),
+        extractedFields,
+        warnings: [
+          ...validationIssues
+            .filter((issue) => issue.severity === "warning")
+            .map((issue) => issue.message),
+          ...(financialFigures?.warning ? [financialFigures.warning] : []),
+        ],
       };
     }),
 
@@ -1791,3 +1915,4 @@ IMPORTANT CERTIFICATE 2 RULES:
       return CIGA_BY_ACTIVITY[input.activity] ?? [];
     }),
 });
+

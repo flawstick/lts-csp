@@ -16,6 +16,15 @@ export const DEFAULT_PORTAL_CONTACT_INFO: ResolvedOrgPortalContactInfo = {
   phone: "+44 1481 755862",
 };
 
+/**
+ * Contact entered on the Guernsey Tax Portal's final contact step. LTS files
+ * as agent, so this is always the LTS contact. It is deliberately separate from
+ * an organisation's client portal contact settings, which CSPs may point at
+ * their own staff (e.g. a signatory) for client-facing communication.
+ */
+export const GUERNSEY_FILING_CONTACT_INFO: ResolvedOrgPortalContactInfo =
+  DEFAULT_PORTAL_CONTACT_INFO;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }

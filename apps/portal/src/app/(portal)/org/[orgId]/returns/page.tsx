@@ -15,6 +15,12 @@ import {
 import { useMemo, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
+import {
+  getReturnReadinessState,
+  hasManagerSignoff,
+  requiresManagerSignoff,
+  type ReturnReadinessState,
+} from "@repo/database/return-readiness";
 
 import {
   AlertDialog,
@@ -168,6 +174,8 @@ type ReturnListRow = {
   isSubstanceComplete: boolean | null;
   files: unknown;
   readyForSubmissionAt?: Date | string | null;
+  managerSignOff?: string | null;
+  managerSignOffDate?: string | null;
 };
 
 function getRowSubmittability(row: ReturnListRow) {
@@ -201,19 +209,41 @@ function getRowSubmittability(row: ReturnListRow) {
   );
 }
 
+/**
+ * Approval stage of a return: draft, awaiting the manager's signoff on the
+ * form (Guernsey ESR), awaiting an admin to mark it ready, or approved.
+ */
+function getRowApprovalState(row: ReturnListRow): ReturnReadinessState {
+  return getReturnReadinessState({
+    status: normalizeStatus(row.status),
+    readyForSubmissionAt: row.readyForSubmissionAt,
+    isFormComplete: getRowSubmittability(row),
+    requiresManagerSignoff: requiresManagerSignoff(row),
+    hasManagerSignoff: hasManagerSignoff(row),
+  });
+}
+
+const APPROVAL_LABEL: Record<ReturnReadinessState, string> = {
+  signed_off: "Approved",
+  awaiting_signoff: "Awaiting admin signoff",
+  awaiting_manager_signoff: "Awaiting manager signoff",
+  missing_fields: "Draft",
+  needs_form: "Draft",
+};
+
+function hasAdminSignoff(row: ReturnListRow) {
+  return (
+    Boolean(row.readyForSubmissionAt) ||
+    normalizeStatus(row.status) === "completed"
+  );
+}
+
 function canBulkSubmitRow(row: ReturnListRow) {
-  const status = normalizeStatus(row.status);
-  if (status === "dismissed") {
+  if (normalizeStatus(row.status) === "dismissed" || hasAdminSignoff(row)) {
     return false;
   }
 
-  const isMarkedReady =
-    Boolean(row.readyForSubmissionAt) || status === "completed";
-  if (isMarkedReady) {
-    return false;
-  }
-
-  return getRowSubmittability(row);
+  return getRowApprovalState(row) === "awaiting_signoff";
 }
 
 export default function OrgReturnsPage() {
@@ -479,8 +509,9 @@ export default function OrgReturnsPage() {
     [pageRowIds],
   );
 
-  const readyCount = useMemo(
-    () => returns.filter((row) => row.isSubstanceComplete).length,
+  const approvedCount = useMemo(
+    () =>
+      returns.filter((row) => getRowApprovalState(row) === "signed_off").length,
     [returns],
   );
 
@@ -521,7 +552,7 @@ export default function OrgReturnsPage() {
               {returnsQuery.isLoading ? (
                 <Skeleton className="h-4 w-20" />
               ) : (
-                `${readyCount} form ready`
+                `${approvedCount} approved`
               )}
             </span>
           </div>
@@ -848,9 +879,10 @@ export default function OrgReturnsPage() {
 
                     const isDismissed = status === "dismissed";
                     const returnHref = `/org/${orgId}/returns/${row.id}`;
-                    const isSubmittable = getRowSubmittability(row);
-                    const isMarkedReady =
-                      Boolean(row.readyForSubmissionAt) || status === "completed";
+                    const approvalState = getRowApprovalState(row);
+                    const isApproved = approvalState === "signed_off";
+                    const canMarkReady = approvalState === "awaiting_signoff";
+                    const isMarkedReady = hasAdminSignoff(row);
 
                     return (
                       <tr
@@ -906,26 +938,25 @@ export default function OrgReturnsPage() {
                           <span
                             className={cn(
                               "inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border px-2 py-1 text-xs font-medium",
-                              isMarkedReady
+                              isApproved
                                 ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                : isSubmittable
+                                : canMarkReady
                                   ? "border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-400"
                                   : "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
                             )}
                             title={
-                              !isMarkedReady && missingCount > 0
+                              approvalState === "missing_fields" &&
+                              missingCount > 0
                                 ? `${missingCount} missing field(s)`
-                                : undefined
+                                : approvalState === "awaiting_manager_signoff"
+                                  ? "Record the manager's name and sign-off date under Finalising the Return"
+                                  : undefined
                             }
                           >
-                            {isMarkedReady ? (
+                            {isApproved ? (
                               <CheckCircle2 className="size-3.5" />
                             ) : null}
-                            {isMarkedReady
-                              ? "Ready"
-                              : isSubmittable
-                                ? "Ready to submit"
-                                : "Awaiting"}
+                            {APPROVAL_LABEL[approvalState]}
                           </span>
                         </td>
                         <td className="text-muted-foreground px-4 py-3">
@@ -978,7 +1009,7 @@ export default function OrgReturnsPage() {
                                       <DropdownMenuItem
                                         className="cursor-pointer gap-2"
                                         disabled={
-                                          !isSubmittable ||
+                                          !canMarkReady ||
                                           markReadyMutation.isPending
                                         }
                                         onClick={() =>

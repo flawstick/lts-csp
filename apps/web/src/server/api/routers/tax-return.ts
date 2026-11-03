@@ -30,6 +30,7 @@ import * as cheerio from "cheerio";
 import { decryptPortalCredentials } from "@repo/database/portal-credentials";
 import { launchBrowserTask } from "@/lib/ecs";
 import { getBrowserJobStaleReason } from "@/lib/browser-job-status";
+import { getFilingStartBlocker } from "@/lib/filing-start-guard";
 import { triggerTaxSync } from "@/lib/tax-sync-launcher";
 import {
   jerseyCompanyReturnFormSchema,
@@ -227,10 +228,12 @@ async function maybeMarkBrowserJobStale<
   }
 
   if (ids?.taxReturnId) {
+    // A paused job was already waiting on a person (manual action / review);
+    // losing its worker ends the run but is not a failure of the return.
     await dbClient
       .update(taxReturns)
       .set({
-        status: "failed",
+        status: job.status === "paused" ? "review_required" : "failed",
       })
       .where(eq(taxReturns.id, ids.taxReturnId));
   }
@@ -816,6 +819,8 @@ export const taxReturnRouter = createTRPCRouter({
           metadata: taxReturns.metadata,
           readyForSubmissionAt: taxReturns.readyForSubmissionAt,
           substanceCertificateType: substanceForms.certificateType,
+          managerSignOff: substanceForms.managerSignOff,
+          managerSignOffDate: substanceForms.managerSignOffDate,
           isSubstanceComplete: sql<boolean | null>`
             CASE
               WHEN ${taxReturns.returnType} = 'economic_substance' THEN ${substanceForms.isComplete}
@@ -1676,6 +1681,11 @@ export const taxReturnRouter = createTRPCRouter({
         }
       }
 
+      const submissionBlocker = getFilingStartBlocker({
+        taxReturn,
+        submissionMode: "submit_and_capture_pdf",
+      });
+
       const form = await ctx.db.query.substanceForms.findFirst({
         where: eq(substanceForms.taxReturnId, input.taxReturnId),
       });
@@ -1684,7 +1694,9 @@ export const taxReturnRouter = createTRPCRouter({
         // Still allow starting, but warn
         return {
           canStart: true,
+          canSubmit: false,
           warning: "Substance form not found. Some fields may be missing.",
+          submissionBlocker,
         };
       }
 
@@ -1693,12 +1705,19 @@ export const taxReturnRouter = createTRPCRouter({
         // Allow starting with incomplete form, but include warning
         return {
           canStart: true,
+          canSubmit: false,
           warning: `Substance form incomplete. ${missing.length} fields missing.`,
           missingFields: missing,
+          submissionBlocker,
         };
       }
 
-      return { canStart: true };
+      return {
+        canStart: true,
+        canSubmit: !submissionBlocker,
+        warning: submissionBlocker ?? undefined,
+        submissionBlocker,
+      };
     }),
 
   // Get a single task with its jobs
@@ -1832,6 +1851,17 @@ export const taxReturnRouter = createTRPCRouter({
               "Certificate type is unresolved for this Guernsey return. Confirm Certificate 2 or Certificate 3 on the return page before starting automation.",
           });
         }
+      }
+
+      const filingBlocker = getFilingStartBlocker({
+        taxReturn: task.taxReturn,
+        submissionMode: input.submissionMode,
+      });
+      if (filingBlocker) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: filingBlocker,
+        });
       }
 
       const normalizedJobs = await Promise.all(

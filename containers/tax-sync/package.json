@@ -9,7 +9,8 @@
     "start": "bun src/index.ts",
     "dev:server": "bun --watch src/server.ts",
     "start:server": "bun src/server.ts",
-    "docker:build": "docker build -t repo-tax-sync -f Dockerfile ../.."
+    "docker:build": "docker build -t repo-tax-sync -f Dockerfile ../..",
+    "test": "vitest run"
   },
   "dependencies": {
     "@repo/database": "workspace:*",

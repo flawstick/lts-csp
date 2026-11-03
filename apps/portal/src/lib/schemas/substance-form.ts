@@ -317,6 +317,10 @@ export function getMissingFields(data: Partial<SubstanceFormData>): string[] {
   // Conditional requirements
   if (data.entityType === "Partnership") {
     if (!data.partnershipName) missing.push("partnershipName");
+  } else if (data.entityType && !data.isIncorporatedInGuernsey) {
+    // The Guernsey Tax Portal asks this for every non-partnership entity and the
+    // filing agent must not guess it (e.g. from the registered address).
+    missing.push("isIncorporatedInGuernsey");
   }
 
   if (inScope && !data.totalBoardMeetings && data.totalBoardMeetings !== 0) {
@@ -484,10 +488,10 @@ export const FORM_SECTIONS = [
     id: "companyInfo",
     title: "Company Information",
     description:
-      "Company activity code, tax residency, and entity activity details",
+      "Company activity code, Guernsey incorporation, and entity activity details",
     fields: [
       "economicClassificationCode",
-      "isGuernseyTaxResident",
+      "isIncorporatedInGuernsey",
       "entityActivity",
     ],
     conditional: (data: Partial<SubstanceFormData>) =>

@@ -1,13 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
-ENV_FILE="/Users/amirashak/endeavour/LTS/apps/web/.env"
-PROJECT_ROOT="/Users/amirashak/endeavour/LTS"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${ENV_FILE:-$PROJECT_ROOT/apps/web/.env}"
+DEPLOY_AWS_PROFILE="${AWS_PROFILE:-}"
 DOCKERFILE_PATH="containers/task/Dockerfile"
 
 set -a
 source "$ENV_FILE"
 set +a
+
+# App credentials deliberately cannot administer ECS. Use the deployment login
+# when supplied, without letting keys from the app env override the profile.
+if [ -n "$DEPLOY_AWS_PROFILE" ]; then
+  export AWS_PROFILE="$DEPLOY_AWS_PROFILE"
+  unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+fi
 
 TASK_DEFINITION_REF="${ECS_BROWSER_TASK_DEFINITION:-${ECS_TASK_DEFINITION:-lts-task}}"
 SERVICE_NAME="${ECS_BROWSER_TASK_SERVICE:-lts-browser-workers}"
@@ -109,10 +117,18 @@ jq \
               | upsert_env("BROWSER_JOB_HEARTBEAT_INTERVAL_MS"; $heartbeatInterval)
               | upsert_env("CLOUDWATCH_LOG_GROUP"; $logGroup)
               | upsert_env("WORKER_CONTAINER_NAME"; $container.name)
-              | upsert_env("DATABASE_URL"; $databaseUrl)
-              | upsert_env("REDIS_URL"; $redisUrl)
-              | upsert_env("BROWSER_USE_API_KEY"; $browserUseApiKey)
-              | upsert_env("BLOB_READ_WRITE_TOKEN"; $blobReadWriteToken)
+            )
+          | reduce [
+              { name: "DATABASE_URL", value: $databaseUrl },
+              { name: "REDIS_URL", value: $redisUrl },
+              { name: "BROWSER_USE_API_KEY", value: $browserUseApiKey },
+              { name: "BLOB_READ_WRITE_TOKEN", value: $blobReadWriteToken }
+            ][] as $setting (.;
+              if any(.secrets[]?; .name == $setting.name) then
+                .environment |= delete_env($setting.name)
+              else
+                .environment |= upsert_env($setting.name; $setting.value)
+              end
             )
         )
     ),

@@ -16,7 +16,15 @@ export function getRedis() {
 
 export function getPub() {
   if (!globalForRedis.pub) {
-    globalForRedis.pub = new Redis(process.env.REDIS_URL!);
+    globalForRedis.pub = new Redis(process.env.REDIS_URL!, {
+      connectTimeout: 5_000,
+      commandTimeout: 2_000,
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+    });
+    globalForRedis.pub.on("error", (error: Error) => {
+      console.warn("Job event publisher unavailable:", error.message);
+    });
   }
   return globalForRedis.pub;
 }
@@ -55,12 +63,25 @@ export interface JobEvent {
 // Publish helper
 export async function publishJobEvent(event: JobEvent) {
   const pub = getPub();
-  await pub.publish(CHANNELS.JOB_EVENTS, JSON.stringify(event));
+  // Events are transient notifications; durable job state lives in Postgres.
+  // A disconnected publisher must never hold up browser startup or execution.
+  if (pub.status !== "ready") {
+    return;
+  }
+
+  try {
+    await pub.publish(CHANNELS.JOB_EVENTS, JSON.stringify(event));
+  } catch (error) {
+    console.warn(
+      "Job event publish failed:",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 // Subscribe helper
 export function subscribeToJobEvents(
-  callback: (event: JobEvent) => void
+  callback: (event: JobEvent) => void,
 ): () => void {
   const sub = getSub();
 

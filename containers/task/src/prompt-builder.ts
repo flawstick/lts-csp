@@ -66,6 +66,7 @@ interface PromptBuilderOptions {
   submissionMode?: "prepare_only" | "submit_and_capture_pdf";
   financialStatementsFile?: SessionInputFile | null;
   financialStatementsUrl?: string | null;
+  contactName?: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
 }
@@ -112,6 +113,7 @@ export function buildSubstanceFormPrompt(
     submissionMode = "prepare_only",
     financialStatementsFile,
     financialStatementsUrl,
+    contactName,
     contactEmail,
     contactPhone,
   } = options;
@@ -237,14 +239,17 @@ If the redirected form already contains completed or pre-filled answers, still o
 - Do **NOT** infer **Relevant Activity** if it is missing. That is a material field and should pause if the saved form and documents do not provide it clearly.
 - Prefer pausing over guessing for any field that could materially change the filing.
 ${
-  contactEmail || contactPhone
+  contactName || contactEmail || contactPhone
     ? `
 
 ## FILING CONTACT INFORMATION
 - The contact email is requested **at the end of the filing flow** (on the final contact / declaration step before the review and submit page), not on the earlier substance sections. Do not enter it into earlier fields, and do not go looking for it before you reach that step — keep going through the form and fill it in when that final contact field appears.
+- The filing contact is the filing agent (LTS Tax), NOT a director, authorised signatory or other client representative.
+- If the portal asks for a contact name, use: ${contactName ?? "[MISSING - STOP if required]"}
 - When the portal asks for a contact email at the end of the form, use: ${contactEmail ?? "[MISSING - STOP if required]"}
 - If the portal asks for a contact telephone number, use: ${contactPhone ?? "[MISSING - STOP if required]"}
-- Do not invent other contact details. If the portal requires more than email/phone and it is not already visible on the portal, STOP and report **REQUIRES_ATTENTION**.
+- These contact fields are often PRE-FILLED from a previous filing or the client's account (for example with a signatory's name or email). Always clear and REPLACE any pre-filled contact name, email or telephone with the values above. Do not keep a pre-filled contact.
+- Do not invent other contact details. If the portal requires more than name/email/phone and it is not already visible on the portal, STOP and report **REQUIRES_ATTENTION**.
 `
     : ""
 }
@@ -417,7 +422,7 @@ ${field("Entity Activity", form.entityActivity)}
 - Economic Classification Code is REQUIRED for 2025 returns — this is a dropdown field on the portal, select the matching option.
 - Certificate Type is fixed for this filing flow: always use ${certificateType}.
 - Entity Activity describes the nature of the entity's business (e.g., "Property Holdings"). Preferred to have it filled even if the entity has no relevant activity.
-- If **Is Incorporated in Guernsey** or similar fields already have a portal default selected and you have no explicit contrary information, leave the portal default unchanged instead of guessing.
+- **Is Incorporated in Guernsey** must come from the saved form value above. Do NOT infer it from the registered address, administrator address or entity name. If the saved value is missing and the portal requires an answer, STOP and report **REQUIRES_ATTENTION** naming this field so the client can confirm it.
 `;
 }
 
@@ -429,27 +434,18 @@ ${field("Partnership Number", form.partnershipNumber)}
 `;
 }
 
-function clampNegativeToZero(
-  value: string | null | undefined,
-): string | null | undefined {
-  if (!value) return value;
-  const num = parseFloat(value.replace(/[^0-9.-]/g, ""));
-  if (!isNaN(num) && num < 0) return "0";
-  return value;
-}
-
 function buildFinancialStatementsSection(form: SubstanceForm): string {
   return `
 ## SECTION 4: FINANCIAL STATEMENTS
 ${field("Are Financial Statements Consolidated", form.areFinancialStatementsConsolidated)}
 ${field("Accounts Preparer Name", form.accountsPreparerName)}
 ${field("Accounts Preparer Qualification", form.accountsPreparerQualification)}
-${field("Net Book Value", clampNegativeToZero(form.netBookValue))}
-${field("Total Profit", clampNegativeToZero(form.totalProfit))}
+${field("Net Book Value", form.netBookValue)}
+${field("Total Profit", form.totalProfit)}
 ${field("Profit Before Tax Allocation", form.profitAllocation)}
 
 **IMPORTANT:**
-- Net Book Value and Total Profit: if the value is negative (a loss), enter **0**. The portal does not accept negative values.
+- Net Book Value and Total Profit: the portal accepts negative values. If the figure above is negative (a loss), enter it exactly as given, including the leading minus sign (e.g. **-12345**). Do NOT replace it with 0.
 - Profit Before Tax Allocation is REQUIRED — must be either "Investment" or "Business".
 - Accounts Preparer Name/Qualification is the ACCOUNTANT who prepared the financial statements, NOT LTS Tax.
 - **FINANCIAL STATEMENTS UPLOAD:** When the portal asks if financial statements are available online, select **"No"** and then use **upload_file** on the visible file input with the preloaded Browser Use workspace PDF described above. If the control still shows **"No file chosen"**, use **evaluate** as fallback. Do NOT click Save/Continue until a filename is visible.
