@@ -7,6 +7,7 @@ import {
   Crown,
   Edit3,
   Eye,
+  FileSignature,
   Loader2,
   Mail,
   MoreHorizontal,
@@ -91,6 +92,18 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
     color: "border-emerald-500/20 bg-emerald-500/8 text-emerald-700 dark:text-emerald-400",
   },
 };
+
+function SignatoryBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400"
+      title="Can approve returns for filing"
+    >
+      <FileSignature className="size-3" />
+      Authorised signatory
+    </span>
+  );
+}
 
 function RoleBadge({ role }: { role: string }) {
   const meta = ROLE_META[role] ?? ROLE_META.viewer!;
@@ -286,6 +299,18 @@ function OrgTeamSection({
     onError: (err) => toast.error(err.message),
   });
 
+  const setFilingApprover = api.portalTeam.setFilingApprover.useMutation({
+    onSuccess: (_data, variables) => {
+      toast.success(
+        variables.canApproveFilings
+          ? "Marked as authorised signatory"
+          : "Authorised signatory access removed",
+      );
+      void utils.portalTeam.listMembers.invalidate({ orgId });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const removeMember = api.portalTeam.removeMember.useMutation({
     onSuccess: () => {
       toast.success("Member removed");
@@ -374,7 +399,8 @@ function OrgTeamSection({
       <div className="rounded-xl border border-border/70 bg-card p-5 shadow-xs">
         <p className="text-sm font-semibold">Members</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          People with access to this organization.
+          People with access to this organization. Admins and authorised
+          signatories can approve returns for filing.
         </p>
 
         {membersQuery.isLoading ? (
@@ -409,6 +435,9 @@ function OrgTeamSection({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {member.canApproveFilings && member.role !== "admin" ? (
+                    <SignatoryBadge />
+                  ) : null}
                   <RoleBadge role={member.role} />
                   {isAdmin ? (
                     <DropdownMenu>
@@ -417,7 +446,7 @@ function OrgTeamSection({
                           <MoreHorizontal className="size-4" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuContent align="end" className="w-56">
                         <DropdownMenuItem
                           disabled={member.role === "viewer" || updateRole.isPending}
                           onClick={() =>
@@ -457,6 +486,26 @@ function OrgTeamSection({
                           <Crown className="size-3.5" />
                           Set as Admin
                         </DropdownMenuItem>
+                        {member.role !== "admin" ? (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              disabled={setFilingApprover.isPending}
+                              onClick={() =>
+                                setFilingApprover.mutate({
+                                  orgId,
+                                  membershipId: member.id,
+                                  canApproveFilings: !member.canApproveFilings,
+                                })
+                              }
+                            >
+                              <FileSignature className="size-3.5" />
+                              {member.canApproveFilings
+                                ? "Remove authorised signatory"
+                                : "Mark as authorised signatory"}
+                            </DropdownMenuItem>
+                          </>
+                        ) : null}
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="text-red-600 dark:text-red-400"

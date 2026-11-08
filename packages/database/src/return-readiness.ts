@@ -7,6 +7,7 @@ export const GUERNSEY_FILING_CURRENCY = "GBP";
 
 const FINANCIAL_FIGURES_METADATA_KEY = "financialFigures";
 const SIGNOFF_REVOCATION_METADATA_KEY = "submissionSignoffRevoked";
+const SUBMISSION_SIGNOFF_METADATA_KEY = "submissionSignoff";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -71,12 +72,15 @@ export function stripManagerSignoffFields<T extends Record<string, unknown>>(
  *   it ready for submission in the client portal;
  * - signed_off: approved for submission (or already filed).
  */
-export type ReturnReadinessState =
-  | "signed_off"
-  | "awaiting_signoff"
-  | "awaiting_manager_signoff"
-  | "missing_fields"
-  | "needs_form";
+export const RETURN_READINESS_STATES = [
+  "signed_off",
+  "awaiting_signoff",
+  "awaiting_manager_signoff",
+  "missing_fields",
+  "needs_form",
+] as const;
+
+export type ReturnReadinessState = (typeof RETURN_READINESS_STATES)[number];
 
 export const RETURN_READINESS_LABELS: Record<ReturnReadinessState, string> = {
   signed_off: "Signed off",
@@ -104,6 +108,82 @@ export function getReturnReadinessState(input: {
   }
   if ((input.missingFieldCount ?? 0) > 0) return "missing_fields";
   return "needs_form";
+}
+
+// ============================================================================
+// Return status as shown in LTS
+// ============================================================================
+
+/**
+ * Status values shown in the LTS returns list. A pending return that is
+ * signed off is waiting for the filing automation, so it is shown (and
+ * filtered) as "awaiting_automation" rather than "pending".
+ */
+export const RETURN_DISPLAY_STATUSES = [
+  "awaiting_automation",
+  "pending",
+  "in_progress",
+  "review_required",
+  "completed",
+  "failed",
+  "dismissed",
+] as const;
+
+export type ReturnDisplayStatus = (typeof RETURN_DISPLAY_STATUSES)[number];
+
+export function getReturnDisplayStatus(input: {
+  status: string;
+  readiness: ReturnReadinessState;
+}): string {
+  if (input.status === "pending" && input.readiness === "signed_off") {
+    return "awaiting_automation";
+  }
+  return input.status;
+}
+
+// ============================================================================
+// Client signoff permission (authorised signatories)
+// ============================================================================
+
+export type FilingApprovalCapacity = "admin" | "authorised_signatory";
+
+/**
+ * Who may record the client signoff (mark a return ready for filing) in the
+ * client portal: an active org admin, or an active member an admin has
+ * explicitly marked as an authorised signatory.
+ */
+export function getFilingApprovalCapacity(
+  membership:
+    | {
+        role?: string | null;
+        status?: string | null;
+        canApproveFilings?: boolean | null;
+      }
+    | null
+    | undefined,
+): FilingApprovalCapacity | null {
+  if (!membership || membership.status !== "active") return null;
+  if (membership.role === "admin") return "admin";
+  if (membership.canApproveFilings) return "authorised_signatory";
+  return null;
+}
+
+export const FILING_APPROVER_REQUIRED_MESSAGE =
+  "Only an org admin or a team member marked as an authorised signatory can approve returns for filing. Ask an org admin to mark you as an authorised signatory on the Team page.";
+
+/** Records who gave the client signoff, and in what capacity, on the return. */
+export function withSubmissionSignoffMetadata(
+  metadata: unknown,
+  signoff: { at: Date; accountId: string; capacity: FilingApprovalCapacity },
+): Record<string, unknown> {
+  return {
+    ...(isRecord(metadata) ? metadata : {}),
+    [SUBMISSION_SIGNOFF_METADATA_KEY]: {
+      at: signoff.at.toISOString(),
+      accountId: signoff.accountId,
+      capacity: signoff.capacity,
+    },
+  };
 }
 
 function normalizeComparableValue(value: unknown): string {
@@ -149,13 +229,17 @@ export function buildSubmissionSignoffRevocation(input: {
 
   const now = input.now ?? new Date();
   const previousSignoffAt = input.taxReturn.readyForSubmissionAt;
+  const {
+    [SUBMISSION_SIGNOFF_METADATA_KEY]: previousSignoff,
+    ...metadata
+  } = isRecord(input.taxReturn.metadata) ? input.taxReturn.metadata : {};
 
   return {
     readyForSubmissionAt: null,
     readyForSubmissionBy: null,
     updatedAt: now,
     metadata: {
-      ...(isRecord(input.taxReturn.metadata) ? input.taxReturn.metadata : {}),
+      ...metadata,
       [SIGNOFF_REVOCATION_METADATA_KEY]: {
         at: now.toISOString(),
         source: input.actor.source,
@@ -166,6 +250,10 @@ export function buildSubmissionSignoffRevocation(input: {
             ? previousSignoffAt.toISOString()
             : previousSignoffAt,
         previousSignoffBy: input.taxReturn.readyForSubmissionBy ?? null,
+        previousSignoffCapacity:
+          isRecord(previousSignoff) && typeof previousSignoff.capacity === "string"
+            ? previousSignoff.capacity
+            : null,
       },
     },
   };

@@ -264,6 +264,7 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
 
 type StatusFilter =
   | "all"
+  | "awaiting_automation"
   | "pending"
   | "in_progress"
   | "review_required"
@@ -382,6 +383,7 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
               <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="awaiting_automation">Awaiting automation</SelectItem>
               <SelectItem value="in_progress">In Progress</SelectItem>
               <SelectItem value="review_required">Review Required</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>

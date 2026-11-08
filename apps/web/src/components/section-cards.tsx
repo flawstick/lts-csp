@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { processReturnsHref } from "@/lib/dashboard-links"
 import { api } from "@/trpc/react"
 
 interface SectionCardsProps {
@@ -32,9 +33,9 @@ export function SectionCards({ orgId }: SectionCardsProps) {
         </CardHeader>
         <CardFooter className="grid grid-cols-2 gap-2 -mt-2">
           <Button variant="default" size="sm" className="justify-start" asChild>
-            <Link href={`/org/${orgId}/returns?status=pending`} prefetch={true}>
+            <Link href={processReturnsHref(orgId)} prefetch={true}>
               <Clock className="mr-2 h-3 w-3" />
-              Process Returns
+              Awaiting automation
             </Link>
           </Button>
           <Button variant="outline" size="sm" className="justify-start" asChild>

@@ -75,6 +75,7 @@ export const portalTeamRouter = createTRPCRouter({
         .select({
           id: portalMemberships.id,
           role: portalMemberships.role,
+          canApproveFilings: portalMemberships.canApproveFilings,
           status: portalMemberships.status,
           joinedAt: portalMemberships.joinedAt,
           accountId: portalMemberships.accountId,
@@ -131,6 +132,39 @@ export const portalTeamRouter = createTRPCRouter({
             eq(portalMemberships.orgId, input.orgId),
           ),
         );
+
+      return { success: true };
+    }),
+
+  /**
+   * Mark a member as an authorised signatory, who may approve returns for
+   * filing without being an admin. Admins can always approve.
+   */
+  setFilingApprover: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        membershipId: z.string().uuid(),
+        canApproveFilings: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertOrgAdmin(ctx, input.orgId);
+
+      const [updated] = await ctx.db
+        .update(portalMemberships)
+        .set({ canApproveFilings: input.canApproveFilings })
+        .where(
+          and(
+            eq(portalMemberships.id, input.membershipId),
+            eq(portalMemberships.orgId, input.orgId),
+          ),
+        )
+        .returning({ id: portalMemberships.id });
+
+      if (!updated) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
+      }
 
       return { success: true };
     }),

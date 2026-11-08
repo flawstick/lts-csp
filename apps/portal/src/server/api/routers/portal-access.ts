@@ -115,6 +115,7 @@ export const portalAccessRouter = createTRPCRouter({
       .select({
         id: portalMemberships.id,
         role: portalMemberships.role,
+        canApproveFilings: portalMemberships.canApproveFilings,
         orgId: portalMemberships.orgId,
         orgName: organisations.name,
         orgSlug: organisations.slug,

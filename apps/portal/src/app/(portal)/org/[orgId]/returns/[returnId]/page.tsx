@@ -17,6 +17,7 @@ import {
   resolveGuernseyCertificateType,
 } from "@repo/database/guernsey-filing";
 import {
+  getFilingApprovalCapacity,
   hasManagerSignoff,
   MANAGER_SIGNOFF_REQUIRED_MESSAGE,
 } from "@repo/database/return-readiness";
@@ -115,11 +116,12 @@ export default function ReturnWorkspacePage() {
   });
 
   const myMembershipsQuery = api.portalAccess.getMyMemberships.useQuery();
-  const isAdmin = useMemo(() => {
+  const canApproveFilings = useMemo(() => {
     const memberships = myMembershipsQuery.data?.memberships ?? [];
     return memberships.some(
       (membership) =>
-        membership.orgId === orgId && membership.role === "admin",
+        membership.orgId === orgId &&
+        getFilingApprovalCapacity(membership) !== null,
     );
   }, [myMembershipsQuery.data?.memberships, orgId]);
 
@@ -252,7 +254,7 @@ export default function ReturnWorkspacePage() {
   );
   const activeCertificateType =
     localCertificateType ?? certificateResolution.certificateType;
-  // The CSP manager signs off the drafted ESR before an admin approves it.
+  // The CSP manager signs off the drafted ESR before an admin or authorised signatory approves it.
   const isManagerSignedOff = hasManagerSignoff(substanceFormQuery.data);
   const isGuernseyCertificateUnresolved = Boolean(
     selectedReturn?.jurisdictionCode === "GG" &&
@@ -802,7 +804,7 @@ export default function ReturnWorkspacePage() {
             undismissMutation.mutate({ orgId, taxReturnId: selectedReturn.id })
           }
           isDismissing={dismissMutation.isPending || undismissMutation.isPending}
-          isAdmin={isAdmin}
+          canApproveFilings={canApproveFilings}
           readyForSubmissionAt={selectedReturn.readyForSubmissionAt ?? null}
           isSubmittable={
             Boolean(selectedReturn.isSubstanceComplete) &&
@@ -937,7 +939,7 @@ export default function ReturnWorkspacePage() {
           isDismissing={
             dismissMutation.isPending || undismissMutation.isPending
           }
-          isAdmin={isAdmin}
+          canApproveFilings={canApproveFilings}
           readyForSubmissionAt={selectedReturn.readyForSubmissionAt ?? null}
           managerSignoffMissing={!isManagerSignedOff}
           isSubmittable={

@@ -16,6 +16,7 @@ import { useMemo, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
 import {
+  getFilingApprovalCapacity,
   getReturnReadinessState,
   hasManagerSignoff,
   requiresManagerSignoff,
@@ -211,7 +212,8 @@ function getRowSubmittability(row: ReturnListRow) {
 
 /**
  * Approval stage of a return: draft, awaiting the manager's signoff on the
- * form (Guernsey ESR), awaiting an admin to mark it ready, or approved.
+ * form (Guernsey ESR), awaiting an admin or authorised signatory to approve
+ * it for filing, or approved.
  */
 function getRowApprovalState(row: ReturnListRow): ReturnReadinessState {
   return getReturnReadinessState({
@@ -225,13 +227,13 @@ function getRowApprovalState(row: ReturnListRow): ReturnReadinessState {
 
 const APPROVAL_LABEL: Record<ReturnReadinessState, string> = {
   signed_off: "Approved",
-  awaiting_signoff: "Awaiting admin signoff",
+  awaiting_signoff: "Awaiting signatory approval",
   awaiting_manager_signoff: "Awaiting manager signoff",
   missing_fields: "Draft",
   needs_form: "Draft",
 };
 
-function hasAdminSignoff(row: ReturnListRow) {
+function hasClientSignoff(row: ReturnListRow) {
   return (
     Boolean(row.readyForSubmissionAt) ||
     normalizeStatus(row.status) === "completed"
@@ -239,7 +241,7 @@ function hasAdminSignoff(row: ReturnListRow) {
 }
 
 function canBulkSubmitRow(row: ReturnListRow) {
-  if (normalizeStatus(row.status) === "dismissed" || hasAdminSignoff(row)) {
+  if (normalizeStatus(row.status) === "dismissed" || hasClientSignoff(row)) {
     return false;
   }
 
@@ -271,11 +273,13 @@ export default function OrgReturnsPage() {
   });
 
   const myMembershipsQuery = api.portalAccess.getMyMemberships.useQuery();
-  const isAdmin = useMemo(() => {
+  // Org admins and authorised signatories may approve returns for filing.
+  const canApproveFilings = useMemo(() => {
     const memberships = myMembershipsQuery.data?.memberships ?? [];
     return memberships.some(
       (membership) =>
-        membership.orgId === orgId && membership.role === "admin",
+        membership.orgId === orgId &&
+        getFilingApprovalCapacity(membership) !== null,
     );
   }, [myMembershipsQuery.data?.memberships, orgId]);
 
@@ -689,7 +693,7 @@ export default function OrgReturnsPage() {
             Sort: {sortKey}
           </Button>
 
-          {isAdmin && selectedIds.size > 0 ? (
+          {canApproveFilings && selectedIds.size > 0 ? (
             <div className="ml-auto flex items-center gap-2">
               <span className="text-muted-foreground text-xs">
                 {selectedIds.size} selected
@@ -817,7 +821,7 @@ export default function OrgReturnsPage() {
               <table className="w-full min-w-[980px] text-sm">
                 <thead>
                   <tr className="text-muted-foreground border-b">
-                    {isAdmin ? (
+                    {canApproveFilings ? (
                       <th className="w-10 px-4 py-3 text-left font-medium">
                         <Checkbox
                           checked={
@@ -882,7 +886,7 @@ export default function OrgReturnsPage() {
                     const approvalState = getRowApprovalState(row);
                     const isApproved = approvalState === "signed_off";
                     const canMarkReady = approvalState === "awaiting_signoff";
-                    const isMarkedReady = hasAdminSignoff(row);
+                    const isMarkedReady = hasClientSignoff(row);
 
                     return (
                       <tr
@@ -890,7 +894,7 @@ export default function OrgReturnsPage() {
                         className="border-b/60 hover:bg-muted/25 cursor-pointer transition"
                         onClick={() => navigate(returnHref, "nav-forward")}
                       >
-                        {isAdmin ? (
+                        {canApproveFilings ? (
                           <td
                             className="px-4 py-3"
                             onClick={(event) => event.stopPropagation()}
@@ -950,7 +954,9 @@ export default function OrgReturnsPage() {
                                 ? `${missingCount} missing field(s)`
                                 : approvalState === "awaiting_manager_signoff"
                                   ? "Record the manager's name and sign-off date under Finalising the Return"
-                                  : undefined
+                                  : approvalState === "awaiting_signoff"
+                                    ? "An org admin or authorised signatory must submit this return for filing"
+                                    : undefined
                             }
                           >
                             {isApproved ? (
@@ -988,7 +994,7 @@ export default function OrgReturnsPage() {
                                   <ExternalLink className="size-3.5" />
                                   Open
                                 </DropdownMenuItem>
-                                {isAdmin && !isDismissed ? (
+                                {canApproveFilings && !isDismissed ? (
                                   <>
                                     <DropdownMenuSeparator />
                                     {isMarkedReady ? (
@@ -1073,7 +1079,7 @@ export default function OrgReturnsPage() {
                   {!rows.length ? (
                     <tr>
                       <td
-                        colSpan={isAdmin ? 8 : 7}
+                        colSpan={canApproveFilings ? 8 : 7}
                         className="text-muted-foreground px-4 py-10 text-center"
                       >
                         No returns match the current filters.

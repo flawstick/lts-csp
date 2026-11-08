@@ -21,6 +21,14 @@ import {
   taxReturnFileRoles,
 } from "@repo/database";
 import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
+import {
+  getReturnDisplayStatus,
+  getReturnReadinessState,
+  hasManagerSignoff,
+  requiresManagerSignoff,
+  RETURN_DISPLAY_STATUSES,
+  RETURN_READINESS_STATES,
+} from "@repo/database/return-readiness";
 import { asc, desc, sql, eq, and, lt, inArray, or } from "drizzle-orm";
 import {
   CloudWatchLogsClient,
@@ -745,16 +753,10 @@ export const taxReturnRouter = createTRPCRouter({
         pageSize: z.number().min(1).max(100).default(20),
         jurisdictionCode: z.string().trim().min(2).max(8).optional(),
         taxYear: z.number().int().optional(),
-        status: z
-          .enum([
-            "pending",
-            "in_progress",
-            "review_required",
-            "completed",
-            "failed",
-            "dismissed",
-          ])
-          .optional(),
+        // Status as shown in the list: a signed-off pending return is
+        // "awaiting_automation", and "pending" excludes those returns.
+        status: z.enum(RETURN_DISPLAY_STATUSES).optional(),
+        readiness: z.enum(RETURN_READINESS_STATES).optional(),
         certificateType: z
           .enum(["Certificate 2", "Certificate 3", "unresolved"])
           .optional(),
@@ -771,6 +773,7 @@ export const taxReturnRouter = createTRPCRouter({
         jurisdictionCode,
         taxYear,
         status,
+        readiness,
         certificateType,
         search,
       } = input;
@@ -793,7 +796,12 @@ export const taxReturnRouter = createTRPCRouter({
       }
 
       if (status) {
-        conditions.push(eq(taxReturns.status, status));
+        conditions.push(
+          eq(
+            taxReturns.status,
+            status === "awaiting_automation" ? "pending" : status,
+          ),
+        );
       }
       if (search) {
         const searchPattern = `%${search}%`;
@@ -851,17 +859,42 @@ export const taxReturnRouter = createTRPCRouter({
         .where(whereClause)
         .orderBy(desc(taxReturns.createdAt));
 
-      const filteredReturns = rows.filter((row) =>
-        matchesGuernseyCertificateFilter(
-          {
-            jurisdictionCode: row.jurisdiction?.code ?? null,
-            returnType: row.returnType,
-            metadata: row.metadata,
-            substanceCertificateType: row.substanceCertificateType,
-          },
-          certificateType,
-        ),
-      );
+      const filteredReturns = rows.filter((row) => {
+        if (
+          !matchesGuernseyCertificateFilter(
+            {
+              jurisdictionCode: row.jurisdiction?.code ?? null,
+              returnType: row.returnType,
+              metadata: row.metadata,
+              substanceCertificateType: row.substanceCertificateType,
+            },
+            certificateType,
+          )
+        ) {
+          return false;
+        }
+
+        if (!status && !readiness) return true;
+
+        const rowReadiness = getReturnReadinessState({
+          status: row.status,
+          readyForSubmissionAt: row.readyForSubmissionAt,
+          isFormComplete: row.isSubstanceComplete,
+          missingFieldCount: row.missingSubstanceFieldCount,
+          requiresManagerSignoff: requiresManagerSignoff(row),
+          hasManagerSignoff: hasManagerSignoff(row),
+        });
+
+        if (readiness && rowReadiness !== readiness) return false;
+        if (
+          status &&
+          getReturnDisplayStatus({ status: row.status, readiness: rowReadiness }) !==
+            status
+        ) {
+          return false;
+        }
+        return true;
+      });
       const total = filteredReturns.length;
       const paginatedReturns = filteredReturns.slice(offset, offset + pageSize);
       const totalPages = Math.ceil(total / pageSize);

@@ -33,7 +33,7 @@ When referencing pages, output markdown links using these paths. Use {orgId} as 
 
 ### Dashboard — [Dashboard](/org/{orgId})
 The main overview for an organisation. Shows:
-- **Quick Actions**: Process Returns, Sync, Returns, Settings
+- **Quick Actions**: Awaiting automation (signed-off returns ready for filing automation), Sync, Returns, Settings
 - **Stats cards**: Total Tax Returns (pending/completed counts), Processing Tasks (running/pending/failed counts)
 - **Chart**: Interactive area chart for return analytics
 - **Returns table**: Searchable, filterable table with status, jurisdiction, tax year, readiness, and pagination. Rows are clickable.

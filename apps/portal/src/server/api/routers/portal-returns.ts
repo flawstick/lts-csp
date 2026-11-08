@@ -24,13 +24,16 @@ import {
   taxReturns,
   taxReturnFileCategories,
   taxReturnFileRoles,
+  FILING_APPROVER_REQUIRED_MESSAGE,
   getChangedFormFields,
+  getFilingApprovalCapacity,
   getPendingGbpConversionMessage,
   hasManagerSignoff,
   MANAGER_SIGNOFF_REQUIRED_MESSAGE,
   resolveExtractedFinancialFigures,
   stripManagerSignoffFields,
   syncTaxReturnAfterFormChange,
+  withSubmissionSignoffMetadata,
   type FinancialFiguresMetadata,
 } from "@repo/database";
 import {
@@ -1096,21 +1099,26 @@ async function assertActiveMembership(ctx: {
   return membership;
 }
 
-async function assertAdminMembership(ctx: {
+/**
+ * The client signoff (ready for filing) may be given by an org admin or by a
+ * member an admin has marked as an authorised signatory.
+ */
+async function assertFilingApprover(ctx: {
   db: TRPCContext["db"];
   accountId: string;
   orgId: string;
 }) {
   const membership = await assertActiveMembership(ctx);
+  const capacity = getFilingApprovalCapacity(membership);
 
-  if (membership.role !== "admin") {
+  if (!capacity) {
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: "Only admins can perform this action.",
+      message: FILING_APPROVER_REQUIRED_MESSAGE,
     });
   }
 
-  return membership;
+  return { membership, capacity };
 }
 
 type PortalDemoModeMap = Map<
@@ -1255,7 +1263,8 @@ async function validateReturnReadyForSubmission(ctx: {
       });
     }
 
-    // The CSP manager signs off the drafted form before the admin approves it.
+    // The CSP manager signs off the drafted form before an admin or authorised
+    // signatory approves it.
     if (!hasManagerSignoff(substanceForm)) {
       throw new TRPCError({
         code: "BAD_REQUEST",
@@ -3341,7 +3350,7 @@ export const portalReturnsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const account = await ensurePortalAccount(ctx);
-      await assertAdminMembership({
+      const { capacity } = await assertFilingApprover({
         db: ctx.db,
         accountId: account.id,
         orgId: input.orgId,
@@ -3372,6 +3381,11 @@ export const portalReturnsRouter = createTRPCRouter({
         .set({
           readyForSubmissionAt: now,
           readyForSubmissionBy: account.id,
+          metadata: withSubmissionSignoffMetadata(returnRecord.metadata, {
+            at: now,
+            accountId: account.id,
+            capacity,
+          }),
           updatedAt: now,
         })
         .where(eq(taxReturns.id, input.taxReturnId));
@@ -3392,7 +3406,7 @@ export const portalReturnsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const account = await ensurePortalAccount(ctx);
-      await assertAdminMembership({
+      const { capacity } = await assertFilingApprover({
         db: ctx.db,
         accountId: account.id,
         orgId: input.orgId,
@@ -3400,7 +3414,7 @@ export const portalReturnsRouter = createTRPCRouter({
 
       const now = new Date();
       const skipped: Array<{ taxReturnId: string; reason: string }> = [];
-      const idsToUpdate: string[] = [];
+      const returnsToUpdate: Array<{ id: string; metadata: unknown }> = [];
 
       for (const taxReturnId of input.taxReturnIds) {
         const returnRecord = await getPortalReturnForOrg({
@@ -3431,7 +3445,10 @@ export const portalReturnsRouter = createTRPCRouter({
             returnRecord,
             taxReturnId,
           });
-          idsToUpdate.push(taxReturnId);
+          returnsToUpdate.push({
+            id: taxReturnId,
+            metadata: returnRecord.metadata,
+          });
         } catch (error) {
           skipped.push({
             taxReturnId,
@@ -3443,19 +3460,24 @@ export const portalReturnsRouter = createTRPCRouter({
         }
       }
 
-      if (idsToUpdate.length > 0) {
+      for (const returnToUpdate of returnsToUpdate) {
         await ctx.db
           .update(taxReturns)
           .set({
             readyForSubmissionAt: now,
             readyForSubmissionBy: account.id,
+            metadata: withSubmissionSignoffMetadata(returnToUpdate.metadata, {
+              at: now,
+              accountId: account.id,
+              capacity,
+            }),
             updatedAt: now,
           })
-          .where(inArray(taxReturns.id, idsToUpdate));
+          .where(eq(taxReturns.id, returnToUpdate.id));
       }
 
       return {
-        succeeded: idsToUpdate.length,
+        succeeded: returnsToUpdate.length,
         skipped,
       };
     }),
@@ -3469,7 +3491,7 @@ export const portalReturnsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const account = await ensurePortalAccount(ctx);
-      await assertAdminMembership({
+      await assertFilingApprover({
         db: ctx.db,
         accountId: account.id,
         orgId: input.orgId,
@@ -3488,11 +3510,22 @@ export const portalReturnsRouter = createTRPCRouter({
         });
       }
 
+      // The recorded approver no longer applies once the signoff is withdrawn.
+      const metadata: Record<string, unknown> = {
+        ...(returnRecord.metadata &&
+        typeof returnRecord.metadata === "object" &&
+        !Array.isArray(returnRecord.metadata)
+          ? returnRecord.metadata
+          : {}),
+      };
+      delete metadata.submissionSignoff;
+
       await ctx.db
         .update(taxReturns)
         .set({
           readyForSubmissionAt: null,
           readyForSubmissionBy: null,
+          metadata,
           updatedAt: new Date(),
         })
         .where(eq(taxReturns.id, input.taxReturnId));
