@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { RETURN_DISPLAY_STATUSES } from "@repo/database/return-readiness";
-import { processReturnsHref } from "./dashboard-links";
+import {
+  processReturnsHref,
+  returnsListHref,
+  syncReturnsHref,
+  tasksHref,
+} from "./dashboard-links";
 
 describe("processReturnsHref", () => {
   it("opens the Awaiting automation filter, not Pending", () => {
@@ -12,3 +17,12 @@ describe("processReturnsHref", () => {
     expect(RETURN_DISPLAY_STATUSES).toContain(status);
   });
 });
+
+describe("dashboard shortcuts", () => {
+  it("point at the existing returns and tasks routes", () => {
+    expect(returnsListHref("org-1", "pending")).toBe("/org/org-1/returns?status=pending")
+    expect(returnsListHref("org-1")).toBe("/org/org-1/returns")
+    expect(syncReturnsHref("org-1")).toBe("/org/org-1/returns?dialog=sync-jobs")
+    expect(tasksHref("org-1")).toBe("/org/org-1/tasks")
+  })
+})

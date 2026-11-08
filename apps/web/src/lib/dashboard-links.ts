@@ -12,3 +12,12 @@ export function returnsListHref(orgId: string, status?: ReturnDisplayStatus): st
 export function processReturnsHref(orgId: string): string {
   return returnsListHref(orgId, "awaiting_automation")
 }
+
+/** Opens the returns page with the portal sync jobs dialog. */
+export function syncReturnsHref(orgId: string): string {
+  return `/org/${orgId}/returns?dialog=sync-jobs`
+}
+
+export function tasksHref(orgId: string): string {
+  return `/org/${orgId}/tasks`
+}
