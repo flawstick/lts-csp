@@ -21,3 +21,9 @@ export function syncReturnsHref(orgId: string): string {
 export function tasksHref(orgId: string): string {
   return `/org/${orgId}/tasks`
 }
+
+/**
+ * Personal Tax Returns live outside any organisation. The page is a
+ * placeholder while the feature is in development.
+ */
+export const PERSONAL_TAX_RETURNS_HREF = "/personal-returns"

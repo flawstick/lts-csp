@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RETURN_DISPLAY_STATUSES } from "@repo/database/return-readiness";
 import {
+  PERSONAL_TAX_RETURNS_HREF,
   processReturnsHref,
   returnsListHref,
   syncReturnsHref,
@@ -24,5 +25,12 @@ describe("dashboard shortcuts", () => {
     expect(returnsListHref("org-1")).toBe("/org/org-1/returns")
     expect(syncReturnsHref("org-1")).toBe("/org/org-1/returns?dialog=sync-jobs")
     expect(tasksHref("org-1")).toBe("/org/org-1/tasks")
+  })
+})
+
+describe("personal tax returns entry", () => {
+  it("lives outside the organisation routes", () => {
+    expect(PERSONAL_TAX_RETURNS_HREF).toBe("/personal-returns")
+    expect(PERSONAL_TAX_RETURNS_HREF.startsWith("/org/")).toBe(false)
   })
 })

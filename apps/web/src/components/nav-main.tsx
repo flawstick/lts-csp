@@ -21,6 +21,8 @@ export function NavMain({
     title: string
     url: string
     icon?: React.ComponentType<{ className?: string }>
+    /** Short status shown beside the title, such as "In development". */
+    badge?: string
   }[]
 }) {
   const pathname = usePathname()
@@ -45,7 +47,7 @@ export function NavMain({
           <SidebarMenuItem key={item.title}>
             <SidebarMenuButton
               asChild
-              tooltip={item.title}
+              tooltip={item.badge ? `${item.title} (${item.badge.toLowerCase()})` : item.title}
               // Only apply isActive prop on the client after mount to prevent hydration errors
               {...(mounted && {
                 isActive: pathname === item.url || (
@@ -62,7 +64,12 @@ export function NavMain({
                 onFocus={() => router.prefetch(item.url)}
               >
                 {item.icon && <item.icon />}
-                <span>{item.title}</span>
+                <span className="truncate">{item.title}</span>
+                {item.badge && (
+                  <span className="border-sidebar-border text-sidebar-foreground/70 ml-auto shrink-0 rounded-full border px-1.5 py-px text-[10px] leading-4 font-medium whitespace-nowrap group-data-[collapsible=icon]:hidden">
+                    {item.badge}
+                  </span>
+                )}
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

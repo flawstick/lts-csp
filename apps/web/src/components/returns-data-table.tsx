@@ -57,6 +57,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { syncReturnsHref } from "@/lib/dashboard-links"
 import { api } from "@/trpc/react"
 
 type TaxReturn = {
@@ -514,9 +515,20 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
               ) : (
                 <TableRow>
                   <TableCell colSpan={columns.length} className="text-muted-foreground h-28 text-center text-sm">
-                    {hasActiveFilters
-                      ? "No returns match the current filters."
-                      : "No returns found. Sync from the portal to get started."}
+                    {hasActiveFilters ? (
+                      "No returns match the current filters."
+                    ) : (
+                      <>
+                        No returns yet.{" "}
+                        <Link
+                          href={syncReturnsHref(orgId)}
+                          className="text-foreground font-medium underline-offset-4 hover:underline"
+                        >
+                          Sync from the portal
+                        </Link>{" "}
+                        to get started.
+                      </>
+                    )}
                   </TableCell>
                 </TableRow>
               )}
