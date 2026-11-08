@@ -106,7 +106,7 @@ type JerseyReturnWorkspaceProps = {
   isDismissing?: boolean;
   accessToken?: string;
   onNavigateToGuidedFinish?: () => void;
-  isAdmin?: boolean;
+  canApproveFilings?: boolean;
   isSubmittable?: boolean;
   readyForSubmissionAt?: string | Date | null;
   submittabilityBlockReason?: string | null;
@@ -218,7 +218,7 @@ export function JerseyReturnWorkspace({
   isDismissing,
   accessToken,
   onNavigateToGuidedFinish,
-  isAdmin = false,
+  canApproveFilings = false,
   isSubmittable = false,
   readyForSubmissionAt = null,
   submittabilityBlockReason = null,
@@ -805,7 +805,7 @@ export function JerseyReturnWorkspace({
                   <div className="space-y-0.5">
                     <p className="font-medium">Ready for filing</p>
                     <p className="text-xs text-emerald-800/90 dark:text-emerald-300/90">
-                      An admin signed off on this return
+                      An admin or authorised signatory approved this return
                       {readyTimestampText ? ` on ${readyTimestampText}` : ""}.
                       LTS Tax can now submit it on the client&apos;s behalf.
                     </p>
@@ -815,7 +815,7 @@ export function JerseyReturnWorkspace({
             </div>
 
             <div className="flex items-center gap-2">
-              {isAdmin && !isClientAccessMode && !isMarkedReady && onMarkReadyForSubmission ? (
+              {canApproveFilings && !isClientAccessMode && !isMarkedReady && onMarkReadyForSubmission ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="inline-flex">
@@ -840,7 +840,7 @@ export function JerseyReturnWorkspace({
                   ) : null}
                 </Tooltip>
               ) : null}
-              {isAdmin && !isClientAccessMode && isMarkedReady && onRevertReadyForSubmission ? (
+              {canApproveFilings && !isClientAccessMode && isMarkedReady && onRevertReadyForSubmission ? (
                 <Button
                   variant="outline"
                   onClick={onRevertReadyForSubmission}

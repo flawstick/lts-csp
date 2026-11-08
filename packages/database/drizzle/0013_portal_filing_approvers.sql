@@ -1,0 +1,1 @@
+ALTER TABLE "lts_portal_membership" ADD COLUMN "can_approve_filings" boolean DEFAULT false NOT NULL;

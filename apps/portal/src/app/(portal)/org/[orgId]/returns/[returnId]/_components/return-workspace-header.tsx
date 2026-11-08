@@ -61,7 +61,7 @@ type ReturnWorkspaceHeaderProps = {
   onDismiss?: () => void;
   onUndismiss?: () => void;
   isDismissing?: boolean;
-  isAdmin?: boolean;
+  canApproveFilings?: boolean;
   isSubmittable?: boolean;
   readyForSubmissionAt?: string | Date | null;
   /** Guernsey ESR: the manager has not recorded their signoff on the form. */
@@ -82,7 +82,7 @@ export function ReturnWorkspaceHeader({
   onDismiss,
   onUndismiss,
   isDismissing,
-  isAdmin = false,
+  canApproveFilings = false,
   isSubmittable = false,
   readyForSubmissionAt = null,
   managerSignoffMissing = false,
@@ -171,11 +171,12 @@ export function ReturnWorkspaceHeader({
             <div className="max-w-2xl rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
               <p className="font-medium">Awaiting manager signoff</p>
               <p className="text-xs">
-                An admin marked this return ready
+                This return was marked ready
                 {readyTimestampText ? ` on ${readyTimestampText}` : ""}, but the
                 manager has not signed off the form. It will not be submitted
                 until the manager&apos;s name and sign-off date are recorded
-                under Finalising the Return and an admin marks it ready again.
+                under Finalising the Return and an admin or authorised
+                signatory submits it for filing again.
               </p>
             </div>
           ) : isMarkedReady ? (
@@ -184,17 +185,28 @@ export function ReturnWorkspaceHeader({
               <div className="space-y-0.5">
                 <p className="font-medium">Ready for filing</p>
                 <p className="text-xs text-emerald-800/90 dark:text-emerald-300/90">
-                  An admin signed off on this return
+                  An admin or authorised signatory approved this return
                   {readyTimestampText ? ` on ${readyTimestampText}` : ""}. LTS
                   Tax can now submit it on the client&apos;s behalf.
                 </p>
               </div>
             </div>
+          ) : !canApproveFilings && isSubmittable && !isReadOnly ? (
+            <div className="max-w-2xl rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm text-blue-900 dark:text-blue-200">
+              <p className="font-medium">Awaiting signatory approval</p>
+              <p className="text-xs">
+                The return is complete and the manager has signed off. It is
+                not sent to LTS Tax for filing until an org admin or a team
+                member marked as an authorised signatory clicks Submit for
+                filing. Recording a name in Finalising the Return does not
+                approve it for filing.
+              </p>
+            </div>
           ) : null}
         </div>
 
         <div className="flex items-center gap-2">
-          {isAdmin && !isMarkedReady && onMarkReadyForSubmission ? (
+          {canApproveFilings && !isMarkedReady && onMarkReadyForSubmission ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="inline-flex">
@@ -223,7 +235,7 @@ export function ReturnWorkspaceHeader({
               ) : null}
             </Tooltip>
           ) : null}
-          {isAdmin && isMarkedReady && onRevertReadyForSubmission ? (
+          {canApproveFilings && isMarkedReady && onRevertReadyForSubmission ? (
             <Button
               variant="outline"
               onClick={onRevertReadyForSubmission}

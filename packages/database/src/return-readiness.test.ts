@@ -4,7 +4,9 @@ import {
   buildSubmissionSignoffRevocation,
   confirmFinancialFiguresMetadata,
   getChangedFormFields,
+  getFilingApprovalCapacity,
   getPendingGbpConversionMessage,
+  getReturnDisplayStatus,
   getReturnReadinessState,
   hasManagerSignoff,
   isPendingGbpConversion,
@@ -13,6 +15,7 @@ import {
   resolveExtractedFinancialFigures,
   stripManagerSignoffFields,
   withFinancialFiguresMetadata,
+  withSubmissionSignoffMetadata,
 } from "./return-readiness";
 
 const now = new Date("2026-11-03T10:00:00Z");
@@ -293,5 +296,89 @@ describe("financial statement currency", () => {
       now,
     );
     expect(isPendingGbpConversion(confirmed)).toBe(false);
+  });
+});
+
+describe("client signoff permission", () => {
+  it("lets active admins and explicitly authorised signatories approve", () => {
+    expect(getFilingApprovalCapacity({ role: "admin", status: "active" })).toBe("admin");
+    expect(
+      getFilingApprovalCapacity({
+        role: "editor",
+        status: "active",
+        canApproveFilings: true,
+      }),
+    ).toBe("authorised_signatory");
+  });
+
+  it("refuses ordinary members and inactive memberships", () => {
+    expect(getFilingApprovalCapacity({ role: "editor", status: "active" })).toBeNull();
+    expect(
+      getFilingApprovalCapacity({
+        role: "viewer",
+        status: "active",
+        canApproveFilings: false,
+      }),
+    ).toBeNull();
+    expect(
+      getFilingApprovalCapacity({
+        role: "admin",
+        status: "suspended",
+        canApproveFilings: true,
+      }),
+    ).toBeNull();
+    expect(getFilingApprovalCapacity(null)).toBeNull();
+  });
+
+  it("records the approver and clears it when the signoff is revoked", () => {
+    const metadata = withSubmissionSignoffMetadata(
+      { source: "Guernsey Tax Portal" },
+      { at: now, accountId: "signatory-id", capacity: "authorised_signatory" },
+    );
+    expect(metadata.submissionSignoff).toEqual({
+      at: now.toISOString(),
+      accountId: "signatory-id",
+      capacity: "authorised_signatory",
+    });
+
+    const patch = buildSubmissionSignoffRevocation({
+      taxReturn: {
+        status: "pending",
+        metadata,
+        readyForSubmissionAt: now,
+        readyForSubmissionBy: "signatory-id",
+      },
+      changedFields: ["totalFte"],
+      actor: { source: "portal" },
+      now,
+    });
+    expect(patch?.metadata).not.toHaveProperty("submissionSignoff");
+    expect(patch?.metadata.submissionSignoffRevoked).toMatchObject({
+      previousSignoffBy: "signatory-id",
+      previousSignoffCapacity: "authorised_signatory",
+    });
+  });
+});
+
+describe("return display status", () => {
+  it("shows signed-off pending returns as awaiting automation", () => {
+    expect(getReturnDisplayStatus({ status: "pending", readiness: "signed_off" })).toBe(
+      "awaiting_automation",
+    );
+    expect(
+      getReturnDisplayStatus({ status: "pending", readiness: "awaiting_signoff" }),
+    ).toBe("pending");
+    expect(
+      getReturnDisplayStatus({
+        status: "pending",
+        readiness: "awaiting_manager_signoff",
+      }),
+    ).toBe("pending");
+    expect(getReturnDisplayStatus({ status: "completed", readiness: "signed_off" })).toBe(
+      "completed",
+    );
+    expect(getReturnDisplayStatus({ status: "failed", readiness: "signed_off" })).toBe(
+      "failed",
+    );
   });
 });

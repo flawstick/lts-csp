@@ -350,6 +350,11 @@ export const portalMemberships = createTable(
       .notNull()
       .references(() => organisations.id, { onDelete: "cascade" }),
     role: portalMembershipRoleEnum("role").notNull().default("viewer"),
+    /**
+     * Authorised signatory: may approve returns for filing (client signoff)
+     * without being an org admin. Granted explicitly by an org admin.
+     */
+    canApproveFilings: boolean("can_approve_filings").notNull().default(false),
     status: portalMembershipStatusEnum("status").notNull().default("pending"),
     invitedBy: uuid("invited_by").references(() => accounts.id),
     joinedAt: timestamp("joined_at", { withTimezone: true }),

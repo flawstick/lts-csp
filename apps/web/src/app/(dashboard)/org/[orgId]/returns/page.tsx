@@ -16,7 +16,6 @@ import {
 import {
   flexRender,
   getCoreRowModel,
-  getPaginationRowModel,
   useReactTable,
   type ColumnDef,
   type VisibilityState,
@@ -67,14 +66,17 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { SyncJobsDialog } from "@/components/sync-jobs-dialog"
 import { DirectionalTransition } from "@/components/view-transition"
 import { useNavigateWithTransition } from "@/lib/navigate-with-transition"
-import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing"
 import {
+  getReturnDisplayStatus,
   getReturnReadinessState,
   hasManagerSignoff,
   requiresManagerSignoff,
+  RETURN_DISPLAY_STATUSES,
+  type ReturnDisplayStatus,
+  type ReturnReadinessState,
 } from "@repo/database/return-readiness"
 
-type StatusFilter = "pending" | "in_progress" | "review_required" | "completed" | "failed" | "dismissed" | undefined
+type StatusFilter = ReturnDisplayStatus | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
 type TaxYearFilter = "all" | `${number}`
 type ReadinessFilter =
@@ -85,6 +87,20 @@ type ReadinessFilter =
   | "missing"
   | "needs_form"
 type CertificateFilter = "all" | "Certificate 2" | "Certificate 3" | "unresolved"
+
+const READINESS_FILTER_STATES: Record<Exclude<ReadinessFilter, "all">, ReturnReadinessState> = {
+  ready: "signed_off",
+  awaiting_manager_signoff: "awaiting_manager_signoff",
+  awaiting_signoff: "awaiting_signoff",
+  missing: "missing_fields",
+  needs_form: "needs_form",
+}
+
+function parseStatusFilter(value: string | null): StatusFilter {
+  return (RETURN_DISPLAY_STATUSES as readonly string[]).includes(value ?? "")
+    ? (value as ReturnDisplayStatus)
+    : undefined
+}
 
 type TaxReturnRow = {
   id: string
@@ -120,39 +136,6 @@ function getRowReadiness(row: TaxReturnRow) {
   })
 }
 
-function matchesCertificateFilter(
-  row: Pick<
-    TaxReturnRow,
-    "metadata" | "substanceCertificateType" | "returnType" | "jurisdiction"
-  >,
-  certificateFilter: CertificateFilter,
-) {
-  if (certificateFilter === "all") {
-    return true
-  }
-
-  if (
-    row.jurisdiction?.code !== "GG" ||
-    row.returnType !== "economic_substance"
-  ) {
-    return false
-  }
-
-  const resolution = resolveGuernseyCertificateType({
-    metadata:
-      row.metadata && typeof row.metadata === "object"
-        ? (row.metadata as Record<string, unknown>)
-        : null,
-    savedCertificateType: row.substanceCertificateType ?? null,
-  })
-
-  if (certificateFilter === "unresolved") {
-    return resolution.unresolved
-  }
-
-  return resolution.certificateType === certificateFilter
-}
-
 const statusBadgeStyles: Record<string, string> = {
   completed: "border-emerald-500/50 bg-emerald-500/15 text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400",
   in_progress: "border-blue-500/50 bg-blue-500/15 text-blue-800 dark:border-blue-500/35 dark:bg-blue-500/10 dark:text-blue-400",
@@ -160,9 +143,12 @@ const statusBadgeStyles: Record<string, string> = {
   failed: "border-rose-500/50 bg-rose-500/15 text-rose-800 dark:border-rose-500/35 dark:bg-rose-500/10 dark:text-rose-400",
   dismissed: "border-zinc-500/50 bg-zinc-500/15 text-zinc-700 dark:border-zinc-500/35 dark:bg-zinc-500/10 dark:text-zinc-500",
   pending: "border-amber-500/50 bg-amber-500/15 text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400",
+  awaiting_automation: "border-amber-500/50 bg-amber-500/15 text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400",
 }
 
 const statusLabels: Record<string, string> = {
+  awaiting_automation: "Awaiting Automation",
+  pending: "Pending",
   completed: "Completed",
   in_progress: "In Progress",
   review_required: "Review Required",
@@ -240,12 +226,14 @@ function createColumns(
       accessorKey: "status",
       header: "Status",
       cell: ({ row }) => {
-        const status = row.original.status
         // Only signed-off returns are ready for automation; a complete form
         // still needs the manager's and client signatory's approval first.
-        const isReadyForAutomation = getRowReadiness(row.original) === "signed_off"
+        const status = getReturnDisplayStatus({
+          status: row.original.status,
+          readiness: getRowReadiness(row.original),
+        })
         const cls = statusBadgeStyles[status] ?? statusBadgeStyles.pending
-        const label = statusLabels[status] ?? (isReadyForAutomation ? "Awaiting Automation" : "Pending")
+        const label = statusLabels[status] ?? statusLabels.pending
         return (
           <span className={`inline-flex rounded-lg border px-2 py-0.5 text-xs font-medium ${cls}`}>
             {label}
@@ -368,7 +356,7 @@ export default function ReturnsPage() {
   const navigateWithTransition = useNavigateWithTransition()
   const orgId = params?.orgId as string
   const searchParams = useSearchParams()
-  const initialStatus = searchParams.get("status") as StatusFilter
+  const initialStatus = parseStatusFilter(searchParams.get("status"))
   const syncJobsDialogRequested = searchParams.get("dialog") === "sync-jobs"
   const currentCalendarYear = React.useMemo(() => new Date().getUTCFullYear(), [])
   const defaultTaxYear = currentCalendarYear - 1
@@ -412,17 +400,17 @@ export default function ReturnsPage() {
     setSyncJobsDialogOpen(syncJobsDialogRequested)
   }, [syncJobsDialogRequested])
 
-  const isReadinessActive = readinessFilter !== "all"
-
   const { data, isLoading, refetch } = api.taxReturn.list.useQuery(
     {
       orgId,
-      page: isReadinessActive ? 1 : pagination.pageIndex + 1,
-      pageSize: isReadinessActive ? 100 : pagination.pageSize,
+      page: pagination.pageIndex + 1,
+      pageSize: pagination.pageSize,
       jurisdictionCode:
         jurisdictionFilter === "all" ? undefined : jurisdictionFilter,
       taxYear: taxYearFilter === "all" ? undefined : Number(taxYearFilter),
       status: statusFilter,
+      readiness:
+        readinessFilter === "all" ? undefined : READINESS_FILTER_STATES[readinessFilter],
       certificateType:
         certificateFilter === "all" ? undefined : certificateFilter,
       search: debouncedSearch || undefined,
@@ -528,23 +516,15 @@ export default function ReturnsPage() {
     [orgId],
   )
 
-  const filteredReturns = React.useMemo(() => {
-    const returns = (data?.returns ?? []) as TaxReturnRow[]
-    if (readinessFilter === "all") return returns
-    return returns.filter((r) => {
-      if (!matchesCertificateFilter(r, certificateFilter)) return false
-      const readiness = getRowReadiness(r)
-      if (readinessFilter === "ready") return readiness === "signed_off"
-      if (readinessFilter === "awaiting_manager_signoff") return readiness === "awaiting_manager_signoff"
-      if (readinessFilter === "awaiting_signoff") return readiness === "awaiting_signoff"
-      if (readinessFilter === "missing") return readiness === "missing_fields"
-      if (readinessFilter === "needs_form") return readiness === "needs_form"
-      return true
-    })
-  }, [certificateFilter, data?.returns, readinessFilter])
+  // Status, readiness and certificate filters are applied by the server, so
+  // pages and totals cover every matching return.
+  const returns = React.useMemo(
+    () => (data?.returns ?? []) as TaxReturnRow[],
+    [data?.returns],
+  )
 
   const table = useReactTable({
-    data: filteredReturns,
+    data: returns,
     columns,
     state: {
       columnVisibility,
@@ -553,13 +533,12 @@ export default function ReturnsPage() {
     },
     getRowId: (row) => row.id,
     enableRowSelection: true,
-    manualPagination: !isReadinessActive,
-    pageCount: isReadinessActive ? undefined : (data?.totalPages ?? 1),
+    manualPagination: true,
+    pageCount: data?.totalPages ?? 1,
     onRowSelectionChange: setRowSelection,
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange: setPagination,
     getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: isReadinessActive ? getPaginationRowModel() : undefined,
   })
 
   const selectedCount = Object.keys(rowSelection).length
@@ -669,6 +648,7 @@ export default function ReturnsPage() {
                     {([
                       ["all", "All statuses"],
                       ["pending", "Pending"],
+                      ["awaiting_automation", "Awaiting automation"],
                       ["in_progress", "In Progress"],
                       ["review_required", "Review Required"],
                       ["completed", "Completed"],
@@ -933,7 +913,7 @@ export default function ReturnsPage() {
             <div className="flex items-center justify-between px-4">
               <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
                 {selectedCount} of{" "}
-                {isReadinessActive ? filteredReturns.length : (data?.total ?? 0)} row(s) selected.
+                {data?.total ?? 0} row(s) selected.
               </div>
               <div className="flex w-full items-center gap-8 lg:w-fit">
                 <div className="hidden items-center gap-2 lg:flex">
