@@ -17,6 +17,7 @@ import {
   IconDotsVertical,
   IconExternalLink,
   IconLayoutColumns,
+  IconSearch,
 } from "@tabler/icons-react"
 import {
   flexRender,
@@ -37,7 +38,6 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Label } from "@/components/ui/label"
@@ -239,10 +239,10 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
             onClick={(e) => e.stopPropagation()}
           >
             <IconDotsVertical />
-            <span className="sr-only">Open menu</span>
+            <span className="sr-only">Actions for {row.original.entityName}</span>
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-32">
+        <DropdownMenuContent align="end" className="w-40">
           <DropdownMenuItem asChild>
             <Link href={`/org/${orgId}/returns/${row.original.id}`}>View Details</Link>
           </DropdownMenuItem>
@@ -254,8 +254,6 @@ const createColumns = (orgId: string): ColumnDef<TaxReturn>[] => [
               </a>
             </DropdownMenuItem>
           )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive">Delete</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     ),
@@ -362,22 +360,28 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
     taxYearFilter !== "all"
 
   return (
-    <div className="w-full flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative w-full min-w-[220px] max-w-sm">
+    <div className="flex w-full flex-col gap-3">
+      <div className="flex flex-col gap-2 @3xl/main:flex-row @3xl/main:items-center @3xl/main:justify-between">
+        <div className="grid grid-cols-2 gap-2 @xl/main:flex @xl/main:flex-wrap @xl/main:items-center">
+          <div className="relative col-span-2 @xl/main:w-64">
+            <IconSearch
+              aria-hidden
+              className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+            />
             <Input
+              type="search"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Search name or external ID"
-              className="h-9"
+              aria-label="Search returns by name or external ID"
+              className="h-8 pl-8"
             />
           </div>
           <Select
             value={statusFilter}
             onValueChange={(value) => setStatusFilter(value as StatusFilter)}
           >
-            <SelectTrigger size="sm" className="w-[180px]">
+            <SelectTrigger size="sm" className="w-full @xl/main:w-[180px]" aria-label="Filter by status">
               <SelectValue placeholder="All statuses" />
             </SelectTrigger>
             <SelectContent>
@@ -397,7 +401,7 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
               setJurisdictionFilter(value as JurisdictionFilter)
             }
           >
-            <SelectTrigger size="sm" className="w-[170px]">
+            <SelectTrigger size="sm" className="w-full @xl/main:w-[160px]" aria-label="Filter by jurisdiction">
               <SelectValue placeholder="All jurisdictions" />
             </SelectTrigger>
             <SelectContent>
@@ -410,7 +414,7 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
             value={taxYearFilter}
             onValueChange={(value) => setTaxYearFilter(value as TaxYearFilter)}
           >
-            <SelectTrigger size="sm" className="w-[140px]">
+            <SelectTrigger size="sm" className="col-span-2 w-full @xl/main:w-[130px]" aria-label="Filter by tax year">
               <SelectValue placeholder="Tax year" />
             </SelectTrigger>
             <SelectContent>
@@ -426,7 +430,7 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
         <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" className="h-8">
                 <IconLayoutColumns />
                 <span className="hidden lg:inline">Customize Columns</span>
                 <span className="lg:hidden">Columns</span>
@@ -444,27 +448,23 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
                   return (
                     <DropdownMenuCheckboxItem
                       key={column.id}
-                      className="capitalize"
                       checked={column.getIsVisible()}
                       onCheckedChange={(value) => column.toggleVisibility(!!value)}
                     >
-                      {column.id}
+                      {typeof column.columnDef.header === "string"
+                        ? column.columnDef.header
+                        : column.id}
                     </DropdownMenuCheckboxItem>
                   )
                 })}
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/org/${orgId}/returns`}>
-              View All
-            </Link>
-          </Button>
         </div>
       </div>
-      <div className="relative flex flex-col gap-4 overflow-auto">
-        <div className="overflow-hidden rounded-lg border">
+      <div className="relative flex flex-col gap-3">
+        <div className="bg-card overflow-x-auto rounded-xl border">
           <Table>
-            <TableHeader className="bg-muted sticky top-0 z-10">
+            <TableHeader className="bg-muted/60 sticky top-0 z-10">
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
                   {headerGroup.headers.map((header) => {
@@ -513,7 +513,7 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={columns.length} className="h-24 text-center">
+                  <TableCell colSpan={columns.length} className="text-muted-foreground h-28 text-center text-sm">
                     {hasActiveFilters
                       ? "No returns match the current filters."
                       : "No returns found. Sync from the portal to get started."}
@@ -523,7 +523,7 @@ export function ReturnsDataTable({ orgId }: ReturnsDataTableProps) {
             </TableBody>
           </Table>
         </div>
-        <div className="flex items-center justify-between px-4">
+        <div className="flex items-center justify-between px-1">
           <div className="text-muted-foreground hidden flex-1 text-sm lg:flex">
             {table.getSelectedRowModel().rows.length} of{" "}
             {data?.total ?? 0} row(s) selected.

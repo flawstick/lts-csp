@@ -1,7 +1,12 @@
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
 import { taxReturns, jurisdictions, tasks } from "@repo/database";
-import { count, desc, eq, ne, and, gte } from "drizzle-orm";
+import { count, desc, eq, ne, and, gte, sql } from "drizzle-orm";
 import { z } from "zod";
+import {
+  ACTIVITY_RANGE_DAYS,
+  activityWindowStart,
+  buildDailySeries,
+} from "@/lib/activity-series";
 
 export const analyticsRouter = createTRPCRouter({
   getStats: publicProcedure.query(async ({ ctx }) => {
@@ -55,6 +60,51 @@ export const analyticsRouter = createTRPCRouter({
     ];
   }),
   
+  /**
+   * Daily returns added and tasks completed for the dashboard chart,
+   * bucketed by UTC day and zero-filled.
+   */
+  getActivitySeries: publicProcedure
+    .input(
+      z.object({
+        orgId: z.string().uuid(),
+        days: z
+          .number()
+          .int()
+          .refine((days) => (ACTIVITY_RANGE_DAYS as readonly number[]).includes(days))
+          .default(30),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const since = activityWindowStart(input.days);
+      const returnDay = sql<string>`to_char(${taxReturns.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
+      // Tasks have no completion timestamp; a completed task's last update
+      // is when it finished.
+      const taskFinishedAt = sql<Date>`COALESCE(${tasks.updatedAt}, ${tasks.createdAt})`;
+      const taskDay = sql<string>`to_char(${taskFinishedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
+
+      const [returnRows, taskRows] = await Promise.all([
+        ctx.db
+          .select({ day: returnDay, count: count(taxReturns.id) })
+          .from(taxReturns)
+          .where(and(eq(taxReturns.orgId, input.orgId), gte(taxReturns.createdAt, since)))
+          .groupBy(returnDay),
+        ctx.db
+          .select({ day: taskDay, count: count(tasks.id) })
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.orgId, input.orgId),
+              eq(tasks.status, "completed"),
+              gte(taskFinishedAt, since),
+            ),
+          )
+          .groupBy(taskDay),
+      ]);
+
+      return buildDailySeries({ days: input.days, returns: returnRows, tasks: taskRows });
+    }),
+
   getJurisdictionStats: publicProcedure.query(async ({ ctx }) => {
       const stats = await ctx.db
         .select({
