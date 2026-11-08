@@ -70,10 +70,10 @@ export default function DashboardPage() {
 
           <section aria-labelledby="dashboard-returns-heading" className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
-              <h2 id="dashboard-returns-heading" className="text-base font-semibold">
+              <h2 id="dashboard-returns-heading" className="text-base leading-none font-semibold">
                 Returns
               </h2>
-              <Button variant="ghost" size="sm" className="text-muted-foreground h-8" asChild>
+              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground -mr-2 h-8" asChild>
                 <Link href={returnsListHref(orgId)} prefetch>
                   View all
                   <ArrowRight className="size-3.5" />

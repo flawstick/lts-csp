@@ -22,6 +22,7 @@ import {
 import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { ActivityRangeDays } from "@/lib/activity-series"
+import { cn } from "@/lib/utils"
 import { api } from "@/trpc/react"
 
 const RANGE_OPTIONS: { value: `${ActivityRangeDays}`; label: string; long: string }[] = [
@@ -29,6 +30,8 @@ const RANGE_OPTIONS: { value: `${ActivityRangeDays}`; label: string; long: strin
   { value: "30", label: "30d", long: "Last 30 days" },
   { value: "90", label: "90d", long: "Last 3 months" },
 ]
+
+const numberFormat = new Intl.NumberFormat("en-GB")
 
 const chartConfig = {
   returns: {
@@ -56,7 +59,7 @@ interface ChartAreaInteractiveProps {
 
 export function ChartAreaInteractive({ orgId }: ChartAreaInteractiveProps) {
   const [range, setRange] = React.useState<`${ActivityRangeDays}`>("30")
-  const { data, isLoading, isError } = api.analytics.getActivitySeries.useQuery(
+  const { data, isLoading, isError, isFetching, isPlaceholderData } = api.analytics.getActivitySeries.useQuery(
     { orgId, days: Number(range) as ActivityRangeDays },
     { refetchOnWindowFocus: false, placeholderData: (previous) => previous },
   )
@@ -70,20 +73,28 @@ export function ChartAreaInteractive({ orgId }: ChartAreaInteractiveProps) {
     [data],
   )
   const isEmpty = !isLoading && !isError && totals.returns === 0 && totals.tasks === 0
+  // While a new range loads, the previous range stays on screen, dimmed.
+  const isSwitchingRange = isFetching && isPlaceholderData
   const rangeLabel = RANGE_OPTIONS.find((option) => option.value === range)?.long ?? ""
 
   return (
-    <Card className="@container/card gap-4">
+    <Card className="@container/card gap-4" aria-busy={isSwitchingRange || undefined}>
       <CardHeader>
-        <CardTitle>Activity</CardTitle>
+        <CardTitle>
+          <h2 className="text-base leading-none font-semibold">Activity</h2>
+        </CardTitle>
         <CardDescription>
           {isLoading ? (
             <Skeleton className="mt-1 h-4 w-48" />
           ) : (
             <>
-              <span className="text-foreground font-medium tabular-nums">{totals.returns}</span>{" "}
+              <span className="text-foreground font-medium tabular-nums">
+                {numberFormat.format(totals.returns)}
+              </span>{" "}
               returns added ·{" "}
-              <span className="text-foreground font-medium tabular-nums">{totals.tasks}</span>{" "}
+              <span className="text-foreground font-medium tabular-nums">
+                {numberFormat.format(totals.tasks)}
+              </span>{" "}
               tasks completed
               <span className="hidden @[480px]/card:inline"> · {rangeLabel.toLowerCase()}</span>
             </>
@@ -109,7 +120,12 @@ export function ChartAreaInteractive({ orgId }: ChartAreaInteractiveProps) {
         ) : isError ? (
           <ChartMessage title="Activity is unavailable" body="Refresh the page to try again." />
         ) : (
-          <div className="relative">
+          <div
+            className={cn(
+              "relative transition-opacity duration-200",
+              isSwitchingRange && "opacity-60",
+            )}
+          >
             <ChartContainer config={chartConfig} className="aspect-auto h-[240px] w-full">
               <AreaChart data={data} margin={{ left: 0, right: 8, top: 8 }}>
                 <defs>
@@ -139,7 +155,7 @@ export function ChartAreaInteractive({ orgId }: ChartAreaInteractiveProps) {
                   tickMargin={4}
                 />
                 <ChartTooltip
-                  cursor={false}
+                  cursor={{ stroke: "var(--border)", strokeWidth: 1 }}
                   content={<ChartTooltipContent labelFormatter={formatDay} indicator="dot" />}
                 />
                 <Area

@@ -11,6 +11,7 @@ import {
   Settings,
   MessageSquare,
   Loader2,
+  User as UserIcon,
 } from "@/lib/icons"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
@@ -20,6 +21,7 @@ import { NavOrg } from "@/components/nav-org"
 import { NavUser } from "@/components/nav-user"
 import { TeamSwitcher } from "@/components/team-switcher"
 import { useOrgFromUrl } from "@/lib/org-context"
+import { PERSONAL_TAX_RETURNS_HREF } from "@/lib/dashboard-links"
 import {
   Sidebar,
   SidebarContent,
@@ -59,6 +61,17 @@ const getBasePlatformItems = (orgId: string | undefined) => [
     title: "Tasks",
     url: orgId ? `/org/${orgId}/tasks` : "/tasks",
     icon: Bot,
+  },
+]
+
+// Personal returns belong to the signed-in user, not an organisation, so
+// this entry never depends on the current org.
+const personalItems = [
+  {
+    title: "Personal Tax Returns",
+    url: PERSONAL_TAX_RETURNS_HREF,
+    icon: UserIcon,
+    badge: "In development",
   },
 ]
 
@@ -202,6 +215,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent className="px-2.5 transition-[padding] duration-200 ease-linear group-data-[collapsible=icon]:px-0">
         <NavMain label="Platform" items={platformItems} />
+        <NavMain label="Personal" items={personalItems} />
         <NavMain label="Settings" items={settingsItems} />
       </SidebarContent>
       <SidebarFooter>

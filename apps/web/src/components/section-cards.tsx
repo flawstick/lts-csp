@@ -51,6 +51,7 @@ export function SectionCards({ orgId }: SectionCardsProps) {
         icon={<Zap className="size-4" />}
         value={awaitingQuery.data?.total}
         loading={awaitingQuery.isLoading}
+        error={awaitingQuery.isError}
         hint="Signed off and ready to file"
         tone="primary"
       />
@@ -60,6 +61,7 @@ export function SectionCards({ orgId }: SectionCardsProps) {
         icon={<Clock className="size-4" />}
         value={pendingQuery.data?.total}
         loading={pendingQuery.isLoading}
+        error={pendingQuery.isError}
         hint="Waiting on form data or signoff"
       />
       <StatTile
@@ -68,6 +70,7 @@ export function SectionCards({ orgId }: SectionCardsProps) {
         icon={<CheckCircle2 className="size-4" />}
         value={completedReturns}
         loading={statsQuery.isLoading}
+        error={statsQuery.isError}
         hint={
           totalReturns > 0
             ? `${completionRate}% of ${numberFormat.format(totalReturns)} returns`
@@ -88,6 +91,7 @@ export function SectionCards({ orgId }: SectionCardsProps) {
         icon={<Terminal className="size-4" />}
         value={runningTasks + queuedTasks}
         loading={statsQuery.isLoading}
+        error={statsQuery.isError}
         hint={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="inline-flex items-center gap-1.5">
@@ -119,6 +123,7 @@ function StatTile({
   icon,
   value,
   loading,
+  error = false,
   hint,
   tone = "default",
   children,
@@ -128,6 +133,8 @@ function StatTile({
   icon: ReactNode
   value: number | undefined
   loading: boolean
+  /** When the count failed to load, show a dash rather than a false zero. */
+  error?: boolean
   hint: ReactNode
   tone?: "default" | "primary"
   children?: ReactNode
@@ -167,13 +174,13 @@ function StatTile({
           <Skeleton className="h-8 w-16" />
         ) : (
           <p className="text-3xl leading-none font-semibold tracking-tight tabular-nums">
-            {numberFormat.format(value ?? 0)}
+            {error ? <span className="text-muted-foreground" aria-label="Unavailable">—</span> : numberFormat.format(value ?? 0)}
           </p>
         )}
-        <div className="text-muted-foreground mt-2 text-xs">
-          {loading ? <Skeleton className="h-3.5 w-36" /> : hint}
+        <div className="text-muted-foreground mt-2 min-h-4 text-xs leading-4">
+          {loading ? <Skeleton className="h-3.5 w-36" /> : error ? "Couldn't load this count" : hint}
         </div>
-        {!loading && children}
+        {!loading && !error && children}
       </div>
     </Link>
   )
