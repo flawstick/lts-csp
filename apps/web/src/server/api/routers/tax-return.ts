@@ -20,7 +20,11 @@ import {
   taxReturnFileCategories,
   taxReturnFileRoles,
 } from "@repo/database";
-import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
+import {
+  reconcileGuernseyFormCompletion,
+  resolveGuernseyCertificateType,
+  withGuernseyScopedCompletion,
+} from "@repo/database/guernsey-filing";
 import {
   getReturnDisplayStatus,
   getReturnReadinessState,
@@ -587,7 +591,12 @@ export const taxReturnRouter = createTRPCRouter({
         throw new Error("Tax return not found");
       }
 
-      return taxReturn;
+      return {
+        ...taxReturn,
+        substanceForm: taxReturn.substanceForm
+          ? withGuernseyScopedCompletion(taxReturn.substanceForm)
+          : null,
+      };
     }),
 
   // Add file to a tax return
@@ -813,7 +822,7 @@ export const taxReturnRouter = createTRPCRouter({
       const whereClause =
         conditions.length > 0 ? and(...conditions) : undefined;
 
-      const rows = await ctx.db
+      const queriedRows = await ctx.db
         .select({
           id: taxReturns.id,
           entityName: taxReturns.entityName,
@@ -827,6 +836,9 @@ export const taxReturnRouter = createTRPCRouter({
           metadata: taxReturns.metadata,
           readyForSubmissionAt: taxReturns.readyForSubmissionAt,
           substanceCertificateType: substanceForms.certificateType,
+          substanceRelevantActivity: substanceForms.relevantActivity,
+          substanceOperatingExpenditure: substanceForms.adequacyExpenditureDetails,
+          substanceMissingFields: substanceForms.missingFields,
           managerSignOff: substanceForms.managerSignOff,
           managerSignOffDate: substanceForms.managerSignOffDate,
           isSubstanceComplete: sql<boolean | null>`
@@ -858,6 +870,36 @@ export const taxReturnRouter = createTRPCRouter({
         )
         .where(whereClause)
         .orderBy(desc(taxReturns.createdAt));
+
+      // Apply in-scope-only requirements (operating expenditure) to the stored
+      // completion so readiness reflects the form's current data.
+      const rows = queriedRows.map(
+        ({ substanceMissingFields, ...row }) => {
+          if (
+            row.returnType !== "economic_substance" ||
+            row.isSubstanceComplete === null
+          ) {
+            return row;
+          }
+          const reconciled = reconcileGuernseyFormCompletion({
+            isComplete: row.isSubstanceComplete,
+            missingFields: substanceMissingFields,
+            form: {
+              certificateType: row.substanceCertificateType,
+              relevantActivity: row.substanceRelevantActivity,
+              adequacyExpenditureDetails: row.substanceOperatingExpenditure,
+            },
+          });
+          return {
+            ...row,
+            isSubstanceComplete: reconciled.isComplete,
+            missingSubstanceFieldCount: Math.max(
+              row.missingSubstanceFieldCount,
+              reconciled.missingFields.length,
+            ),
+          };
+        },
+      );
 
       const filteredReturns = rows.filter((row) => {
         if (
@@ -1358,7 +1400,7 @@ export const taxReturnRouter = createTRPCRouter({
       const whereClause =
         conditions.length > 0 ? and(...conditions) : undefined;
 
-      const taskList = await ctx.db
+      const queriedTasks = await ctx.db
         .select({
           id: tasks.id,
           name: tasks.name,
@@ -1383,6 +1425,8 @@ export const taxReturnRouter = createTRPCRouter({
             isComplete: substanceForms.isComplete,
             missingFields: substanceForms.missingFields,
             certificateType: substanceForms.certificateType,
+            relevantActivity: substanceForms.relevantActivity,
+            adequacyExpenditureDetails: substanceForms.adequacyExpenditureDetails,
           },
         })
         .from(tasks)
@@ -1394,6 +1438,15 @@ export const taxReturnRouter = createTRPCRouter({
         )
         .where(whereClause)
         .orderBy(desc(tasks.createdAt));
+
+      const taskList = queriedTasks.map((task) =>
+        task.substanceForm
+          ? {
+              ...task,
+              substanceForm: withGuernseyScopedCompletion(task.substanceForm),
+            }
+          : task,
+      );
 
       const filteredTaskList = taskList.filter((task) =>
         matchesGuernseyCertificateFilter(
@@ -1733,8 +1786,13 @@ export const taxReturnRouter = createTRPCRouter({
         };
       }
 
-      if (!form.isComplete) {
-        const missing = (form.missingFields as string[]) || [];
+      const completion = reconcileGuernseyFormCompletion({
+        isComplete: form.isComplete,
+        missingFields: form.missingFields,
+        form,
+      });
+      if (!completion.isComplete) {
+        const missing = completion.missingFields;
         // Allow starting with incomplete form, but include warning
         return {
           canStart: true,

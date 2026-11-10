@@ -49,7 +49,10 @@ import {
 import {
   buildGuernseyCertificateTwoDefaults,
   detectGuernseyCertificateTypeFromDocuments,
+  getGuernseyScopedRequirementBlocker,
   hasMeaningfulGuernseyFormData,
+  reconcileGuernseyFormCompletion,
+  withGuernseyScopedCompletion,
   type GuernseyCertificateType,
   type GuernseyCertificateTypeResolution,
   resolveGuernseyCertificateType,
@@ -1239,6 +1242,43 @@ type PortalReturnRecord = NonNullable<
   Awaited<ReturnType<typeof getPortalReturnForOrg>>
 >;
 
+/**
+ * Applies in-scope-only requirements (operating expenditure) to a list row's
+ * stored completion so readiness reflects the form's current data.
+ */
+function withScopedSubstanceCompletion<
+  T extends {
+    returnType: string | null;
+    isSubstanceComplete: boolean | null;
+    missingSubstanceFields?: unknown;
+    substanceCertificateType: string | null;
+    substanceRelevantActivity: string | null;
+    substanceOperatingExpenditure: string | null;
+  },
+>(row: T): T {
+  if (row.returnType !== "economic_substance" || row.isSubstanceComplete === null) {
+    return row;
+  }
+
+  const reconciled = reconcileGuernseyFormCompletion({
+    isComplete: row.isSubstanceComplete,
+    missingFields: row.missingSubstanceFields,
+    form: {
+      certificateType: row.substanceCertificateType,
+      relevantActivity: row.substanceRelevantActivity,
+      adequacyExpenditureDetails: row.substanceOperatingExpenditure,
+    },
+  });
+
+  return {
+    ...row,
+    isSubstanceComplete: reconciled.isComplete,
+    ...("missingSubstanceFields" in row
+      ? { missingSubstanceFields: reconciled.missingFields }
+      : {}),
+  };
+}
+
 async function validateReturnReadyForSubmission(ctx: {
   db: TRPCContext["db"];
   returnRecord: PortalReturnRecord;
@@ -1260,6 +1300,17 @@ async function validateReturnReadyForSubmission(ctx: {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "The Guernsey ESR form still has required fields to complete.",
+      });
+    }
+
+    // Recalculated from current data so forms saved before a requirement was
+    // added cannot be approved with it missing.
+    const scopedRequirementBlocker =
+      getGuernseyScopedRequirementBlocker(substanceForm);
+    if (scopedRequirementBlocker) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: scopedRequirementBlocker,
       });
     }
 
@@ -2359,6 +2410,8 @@ export const portalReturnsRouter = createTRPCRouter({
           jurisdictionName: jurisdictions.name,
           substanceId: substanceForms.id,
           substanceCertificateType: substanceForms.certificateType,
+          substanceRelevantActivity: substanceForms.relevantActivity,
+          substanceOperatingExpenditure: substanceForms.adequacyExpenditureDetails,
           jerseyFormId: jerseyCompanyReturnForms.id,
           managerSignOff: substanceForms.managerSignOff,
           managerSignOffDate: substanceForms.managerSignOffDate,
@@ -2389,7 +2442,10 @@ export const portalReturnsRouter = createTRPCRouter({
         .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt));
       const demoModeMap = await getPortalDemoModeMap(ctx.db, [input.orgId]);
 
-      return filterPortalDemoRows(rows, demoModeMap);
+      return filterPortalDemoRows(
+        rows.map(withScopedSubstanceCompletion),
+        demoModeMap,
+      );
     }),
 
   listByOrgSummary: protectedProcedure
@@ -2412,6 +2468,10 @@ export const portalReturnsRouter = createTRPCRouter({
           jurisdictionCode: jurisdictions.code,
           jurisdictionName: jurisdictions.name,
           updatedAt: taxReturns.updatedAt,
+          returnType: taxReturns.returnType,
+          substanceCertificateType: substanceForms.certificateType,
+          substanceRelevantActivity: substanceForms.relevantActivity,
+          substanceOperatingExpenditure: substanceForms.adequacyExpenditureDetails,
           isSubstanceComplete: sql<boolean | null>`
             CASE
               WHEN ${taxReturns.returnType} = 'economic_substance' THEN ${substanceForms.isComplete}
@@ -2434,7 +2494,10 @@ export const portalReturnsRouter = createTRPCRouter({
         .orderBy(desc(taxReturns.updatedAt), desc(taxReturns.createdAt));
       const demoModeMap = await getPortalDemoModeMap(ctx.db, [input.orgId]);
 
-      return filterPortalDemoRows(rows, demoModeMap);
+      return filterPortalDemoRows(
+        rows.map(withScopedSubstanceCompletion),
+        demoModeMap,
+      );
     }),
 
   getSubstanceForm: protectedProcedure
@@ -2471,7 +2534,7 @@ export const portalReturnsRouter = createTRPCRouter({
         where: eq(substanceForms.taxReturnId, input.taxReturnId),
       });
 
-      return form ?? null;
+      return form ? withGuernseyScopedCompletion(form) : null;
     }),
 
   createSubstanceForm: protectedProcedure

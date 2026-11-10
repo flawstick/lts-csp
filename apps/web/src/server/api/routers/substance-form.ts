@@ -24,6 +24,8 @@ import {
   resolveGuernseyCertificateType,
   setGuernseyCertificateTypeMetadata,
   validateGuernseySourceDocuments,
+  reconcileGuernseyFormCompletion,
+  withGuernseyScopedCompletion,
 } from "@repo/database/guernsey-filing";
 import { eq } from "drizzle-orm";
 import { createGateway } from "@ai-sdk/gateway";
@@ -1086,7 +1088,7 @@ export const substanceFormRouter = createTRPCRouter({
       const form = await ctx.db.query.substanceForms.findFirst({
         where: eq(substanceForms.taxReturnId, input.taxReturnId),
       });
-      return form ?? null;
+      return form ? withGuernseyScopedCompletion(form) : null;
     }),
 
   // Create or get form for a tax return
@@ -1899,12 +1901,15 @@ IMPORTANT CERTIFICATE 2 RULES:
         };
       }
 
+      const completion = reconcileGuernseyFormCompletion({
+        isComplete: form.isComplete,
+        missingFields: form.missingFields,
+        form,
+      });
       return {
         exists: true,
-        isComplete: form.isComplete ?? false,
-        missingFields: Array.isArray(form.missingFields)
-          ? form.missingFields
-          : [],
+        isComplete: completion.isComplete,
+        missingFields: completion.missingFields,
       };
     }),
 

@@ -7,6 +7,10 @@ import {
 } from "@/lib/schemas/substance-form";
 import type { FORM_SECTIONS } from "@/lib/schemas/substance-form";
 import type { RouterOutputs } from "@/trpc/react";
+import {
+  GUERNSEY_OPERATING_EXPENDITURE_FIELD,
+  isGuernseyOperatingExpenditureRequired,
+} from "@repo/database/guernsey-filing";
 
 export type PortalReturnRecord =
   RouterOutputs["portalReturns"]["listByOrg"][number];
@@ -176,6 +180,13 @@ export function isFieldRequired(
   }
 
   if (field === "totalBoardMeetings" && isGuernseySubstanceInScope(data)) {
+    return true;
+  }
+
+  if (
+    field === GUERNSEY_OPERATING_EXPENDITURE_FIELD &&
+    isGuernseyOperatingExpenditureRequired(data)
+  ) {
     return true;
   }
 

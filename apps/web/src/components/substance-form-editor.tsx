@@ -21,6 +21,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Loader2 } from "@/lib/icons"
+import {
+  GUERNSEY_OPERATING_EXPENDITURE_FIELD,
+  isGuernseyFormValueSupplied,
+  isGuernseyOperatingExpenditureRequired,
+} from "@repo/database/guernsey-filing"
 import { DatePicker } from "@/components/ui/date-picker"
 import {
   FIELD_LABELS,
@@ -154,16 +159,32 @@ export function SubstanceFormEditor({
     }
 
     if (field === "activityGrossIncome" || field === "adequacyExpenditureDetails") {
+      const required =
+        field === GUERNSEY_OPERATING_EXPENDITURE_FIELD &&
+        isGuernseyOperatingExpenditureRequired(localData)
+      const showHint = required && !isGuernseyFormValueSupplied(value)
       return (
         <div key={field} className="space-y-2">
-          <Label htmlFor={field}>{label}</Label>
+          <Label htmlFor={field}>
+            {label}
+            {required ? <span className="text-destructive"> *</span> : null}
+          </Label>
           <Input
             id={field}
             type="text"
             inputMode="decimal"
+            aria-required={required || undefined}
+            aria-invalid={showHint || undefined}
+            aria-describedby={showHint ? `${field}-hint` : undefined}
             value={(value as string) ?? ""}
             onChange={(e) => updateField(field, e.target.value || undefined)}
           />
+          {showHint ? (
+            <p id={`${field}-hint`} className="text-xs text-amber-700 dark:text-amber-400">
+              Required because this entity is within scope of economic substance.
+              Enter the amount, or 0 if there was none.
+            </p>
+          ) : null}
         </div>
       )
     }

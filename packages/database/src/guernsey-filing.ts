@@ -241,6 +241,110 @@ export function isGuernseySubstanceInScope(
   return relevantActivity !== "None of the above";
 }
 
+/**
+ * Whether a form value counts as supplied. Blank strings, null and undefined
+ * are missing; numeric zero (0 or "0") is a supplied value.
+ */
+export function isGuernseyFormValueSupplied(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
+export const GUERNSEY_OPERATING_EXPENDITURE_FIELD =
+  "adequacyExpenditureDetails" as const;
+
+export const GUERNSEY_OPERATING_EXPENDITURE_LABEL =
+  "Operating Expenditure Relating to the Activity";
+
+export const GUERNSEY_OPERATING_EXPENDITURE_REQUIRED_MESSAGE =
+  "Operating Expenditure Relating to the Activity is required because this entity is within scope of economic substance. Enter the amount under Economic Substance Requirements (enter 0 if there was none).";
+
+export type GuernseyScopedRequirementInput = GuernseySubstanceScopeInput & {
+  adequacyExpenditureDetails?: string | number | null;
+};
+
+/**
+ * Fields that become required only when the entity is within scope of
+ * economic substance (see isGuernseySubstanceInScope).
+ */
+export function isGuernseyOperatingExpenditureRequired(
+  form: GuernseySubstanceScopeInput | null | undefined,
+) {
+  return isGuernseySubstanceInScope(form);
+}
+
+/** In-scope-only required fields that are still missing on the form. */
+export function getGuernseyScopedMissingFields(
+  form: GuernseyScopedRequirementInput | null | undefined,
+): string[] {
+  if (!form || !isGuernseyOperatingExpenditureRequired(form)) return [];
+
+  return isGuernseyFormValueSupplied(form.adequacyExpenditureDetails)
+    ? []
+    : [GUERNSEY_OPERATING_EXPENDITURE_FIELD];
+}
+
+/**
+ * Actionable reason the form cannot be approved or filed because of an
+ * in-scope-only requirement, or null when there is none.
+ */
+export function getGuernseyScopedRequirementBlocker(
+  form: GuernseyScopedRequirementInput | null | undefined,
+): string | null {
+  return getGuernseyScopedMissingFields(form).includes(
+    GUERNSEY_OPERATING_EXPENDITURE_FIELD,
+  )
+    ? GUERNSEY_OPERATING_EXPENDITURE_REQUIRED_MESSAGE
+    : null;
+}
+
+/**
+ * Reconciles a stored completion flag and missing-field list with the
+ * in-scope-only requirements, using the form's current data. Forms saved
+ * before a requirement existed keep a stale `isComplete`; this read-time
+ * check keeps readiness and approval consistent without rewriting rows.
+ */
+export function reconcileGuernseyFormCompletion(input: {
+  isComplete: boolean | null | undefined;
+  missingFields: unknown;
+  form: GuernseyScopedRequirementInput | null | undefined;
+}): { isComplete: boolean; missingFields: string[] } {
+  const stored = Array.isArray(input.missingFields)
+    ? input.missingFields.filter(
+        (field): field is string => typeof field === "string",
+      )
+    : [];
+  const scopedMissing = getGuernseyScopedMissingFields(input.form).filter(
+    (field) => !stored.includes(field),
+  );
+
+  return {
+    isComplete: Boolean(input.isComplete) && scopedMissing.length === 0,
+    missingFields: [...stored, ...scopedMissing],
+  };
+}
+
+/**
+ * Same as reconcileGuernseyFormCompletion, applied to a substance form row.
+ * Keeps the row's own type so callers can use it wherever the row was used.
+ */
+export function withGuernseyScopedCompletion<
+  T extends GuernseyScopedRequirementInput & {
+    isComplete?: boolean | null;
+    missingFields?: unknown;
+  },
+>(form: T): T {
+  const reconciled = reconcileGuernseyFormCompletion({
+    isComplete: form.isComplete,
+    missingFields: form.missingFields,
+    form,
+  });
+  return { ...form, ...reconciled };
+}
+
 export function buildGuernseyCertificateTwoDefaults(taxYear: number) {
   return {
     certificateType: "Certificate 2" as const,

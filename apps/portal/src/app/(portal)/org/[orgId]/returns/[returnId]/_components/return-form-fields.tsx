@@ -3,6 +3,10 @@
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { format, parse } from "date-fns";
 import { AlertCircle, CalendarIcon } from "lucide-react";
+import {
+  GUERNSEY_OPERATING_EXPENDITURE_FIELD,
+  isGuernseyFormValueSupplied,
+} from "@repo/database/guernsey-filing";
 
 import {
   CIGA_BY_ACTIVITY,
@@ -451,6 +455,12 @@ export function ReturnFormFields({
     }
 
     if (MONEY_FIELDS.has(field)) {
+      const showScopedRequirementHint =
+        required &&
+        field === GUERNSEY_OPERATING_EXPENDITURE_FIELD &&
+        !isGuernseyFormValueSupplied(value);
+      const hintId = `${fieldId}-hint`;
+
       return (
         <FieldShell
           key={field}
@@ -463,6 +473,9 @@ export function ReturnFormFields({
             id={fieldId}
             type="text"
             inputMode="decimal"
+            aria-required={required || undefined}
+            aria-invalid={showScopedRequirementHint || undefined}
+            aria-describedby={showScopedRequirementHint ? hintId : undefined}
             value={(value as string | undefined) ?? ""}
             onChange={(e) =>
               setDraftForm((prev) => ({
@@ -471,6 +484,15 @@ export function ReturnFormFields({
               }))
             }
           />
+          {showScopedRequirementHint ? (
+            <p
+              id={hintId}
+              className="text-xs text-amber-700 dark:text-amber-400"
+            >
+              Required because this entity is within scope of economic
+              substance. Enter the amount, or 0 if there was none.
+            </p>
+          ) : null}
         </FieldShell>
       );
     }
