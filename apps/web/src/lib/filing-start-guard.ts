@@ -1,3 +1,4 @@
+import { getGuernseyScopedRequirementBlocker } from "@repo/database/guernsey-filing";
 import {
   getPendingGbpConversionMessage,
   hasManagerSignoff,
@@ -13,6 +14,9 @@ type FilingStartTaxReturn = {
   substanceForm?: {
     managerSignOff?: string | null;
     managerSignOffDate?: string | null;
+    certificateType?: string | null;
+    relevantActivity?: string | null;
+    adequacyExpenditureDetails?: string | null;
   } | null;
 };
 
@@ -40,6 +44,13 @@ export function getFilingStartBlocker(input: {
   if (taxReturn.status === "completed") {
     return "This return is already completed in the Guernsey Tax Portal.";
   }
+
+  // In-scope-only requirements are checked against the current form data, so
+  // an older approval cannot carry a missing value through to filing.
+  const scopedRequirementBlocker = getGuernseyScopedRequirementBlocker(
+    taxReturn.substanceForm,
+  );
+  if (scopedRequirementBlocker) return scopedRequirementBlocker;
 
   if (!hasManagerSignoff(taxReturn.substanceForm)) {
     return "The manager has not signed off this return. Record the manager's name and sign-off date under Finalising the Return, then have an authorised signatory mark it ready for submission in the client portal.";

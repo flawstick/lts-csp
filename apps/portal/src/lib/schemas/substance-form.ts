@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   GUERNSEY_CONSTITUENT_ENTITY_LABEL,
+  getGuernseyScopedMissingFields,
   isGuernseySubstanceInScope as sharedIsGuernseySubstanceInScope,
 } from "@repo/database/guernsey-filing";
 
@@ -333,6 +334,10 @@ export function getMissingFields(data: Partial<SubstanceFormData>): string[] {
       missing.push("outsourcingDetails");
     }
   }
+
+  // Operating expenditure is required only within scope of economic
+  // substance; 0 is a valid answer.
+  missing.push(...getGuernseyScopedMissingFields(data));
 
   return missing;
 }

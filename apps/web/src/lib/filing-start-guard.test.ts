@@ -91,4 +91,65 @@ describe("getFilingStartBlocker", () => {
       }),
     ).toContain("already completed");
   });
+
+  describe("operating expenditure for in-scope entities", () => {
+    const signedOffInScope = {
+      ...guernseyReturn,
+      readyForSubmissionAt: new Date(),
+      substanceForm: {
+        ...guernseyReturn.substanceForm,
+        certificateType: "Certificate 3",
+        relevantActivity: "Banking",
+        adequacyExpenditureDetails: null as string | null,
+      },
+    };
+
+    it("blocks submission when it is missing, even after signoff", () => {
+      expect(
+        getFilingStartBlocker({
+          taxReturn: signedOffInScope,
+          submissionMode: "submit_and_capture_pdf",
+        }),
+      ).toContain("Operating Expenditure Relating to the Activity is required");
+    });
+
+    it("allows submission with zero", () => {
+      expect(
+        getFilingStartBlocker({
+          taxReturn: {
+            ...signedOffInScope,
+            substanceForm: {
+              ...signedOffInScope.substanceForm,
+              adequacyExpenditureDetails: "0",
+            },
+          },
+          submissionMode: "submit_and_capture_pdf",
+        }),
+      ).toBeNull();
+    });
+
+    it("does not block out-of-scope entities", () => {
+      expect(
+        getFilingStartBlocker({
+          taxReturn: {
+            ...signedOffInScope,
+            substanceForm: {
+              ...signedOffInScope.substanceForm,
+              relevantActivity: "None of the above",
+            },
+          },
+          submissionMode: "submit_and_capture_pdf",
+        }),
+      ).toBeNull();
+    });
+
+    it("still allows preparing a draft while it is missing", () => {
+      expect(
+        getFilingStartBlocker({
+          taxReturn: signedOffInScope,
+          submissionMode: "prepare_only",
+        }),
+      ).toBeNull();
+    });
+  });
 });
