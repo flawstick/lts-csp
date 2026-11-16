@@ -18,8 +18,9 @@ import {
 } from "@repo/database/guernsey-filing";
 import {
   getFilingApprovalCapacity,
+  getPendingGbpConversionMessage,
+  getPendingReapproval,
   hasManagerSignoff,
-  MANAGER_SIGNOFF_REQUIRED_MESSAGE,
 } from "@repo/database/return-readiness";
 import { api } from "@/trpc/react";
 import { ReturnWorkspacePageSkeleton } from "@/components/return-workspace-skeleton";
@@ -45,6 +46,7 @@ import { JerseyReturnWorkspace } from "./_components/jersey-return-workspace";
 import { ReturnWorkspaceHeader } from "./_components/return-workspace-header";
 import {
   asVaultFiles,
+  getApprovalBlocker,
   isPdfLike,
   normalizeStatus,
   sanitizeFormData,
@@ -96,9 +98,11 @@ export default function ReturnWorkspacePage() {
   const aiExtractionLockRef = useRef(false);
 
   const utils = api.useUtils();
+  // Approval state must reflect edits made elsewhere (e.g. by LTS staff), so
+  // the workspace always re-reads it when opened instead of trusting a cache.
   const returnsQuery = api.portalReturns.listByOrg.useQuery(
     { orgId },
-    { enabled: !!orgId },
+    { enabled: !!orgId, staleTime: 0 },
   );
 
   const dismissMutation = api.portalReturns.dismissReturn.useMutation({
@@ -125,22 +129,39 @@ export default function ReturnWorkspacePage() {
     );
   }, [myMembershipsQuery.data?.memberships, orgId]);
 
+  // Re-read everything the approval controls depend on, including after a
+  // refused approval (e.g. the return changed since it was loaded).
+  const refreshApprovalState = () => {
+    void utils.portalReturns.listByOrg.invalidate({ orgId });
+    void utils.portalReturns.listByOrgSummary.invalidate({ orgId });
+    void utils.portalReturns.getSubstanceForm.invalidate({
+      orgId,
+      taxReturnId: returnId,
+    });
+  };
+
   const markReadyMutation =
     api.portalReturns.markReadyForSubmission.useMutation({
       onSuccess: () => {
-        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        refreshApprovalState();
         toast.success("Return marked ready for filing.");
       },
-      onError: (error) => toast.error(error.message),
+      onError: (error) => {
+        refreshApprovalState();
+        toast.error(error.message);
+      },
     });
 
   const revertReadyMutation =
     api.portalReturns.revertReadyForSubmission.useMutation({
       onSuccess: () => {
-        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        refreshApprovalState();
         toast.success("Submission reverted.");
       },
-      onError: (error) => toast.error(error.message),
+      onError: (error) => {
+        refreshApprovalState();
+        toast.error(error.message);
+      },
     });
 
   const selectedReturn = useMemo(
@@ -218,6 +239,7 @@ export default function ReturnWorkspacePage() {
     },
     {
       enabled: !!selectedReturn,
+      staleTime: 0,
     },
   );
 
@@ -255,7 +277,11 @@ export default function ReturnWorkspacePage() {
   const activeCertificateType =
     localCertificateType ?? certificateResolution.certificateType;
   // The CSP manager signs off the drafted ESR before an admin or authorised signatory approves it.
-  const isManagerSignedOff = hasManagerSignoff(substanceFormQuery.data);
+  // Falls back to the list row while the form loads, so the approval button
+  // is not shown as blocked on the manager's signoff before the form arrives.
+  const isManagerSignedOff = hasManagerSignoff(
+    substanceFormQuery.data ?? selectedReturn,
+  );
   const isGuernseyCertificateUnresolved = Boolean(
     selectedReturn?.jurisdictionCode === "GG" &&
       selectedReturn?.returnType === "economic_substance" &&
@@ -325,6 +351,17 @@ export default function ReturnWorkspacePage() {
   );
 
   const selectedFiles = asVaultFiles(selectedReturn?.files);
+  const guernseyApprovalBlocker = getApprovalBlocker({
+    isFormComplete: Boolean(selectedReturn?.isSubstanceComplete),
+    isManagerSignedOff,
+    requiresFinancialStatements,
+    hasFinancialStatements: selectedFiles.some(
+      (f) => f.role === "financial_statements",
+    ),
+    pendingGbpConversionMessage: getPendingGbpConversionMessage(
+      selectedReturn?.metadata,
+    ),
+  });
   const isAiExtractionPending =
     isAiExtractionRunning || extractSubstanceFormMutation.isPending;
   const selectedStatus = selectedReturn
@@ -942,26 +979,18 @@ export default function ReturnWorkspacePage() {
           canApproveFilings={canApproveFilings}
           readyForSubmissionAt={selectedReturn.readyForSubmissionAt ?? null}
           managerSignoffMissing={!isManagerSignedOff}
-          isSubmittable={
-            Boolean(selectedReturn.isSubstanceComplete) &&
-            isManagerSignedOff &&
-            (!requiresFinancialStatements ||
-              selectedFiles.some((f) => f.role === "financial_statements"))
-          }
-          submittabilityBlockReason={
-            !selectedReturn.isSubstanceComplete
-              ? "Complete every required field in the substance form first."
-              : !isManagerSignedOff
-                ? MANAGER_SIGNOFF_REQUIRED_MESSAGE
-                : requiresFinancialStatements &&
-                    !selectedFiles.some(
-                      (f) => f.role === "financial_statements",
-                    )
-                  ? "Attach the signed financial statements before marking this Certificate 3 ready."
-                  : null
-          }
+          isSubmittable={!guernseyApprovalBlocker}
+          submittabilityBlockReason={guernseyApprovalBlocker}
+          pendingReapproval={getPendingReapproval(selectedReturn)}
           onMarkReadyForSubmission={() =>
-            markReadyMutation.mutate({ orgId, taxReturnId: returnId })
+            markReadyMutation.mutate({
+              orgId,
+              taxReturnId: returnId,
+              // The approval covers the version of the form on screen.
+              formLastEditedAt: substanceFormQuery.data
+                ? (substanceFormQuery.data.lastEditedAt ?? null)
+                : (selectedReturn.substanceLastEditedAt ?? null),
+            })
           }
           onRevertReadyForSubmission={() =>
             revertReadyMutation.mutate({ orgId, taxReturnId: returnId })

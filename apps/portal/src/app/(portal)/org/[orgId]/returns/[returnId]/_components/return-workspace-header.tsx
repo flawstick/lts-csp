@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CheckCircle2,
   EllipsisVertical,
+  History,
   Loader2,
   RotateCcw,
   Send,
@@ -44,9 +45,12 @@ import {
 import { PortalClientAccessMenuSection } from "@/components/portal-client-access-actions";
 import { SharedElement } from "@/components/view-transitions";
 
+import type { SubmissionSignoffRevocation } from "@repo/database/return-readiness";
+
 import {
   STATUS_CLASS,
   STATUS_LABEL,
+  describeChangedFields,
   type PortalReturnRecord,
   type ReturnStatusTone,
 } from "./return-workspace-shared";
@@ -67,6 +71,11 @@ type ReturnWorkspaceHeaderProps = {
   /** Guernsey ESR: the manager has not recorded their signoff on the form. */
   managerSignoffMissing?: boolean;
   submittabilityBlockReason?: string | null;
+  /**
+   * Set when edits revoked an earlier signoff and no new signoff has been
+   * given: the return needs a fresh approval of the changed data.
+   */
+  pendingReapproval?: SubmissionSignoffRevocation | null;
   onMarkReadyForSubmission?: () => void;
   onRevertReadyForSubmission?: () => void;
   isTogglingReadyForSubmission?: boolean;
@@ -87,6 +96,7 @@ export function ReturnWorkspaceHeader({
   readyForSubmissionAt = null,
   managerSignoffMissing = false,
   submittabilityBlockReason = null,
+  pendingReapproval = null,
   onMarkReadyForSubmission,
   onRevertReadyForSubmission,
   isTogglingReadyForSubmission = false,
@@ -102,6 +112,20 @@ export function ReturnWorkspaceHeader({
   const readyTimestampText =
     readyTimestamp && !Number.isNaN(readyTimestamp.getTime())
       ? readyTimestamp.toLocaleString()
+      : null;
+  const reapprovalChangedAt = pendingReapproval?.at
+    ? new Date(pendingReapproval.at)
+    : null;
+  const reapprovalChangedAtText =
+    reapprovalChangedAt && !Number.isNaN(reapprovalChangedAt.getTime())
+      ? reapprovalChangedAt.toLocaleString()
+      : null;
+  const reapprovalChangedFieldsText = pendingReapproval
+    ? describeChangedFields(pendingReapproval.changedFields)
+    : "";
+  const approvalBlockedReason =
+    canApproveFilings && !isSubmittable && !isReadOnly
+      ? submittabilityBlockReason
       : null;
   const [isDismissDialogOpen, setIsDismissDialogOpen] = useState(false);
   const canDismiss = selectedStatus !== "completed" && Boolean(onDismiss);
@@ -191,6 +215,29 @@ export function ReturnWorkspaceHeader({
                 </p>
               </div>
             </div>
+          ) : pendingReapproval && !isReadOnly ? (
+            <div
+              className="flex max-w-2xl items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200"
+              data-testid="reapproval-required"
+            >
+              <History className="mt-0.5 size-4 shrink-0" />
+              <div className="space-y-0.5">
+                <p className="font-medium">Re-approval needed</p>
+                <p className="text-xs">
+                  This return was approved for filing earlier, but its data
+                  changed
+                  {reapprovalChangedAtText ? ` on ${reapprovalChangedAtText}` : ""}
+                  {reapprovalChangedFieldsText
+                    ? ` (${reapprovalChangedFieldsText})`
+                    : ""}
+                  , so the earlier approval was withdrawn. LTS Tax will not
+                  file it until{" "}
+                  {canApproveFilings
+                    ? "you review the current figures and click Re-approve for filing."
+                    : "an org admin or authorised signatory reviews the current figures and approves it again."}
+                </p>
+              </div>
+            </div>
           ) : !canApproveFilings && isSubmittable && !isReadOnly ? (
             <div className="max-w-2xl rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm text-blue-900 dark:text-blue-200">
               <p className="font-medium">Awaiting signatory approval</p>
@@ -202,6 +249,14 @@ export function ReturnWorkspaceHeader({
                 approve it for filing.
               </p>
             </div>
+          ) : null}
+          {approvalBlockedReason && !isMarkedReady ? (
+            <p
+              className="text-muted-foreground max-w-2xl text-xs"
+              data-testid="approval-blocked-reason"
+            >
+              Submit for filing is unavailable: {approvalBlockedReason}
+            </p>
           ) : null}
         </div>
 
@@ -224,7 +279,9 @@ export function ReturnWorkspaceHeader({
                     ) : (
                       <Send className="size-4" />
                     )}
-                    Submit for filing
+                    {pendingReapproval
+                      ? "Re-approve for filing"
+                      : "Submit for filing"}
                   </Button>
                 </span>
               </TooltipTrigger>

@@ -35,8 +35,10 @@ import {
   getFilingApprovalCapacity,
   getPendingGbpConversionMessage,
   hasManagerSignoff,
+  isApprovalOfStaleForm,
   MANAGER_SIGNOFF_REQUIRED_MESSAGE,
   resolveExtractedFinancialFigures,
+  STALE_APPROVAL_MESSAGE,
   stripManagerSignoffFields,
   syncTaxReturnAfterFormChange,
   withSubmissionSignoffMetadata,
@@ -711,16 +713,36 @@ async function setManualGuernseyCertificateType(params: {
     ...currentFormValues,
     ...nextValues,
   };
+  // Switching the certificate type rewrites filing answers, so completion is
+  // recalculated and an existing client signoff no longer covers the form.
+  const missingFields = getMissingFields(mergedValues as SubstanceFormData);
+  const changedFields = getChangedFormFields(
+    params.existingForm,
+    Object.fromEntries(
+      Object.entries(mergedValues).filter(
+        ([key]) => key in substanceFormSchema.shape,
+      ),
+    ),
+  );
 
   const [updated] = await params.db
     .update(substanceForms)
     .set({
       ...mergedValues,
+      missingFields,
+      isComplete: missingFields.length === 0,
       lastEditedAt: new Date(),
       lastEditedBy: params.accountId,
     })
     .where(eq(substanceForms.taxReturnId, params.taxReturn.id))
     .returning();
+
+  await syncTaxReturnAfterFormChange({
+    db: params.db,
+    taxReturnId: params.taxReturn.id,
+    changedFields,
+    actor: { source: "portal", accountId: params.accountId },
+  });
 
   return updated ?? null;
 }
@@ -1266,6 +1288,8 @@ async function validateReturnReadyForSubmission(ctx: {
   db: TRPCContext["db"];
   returnRecord: PortalReturnRecord;
   taxReturnId: string;
+  /** When the form the signatory reviewed was last edited, if reported. */
+  seenFormLastEditedAt?: Date | string | null;
 }) {
   if (ctx.returnRecord.status === "dismissed") {
     throw new TRPCError({
@@ -1283,6 +1307,20 @@ async function validateReturnReadyForSubmission(ctx: {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "The Guernsey ESR form still has required fields to complete.",
+      });
+    }
+
+    // A signoff must cover the data the signatory reviewed. If the form was
+    // edited after they loaded it, they re-review before approving.
+    if (
+      isApprovalOfStaleForm({
+        seenLastEditedAt: ctx.seenFormLastEditedAt,
+        currentLastEditedAt: substanceForm.lastEditedAt,
+      })
+    ) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: STALE_APPROVAL_MESSAGE,
       });
     }
 
@@ -2370,6 +2408,7 @@ export const portalReturnsRouter = createTRPCRouter({
           jerseyFormId: jerseyCompanyReturnForms.id,
           managerSignOff: substanceForms.managerSignOff,
           managerSignOffDate: substanceForms.managerSignOffDate,
+          substanceLastEditedAt: substanceForms.lastEditedAt,
           isSubstanceComplete: sql<boolean | null>`
             CASE
               WHEN ${taxReturns.returnType} = 'economic_substance' THEN ${substanceForms.isComplete}
@@ -3364,6 +3403,11 @@ export const portalReturnsRouter = createTRPCRouter({
       z.object({
         orgId: z.string().uuid(),
         taxReturnId: z.string().uuid(),
+        /**
+         * Last edit time of the form the signatory reviewed. The approval is
+         * refused if the form changed since.
+         */
+        formLastEditedAt: z.union([z.date(), z.string()]).nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -3391,6 +3435,7 @@ export const portalReturnsRouter = createTRPCRouter({
         db: ctx.db,
         returnRecord,
         taxReturnId: input.taxReturnId,
+        seenFormLastEditedAt: input.formLastEditedAt,
       });
 
       const now = new Date();
@@ -3420,6 +3465,7 @@ export const portalReturnsRouter = createTRPCRouter({
       z.object({
         orgId: z.string().uuid(),
         taxReturnIds: z.array(z.string().uuid()).min(1).max(50),
+        formVersions: z.record(z.string(), z.union([z.date(), z.string()]).nullable()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -3462,6 +3508,7 @@ export const portalReturnsRouter = createTRPCRouter({
             db: ctx.db,
             returnRecord,
             taxReturnId,
+            seenFormLastEditedAt: input.formVersions?.[taxReturnId],
           });
           returnsToUpdate.push({
             id: taxReturnId,

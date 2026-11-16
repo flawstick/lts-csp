@@ -663,15 +663,35 @@ async function setManualGuernseyCertificateType(params: {
     ...currentFormValues,
     ...nextValues,
   };
+  // Switching the certificate type rewrites filing answers, so completion is
+  // recalculated and an existing client signoff no longer covers the form.
+  const missingFields = getMissingFields(mergedValues as SubstanceFormData);
+  const changedFields = getChangedFormFields(
+    params.existingForm,
+    Object.fromEntries(
+      Object.entries(mergedValues).filter(
+        ([key]) => key in substanceFormSchema.shape,
+      ),
+    ),
+  );
 
   const [updated] = await params.db
     .update(substanceForms)
     .set({
       ...mergedValues,
+      missingFields,
+      isComplete: missingFields.length === 0,
       lastEditedAt: new Date(),
     })
     .where(eq(substanceForms.taxReturnId, params.taxReturn.id))
     .returning();
+
+  await syncTaxReturnAfterFormChange({
+    db: params.db,
+    taxReturnId: params.taxReturn.id,
+    changedFields,
+    actor: { source: "web" },
+  });
 
   return updated ?? null;
 }

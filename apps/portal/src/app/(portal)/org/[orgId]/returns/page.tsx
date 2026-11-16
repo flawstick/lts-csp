@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
 import {
   getFilingApprovalCapacity,
+  getPendingReapproval,
   getReturnReadinessState,
   hasManagerSignoff,
   requiresManagerSignoff,
@@ -177,6 +178,7 @@ type ReturnListRow = {
   readyForSubmissionAt?: Date | string | null;
   managerSignOff?: string | null;
   managerSignOffDate?: string | null;
+  substanceLastEditedAt?: Date | string | null;
 };
 
 function getRowSubmittability(row: ReturnListRow) {
@@ -283,22 +285,36 @@ export default function OrgReturnsPage() {
     );
   }, [myMembershipsQuery.data?.memberships, orgId]);
 
+  // Re-read approval state after any approval attempt, including a refused
+  // one (e.g. the return changed since the list was loaded).
+  const refreshApprovalState = () => {
+    void utils.portalReturns.listByOrg.invalidate({ orgId });
+    void utils.portalReturns.listByOrgSummary.invalidate({ orgId });
+    void utils.portalReturns.getSubstanceForm.invalidate();
+  };
+
   const markReadyMutation =
     api.portalReturns.markReadyForSubmission.useMutation({
       onSuccess: () => {
-        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        refreshApprovalState();
         toast.success("Return marked ready for filing.");
       },
-      onError: (error) => toast.error(error.message),
+      onError: (error) => {
+        refreshApprovalState();
+        toast.error(error.message);
+      },
     });
 
   const revertReadyMutation =
     api.portalReturns.revertReadyForSubmission.useMutation({
       onSuccess: () => {
-        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        refreshApprovalState();
         toast.success("Submission reverted.");
       },
-      onError: (error) => toast.error(error.message),
+      onError: (error) => {
+        refreshApprovalState();
+        toast.error(error.message);
+      },
     });
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -309,7 +325,7 @@ export default function OrgReturnsPage() {
   const bulkMarkReadyMutation =
     api.portalReturns.bulkMarkReadyForSubmission.useMutation({
       onSuccess: (result) => {
-        void utils.portalReturns.listByOrg.invalidate({ orgId });
+        refreshApprovalState();
         clearSelection();
 
         if (result.succeeded > 0 && result.skipped.length === 0) {
@@ -354,7 +370,8 @@ export default function OrgReturnsPage() {
 
   const returnsQuery = api.portalReturns.listByOrg.useQuery(
     { orgId },
-    { enabled: !!orgId },
+    // Approval columns must reflect edits made elsewhere (e.g. by LTS staff).
+    { enabled: !!orgId, staleTime: 0 },
   );
 
   const returns = useMemo(() => returnsQuery.data ?? [], [returnsQuery.data]);
@@ -731,6 +748,11 @@ export default function OrgReturnsPage() {
                         bulkMarkReadyMutation.mutate({
                           orgId,
                           taxReturnIds: bulkEligibleIds,
+                          formVersions: Object.fromEntries(
+                            returns
+                              .filter((row) => bulkEligibleIds.includes(row.id))
+                              .map((row) => [row.id, row.substanceLastEditedAt ?? null]),
+                          ),
                         })
                       }
                     >
@@ -887,6 +909,8 @@ export default function OrgReturnsPage() {
                     const isApproved = approvalState === "signed_off";
                     const canMarkReady = approvalState === "awaiting_signoff";
                     const isMarkedReady = hasClientSignoff(row);
+                    const needsReapproval =
+                      canMarkReady && Boolean(getPendingReapproval(row));
 
                     return (
                       <tr
@@ -954,15 +978,19 @@ export default function OrgReturnsPage() {
                                 ? `${missingCount} missing field(s)`
                                 : approvalState === "awaiting_manager_signoff"
                                   ? "Record the manager's name and sign-off date under Finalising the Return"
-                                  : approvalState === "awaiting_signoff"
-                                    ? "An org admin or authorised signatory must submit this return for filing"
-                                    : undefined
+                                  : needsReapproval
+                                    ? "The return changed after it was approved. An org admin or authorised signatory must review it and approve it again"
+                                    : approvalState === "awaiting_signoff"
+                                      ? "An org admin or authorised signatory must submit this return for filing"
+                                      : undefined
                             }
                           >
                             {isApproved ? (
                               <CheckCircle2 className="size-3.5" />
                             ) : null}
-                            {APPROVAL_LABEL[approvalState]}
+                            {needsReapproval
+                              ? "Re-approval needed"
+                              : APPROVAL_LABEL[approvalState]}
                           </span>
                         </td>
                         <td className="text-muted-foreground px-4 py-3">
@@ -1022,11 +1050,17 @@ export default function OrgReturnsPage() {
                                           markReadyMutation.mutate({
                                             orgId,
                                             taxReturnId: row.id,
+                                            // Refused if the form changed
+                                            // since this list was loaded.
+                                            formLastEditedAt:
+                                              row.substanceLastEditedAt ?? null,
                                           })
                                         }
                                       >
                                         <Send className="size-3.5" />
-                                        Submit for filing
+                                        {needsReapproval
+                                          ? "Re-approve for filing"
+                                          : "Submit for filing"}
                                       </DropdownMenuItem>
                                     )}
                                   </>
