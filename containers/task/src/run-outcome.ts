@@ -109,7 +109,15 @@ export type RunOutcome = {
   /** prepare_only run that appears to have submitted anyway. */
   prepareOnlyLikelySubmitted: boolean;
   needsAttention: boolean;
+  /**
+   * The agent stopped on the GRS contact step because no organisation filing
+   * contact is configured. Always also `needsAttention`.
+   */
+  needsFilingContact: boolean;
 };
+
+/** Agent output marker for a run that stopped at the GRS contact step. */
+export const NEEDS_FILING_CONTACT_MARKER = "NEEDS_FILING_CONTACT";
 
 export function classifyRunOutcome(input: {
   submissionMode: SubmissionMode;
@@ -142,11 +150,18 @@ export function classifyRunOutcome(input: {
   }
 
   const explicitRequiresAttention = hasRequiresAttentionOutputMarker(output);
+  // A READY marker wins: the run reached the review/submit page, so it was
+  // not left on the contact step (the return is review_required either way).
+  const needsFilingContact =
+    !prepareOnlyLikelySubmitted &&
+    !prepareOnlyReady &&
+    lowerOutput.includes(NEEDS_FILING_CONTACT_MARKER.toLowerCase());
   const needsAttention =
     !prepareOnlyLikelySubmitted &&
     (prepareOnlyReady
       ? false
-      : explicitRequiresAttention ||
+      : needsFilingContact ||
+        explicitRequiresAttention ||
         (!success &&
           REQUIRES_ATTENTION_KEYWORDS.some((keyword) =>
             lowerOutput.includes(keyword),
@@ -158,6 +173,7 @@ export function classifyRunOutcome(input: {
     likelySubmitted,
     prepareOnlyLikelySubmitted,
     needsAttention,
+    needsFilingContact,
   };
 }
 

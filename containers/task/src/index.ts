@@ -12,8 +12,6 @@ import {
   eq,
   sql,
   orgSettings,
-  resolveGuernseyFilingContactInfo,
-  describeFilingContactProblem,
   type TaxReturnFileCategory,
   type TaxReturnFileRole,
 } from "@repo/database";
@@ -37,7 +35,8 @@ import {
   prepareOnlyGuardFailure,
   type PrepareOnlyGuardStatus,
 } from "./prepare-only-guard";
-import { buildSubstanceFormPrompt } from "./prompt-builder";
+import { decideFilingContactStartup } from "./filing-contact-policy";
+import { buildResumePrompt, buildSubstanceFormPrompt } from "./prompt-builder";
 import {
   classifyRunOutcome,
   resolveFinalRunStatuses,
@@ -92,6 +91,10 @@ const POLL_INTERVAL_MS = 2000;
 const MAX_RUNTIME_MS = 30 * 60 * 1000;
 const PAUSE_CHECK_INTERVAL_MS = 5000;
 const MAX_PAUSE_DURATION_MS = 10 * 60 * 1000; // 10 minutes max pause
+const FILING_CONTACT_PAUSE_MESSAGE =
+  "Needs filing contact: no organisation filing contact is configured, so the draft is stopped at the portal's contact step and the contact fields were left untouched. Enter the organisation's filing contact in the live browser and click Resume to continue to the review page (it will not submit), or leave it and the return will be marked for review.";
+const FILING_CONTACT_REVIEW_REASON =
+  "Needs filing contact: no organisation filing contact is configured, so the draft was stopped at the portal's contact step for a person to complete";
 
 const DETACHED_BROWSER_RECOVERY_PATTERNS = [
   "cdp still not connected",
@@ -1264,24 +1267,42 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     }
 
     // The GRS final contact is the organisation's explicitly configured
-    // contact (e.g. NSM's). No LTS default or launching-user fallback: fail
-    // closed before any browser run starts when it is not configured.
+    // contact (e.g. NSM's). No LTS default or launching-user fallback. Submit
+    // mode fails closed before any browser run starts when it is not
+    // configured; prepare-only drafts without it and stops at the contact
+    // step for a person (see filing-contact-policy.ts).
     const orgSettingsRow = await db.query.orgSettings.findFirst({
       where: eq(orgSettings.orgId, taxReturn.orgId),
       columns: { settings: true },
     });
-    const filingContact = resolveGuernseyFilingContactInfo(
+    const filingContactDecision = decideFilingContactStartup(
+      submissionMode,
       orgSettingsRow?.settings,
     );
-    if (!filingContact.ok) {
-      throw new Error(describeFilingContactProblem(filingContact));
-    }
-    const filingContactInfo = filingContact.contact;
-    await log("Resolved organisation filing contact", {
-      phase: "startup",
-      contactSource: "org_settings.portalContactInfo",
-      hasPhone: Boolean(filingContactInfo.phone),
+    await updateActiveJobRecord({
+      resultDataPatch: {
+        filingContactConfigured: filingContactDecision.kind === "configured",
+      },
     });
+    if (filingContactDecision.kind === "refuse") {
+      throw new Error(filingContactDecision.error);
+    }
+    const filingContactInfo =
+      filingContactDecision.kind === "configured"
+        ? filingContactDecision.contact
+        : null;
+    if (filingContactDecision.kind === "configured") {
+      await log("Resolved organisation filing contact", {
+        phase: "startup",
+        contactSource: "org_settings.portalContactInfo",
+        hasPhone: Boolean(filingContactDecision.contact.phone),
+      });
+    } else {
+      await log(
+        "Organisation filing contact not configured: preparing without it; the agent will leave the contact fields untouched and stop at the contact step",
+        { phase: "startup", problem: filingContactDecision.problem },
+      );
+    }
 
     const taxReturnFiles = getTaxReturnFiles(taxReturn.files);
     const useProxy = process.env.USE_UK_PROXY !== "false";
@@ -1378,9 +1399,9 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       submissionMode,
       financialStatementsFile,
       financialStatementsUrl: financialStatementsFile?.url ?? null,
-      contactName: filingContactInfo.name,
-      contactEmail: filingContactInfo.email,
-      contactPhone: filingContactInfo.phone,
+      contactName: filingContactInfo?.name ?? null,
+      contactEmail: filingContactInfo?.email ?? null,
+      contactPhone: filingContactInfo?.phone ?? null,
     });
     const recoveryReturnUrl =
       taxReturn.link ||
@@ -1973,6 +1994,12 @@ ${prompt}
           prepareOnlyLikelySubmitted,
           needsAttention,
         } = outcome;
+        // Only a prepare-only run started without a configured contact may
+        // stop at the contact step and be resumed past it.
+        const stoppedForFilingContact =
+          outcome.needsFilingContact &&
+          submissionMode === "prepare_only" &&
+          !filingContactInfo;
 
         if (prepareOnlyLikelySubmitted) {
           await log("Prepare-only run appears to have submitted anyway", {
@@ -1982,7 +2009,10 @@ ${prompt}
         }
 
         if (needsAttention) {
-          await log("Task requires user attention - pausing", { output });
+          await log("Task requires user attention - pausing", {
+            output,
+            stoppedForFilingContact,
+          });
 
           await publishJobEvent({
             type: "job:requires_attention",
@@ -1993,8 +2023,10 @@ ${prompt}
               browserUseSessionId: session.id,
               liveUrl: session.liveUrl,
               sessionId: session.id,
-              message:
-                "Agent needs user intervention. The browser session is still active - please complete the required action (e.g., login) and resume.",
+              message: stoppedForFilingContact
+                ? FILING_CONTACT_PAUSE_MESSAGE
+                : "Agent needs user intervention. The browser session is still active - please complete the required action (e.g., login) and resume.",
+              needsFilingContact: stoppedForFilingContact || undefined,
             },
           });
 
@@ -2009,8 +2041,18 @@ ${prompt}
               sessionId: session.id,
               pausedAt: Date.now(),
               pauseReason: output,
+              needsFilingContact: stoppedForFilingContact || undefined,
             },
           });
+
+          if (stoppedForFilingContact) {
+            // The draft is parked on the contact step waiting for a person:
+            // the return needs review now, not only once the pause expires.
+            await setTaxReturnStatusUnlessCompleted(
+              runtime.taxReturnId,
+              "review_required",
+            );
+          }
 
           await log("Waiting for user to complete action and resume...");
           const pauseStartTime = Date.now();
@@ -2031,12 +2073,9 @@ ${prompt}
                 "User resumed - creating new Browser Use run to continue",
               );
 
-              const continuePrompt = `
-Continue from where you left off. The user has completed the login/authentication.
-Now proceed with the original task:
-
-${prompt}
-`;
+              const continuePrompt = buildResumePrompt(prompt, {
+                afterFilingContactStop: stoppedForFilingContact,
+              });
               session = await dispatchBrowserTask(continuePrompt, session.id);
 
               break;
@@ -2058,7 +2097,9 @@ ${prompt}
           if (finalJobCheck?.status === "paused") {
             await log("Pause timeout - ending run, return needs review");
             await markActiveRuntimeAwaitingReview(
-              "Timed out waiting for user intervention",
+              stoppedForFilingContact
+                ? FILING_CONTACT_REVIEW_REASON
+                : "Timed out waiting for user intervention",
             );
             terminalStateHandled = true;
             break;

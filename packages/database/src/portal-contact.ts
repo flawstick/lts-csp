@@ -127,5 +127,5 @@ export function describeFilingContactProblem(
     ...resolution.missing.map((field) => `missing contact ${field}`),
     ...resolution.invalid.map((field) => `invalid contact ${field}`),
   ];
-  return `Organisation filing contact is not configured (${parts.join(", ")}). Set the organisation's portal contact name and email before running a Guernsey filing.`;
+  return `Organisation filing contact is not configured (${parts.join(", ")}). "Submit return" needs the organisation's portal contact name and email set first. "Prepare only" can still draft the return and will stop at the contact step for a person.`;
 }
