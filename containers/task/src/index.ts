@@ -11,21 +11,36 @@ import {
   tasks,
   eq,
   sql,
-  GUERNSEY_FILING_CONTACT_INFO,
+  orgSettings,
+  resolveGuernseyFilingContactInfo,
+  describeFilingContactProblem,
   type TaxReturnFileCategory,
   type TaxReturnFileRole,
 } from "@repo/database";
 import { publishJobEvent } from "@repo/redis";
-import type { FileInfo as BrowserUseFileInfo } from "browser-use-sdk/v3";
 import {
   BrowserUseClient,
-  type BrowserUseModel,
+  BROWSER_USE_MODEL,
   type BrowserUseSessionStatus,
+  type BrowserUseFileInfo,
+  type BrowserUseSession,
 } from "./browser-use-client";
+import {
+  getBrowserFileBaselineKey,
+  looksLikePdf,
+  selectCompletionPdfCandidates,
+} from "./completion-pdf";
+import {
+  detectPrepareOnlyBreach,
+  evaluatePrepareOnlyGuard,
+  isPrepareOnlyGuardRequired,
+  prepareOnlyGuardFailure,
+  type PrepareOnlyGuardStatus,
+} from "./prepare-only-guard";
 import { buildSubstanceFormPrompt } from "./prompt-builder";
 import {
   classifyRunOutcome,
-  getTaxReturnStatusForOutcome,
+  resolveFinalRunStatuses,
   shouldCaptureFiledReturnPdf,
   type SubmissionMode,
 } from "./run-outcome";
@@ -44,7 +59,15 @@ const ENV_SUBMISSION_MODE =
     ? "submit_and_capture_pdf"
     : "prepare_only";
 const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || "";
-const BROWSER_USE_MODEL: BrowserUseModel = "bu-max";
+// Browser Use extension id (from POST /api/v4/extensions) of the uploaded
+// prepare-only guard (containers/task/prepare-only-guard). Unset = prepare_only
+// runs are refused (fail closed) unless
+// BROWSER_USE_PREPARE_ONLY_GUARD_REQUIRED=false explicitly opts out.
+const PREPARE_ONLY_GUARD_EXTENSION_ID =
+  process.env.BROWSER_USE_PREPARE_ONLY_GUARD_EXTENSION_ID?.trim() || null;
+const PREPARE_ONLY_GUARD_REQUIRED = isPrepareOnlyGuardRequired(
+  process.env.BROWSER_USE_PREPARE_ONLY_GUARD_REQUIRED,
+);
 const WORKER_MODE =
   process.env.WORKER_MODE === "single"
     ? "single"
@@ -79,15 +102,6 @@ const DETACHED_BROWSER_RECOVERY_PATTERNS = [
   "reconnection failed",
 ];
 
-const FILED_RETURN_PDF_KEYWORDS = [
-  "return",
-  "submission",
-  "receipt",
-  "confirmation",
-  "confirm",
-  "print",
-  "download",
-];
 
 type TaxReturnAttachedFile = {
   url: string;
@@ -107,20 +121,6 @@ type BrowserSessionInputFile = {
   url: string;
   category?: TaxReturnFileCategory;
   role?: TaxReturnFileRole;
-};
-
-type BrowserFileSource = "session" | "workspace";
-
-type BrowserUseDownloadCandidate = {
-  path: string;
-  name: string;
-  size: number;
-  lastModified: string;
-  url: string;
-  source: BrowserFileSource;
-  wasPresentAtBaseline: boolean;
-  keywordMatches: string[];
-  score: number;
 };
 
 type CompletionPdfIngestionResult = {
@@ -267,17 +267,10 @@ async function publishStatus(status: string, data: Record<string, unknown>) {
 }
 
 function isTerminalSessionStatus(status: BrowserUseSessionStatus): boolean {
-  return (
-    status === "idle" ||
-    status === "stopped" ||
-    status === "timed_out" ||
-    status === "error"
-  );
+  return status === "idle" || status === "stopped" || status === "error";
 }
 
-function normalizeResultData(
-  value: unknown,
-): Record<string, unknown> {
+function normalizeResultData(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
   }
@@ -304,7 +297,10 @@ async function updateActiveJobRecord(params: {
   resultDataPatch?: Record<string, unknown>;
 }) {
   const runtime = getRequiredRuntime();
-  runtime.resultData = mergeResultData(runtime.resultData, params.resultDataPatch);
+  runtime.resultData = mergeResultData(
+    runtime.resultData,
+    params.resultDataPatch,
+  );
 
   const nextValues: Record<string, unknown> = {
     ...(params.set ?? {}),
@@ -563,18 +559,6 @@ function getPdfExtension(file: TaxReturnAttachedFile): string {
   return file.type.toLowerCase().includes("pdf") ? ".pdf" : "";
 }
 
-function toTimestamp(value: string | null | undefined): number {
-  if (!value) return 0;
-  const timestamp = Date.parse(value);
-  return Number.isNaN(timestamp) ? 0 : timestamp;
-}
-
-function getPathBaseName(path: string): string {
-  const normalized = path.split("?")[0] ?? path;
-  const segments = normalized.split("/").filter(Boolean);
-  return segments[segments.length - 1] ?? normalized;
-}
-
 function sanitizeFileBaseName(name: string, fallback: string): string {
   const withoutExtension = name.replace(/\.pdf$/i, "").trim();
   const safe = withoutExtension
@@ -585,140 +569,12 @@ function sanitizeFileBaseName(name: string, fallback: string): string {
   return safe || fallback;
 }
 
-function buildFiledReturnDisplayName(entityName: string, taxYear: number): string {
+function buildFiledReturnDisplayName(
+  entityName: string,
+  taxYear: number,
+): string {
   const safeEntity = sanitizeFileBaseName(entityName, "return");
   return `${safeEntity}-${taxYear}-filed-return.pdf`;
-}
-
-function isPdfArtifact(file: { path: string; url?: string | null }): boolean {
-  const haystack = `${file.path} ${file.url ?? ""}`.toLowerCase();
-  return haystack.includes(".pdf") || haystack.includes("pdf");
-}
-
-function getBrowserFileBaselineKey(
-  source: BrowserFileSource,
-  path: string,
-): string {
-  return `${source}:${path}`;
-}
-
-function isFinancialStatementsArtifact(
-  file: BrowserUseFileInfo,
-  source: BrowserFileSource,
-  financialStatementsFile: BrowserSessionInputFile | null,
-): boolean {
-  if (!financialStatementsFile) {
-    return false;
-  }
-
-  if (
-    source === "workspace" &&
-    file.path === financialStatementsFile.sessionFilePath
-  ) {
-    return true;
-  }
-
-  const fileName = getPathBaseName(file.path).toLowerCase();
-  return fileName === financialStatementsFile.sessionFileName.toLowerCase();
-}
-
-function scoreCompletionPdfCandidate(
-  file: BrowserUseFileInfo,
-  source: BrowserFileSource,
-  baselineKeys: Set<string>,
-): BrowserUseDownloadCandidate | null {
-  if (!file.url || !isPdfArtifact(file)) {
-    return null;
-  }
-
-  const name = getPathBaseName(file.path);
-  const haystack = `${file.path} ${name}`.toLowerCase();
-  const keywordMatches = FILED_RETURN_PDF_KEYWORDS.filter((token) =>
-    haystack.includes(token),
-  );
-  const wasPresentAtBaseline = baselineKeys.has(
-    getBrowserFileBaselineKey(source, file.path),
-  );
-  const score =
-    (wasPresentAtBaseline ? 0 : 100) +
-    keywordMatches.length * 20 +
-    (source === "session" ? 10 : 0) +
-    Math.floor(toTimestamp(file.lastModified) / 1_000);
-
-  return {
-    path: file.path,
-    name,
-    size: file.size,
-    lastModified: file.lastModified,
-    url: file.url,
-    source,
-    wasPresentAtBaseline,
-    keywordMatches,
-    score,
-  };
-}
-
-function buildCompletionPdfCandidates(params: {
-  sessionFiles: BrowserUseFileInfo[];
-  workspaceFiles: BrowserUseFileInfo[];
-  baselineKeys: Set<string>;
-  financialStatementsFile: BrowserSessionInputFile | null;
-}): BrowserUseDownloadCandidate[] {
-  const candidates: BrowserUseDownloadCandidate[] = [];
-
-  for (const file of params.sessionFiles) {
-    if (
-      isFinancialStatementsArtifact(file, "session", params.financialStatementsFile)
-    ) {
-      continue;
-    }
-
-    const candidate = scoreCompletionPdfCandidate(
-      file,
-      "session",
-      params.baselineKeys,
-    );
-
-    if (candidate) {
-      candidates.push(candidate);
-    }
-  }
-
-  for (const file of params.workspaceFiles) {
-    if (
-      isFinancialStatementsArtifact(
-        file,
-        "workspace",
-        params.financialStatementsFile,
-      )
-    ) {
-      continue;
-    }
-
-    const candidate = scoreCompletionPdfCandidate(
-      file,
-      "workspace",
-      params.baselineKeys,
-    );
-
-    if (candidate) {
-      candidates.push(candidate);
-    }
-  }
-
-  return candidates.sort((left, right) => {
-    if (right.score !== left.score) {
-      return right.score - left.score;
-    }
-
-    const timeDiff =
-      toTimestamp(right.lastModified) - toTimestamp(left.lastModified);
-    if (timeDiff !== 0) {
-      return timeDiff;
-    }
-
-    return left.path.localeCompare(right.path);
-  });
 }
 
 const COMPLETION_PDF_CAPTURE_ATTEMPTS = 4;
@@ -755,19 +611,34 @@ async function captureCompletionPdfWithRetry(
   return result;
 }
 
-async function recordMissingFiledReturnPdf(params: {
+/**
+ * Record the receipt outcome on the return (including success, so a stale
+ * "missing" from an earlier run never lingers). Browser Use V4 stores browser
+ * downloads under the BROWSER id, not the agent session id, so both are kept
+ * for recovery: list browsers by agentSessionId, then read each browser's
+ * downloads.
+ */
+async function recordFiledReturnPdfOutcome(params: {
   taxReturnId: string;
   sessionId: string;
   workspaceId: string | null;
+  browserIds: string[];
   completionPdf: CompletionPdfIngestionResult;
+  receiptGate: string | null;
+  workspaceRetained: boolean;
 }) {
   const filedReturnPdf = {
     status: params.completionPdf.status,
     error: params.completionPdf.error ?? null,
     jobId: currentJobId(),
+    browserUseApiVersion: 4,
     browserUseSessionId: params.sessionId,
+    browserUseBrowserIds: params.browserIds,
     browserUseWorkspaceId: params.workspaceId,
+    workspaceRetained: params.workspaceRetained,
     browserUsePath: params.completionPdf.browserUsePath ?? null,
+    fileUrl: params.completionPdf.fileUrl ?? null,
+    receiptGate: params.receiptGate,
     recordedAt: new Date().toISOString(),
   };
 
@@ -792,8 +663,13 @@ async function captureCompletionPdf(params: {
   baselineKeys: Set<string>;
   logFn: typeof log;
 }): Promise<CompletionPdfIngestionResult> {
-  const { client, sessionId, workspaceId, financialStatementsFile, baselineKeys } =
-    params;
+  const {
+    client,
+    sessionId,
+    workspaceId,
+    financialStatementsFile,
+    baselineKeys,
+  } = params;
 
   const sessionFiles = await client.getAllSessionFiles(sessionId);
   const workspaceFiles = workspaceId
@@ -805,11 +681,11 @@ async function captureCompletionPdf(params: {
     workspaceFileCount: workspaceFiles.length,
   });
 
-  const candidates = buildCompletionPdfCandidates({
+  const candidates = selectCompletionPdfCandidates({
     sessionFiles,
     workspaceFiles,
     baselineKeys,
-    financialStatementsFile,
+    excludedInputs: financialStatementsFile ? [financialStatementsFile] : [],
   });
 
   await params.logFn("Discovered completion PDF candidates", {
@@ -818,18 +694,59 @@ async function captureCompletionPdf(params: {
       path: candidate.path,
       name: candidate.name,
       source: candidate.source,
-      wasPresentAtBaseline: candidate.wasPresentAtBaseline,
+      size: candidate.size,
       keywordMatches: candidate.keywordMatches,
       lastModified: candidate.lastModified,
-      score: candidate.score,
     })),
   });
 
-  const selectedCandidate = candidates[0];
-  if (!selectedCandidate) {
+  if (candidates.length === 0) {
     return {
       status: "missing",
-      error: "No downloadable completion PDF was found in the Browser Use files.",
+      error: "No new PDF was downloaded during the run (browser downloads and workspace checked).",
+    };
+  }
+
+  if (!BLOB_READ_WRITE_TOKEN) {
+    return {
+      status: "failed",
+      error: "BLOB_READ_WRITE_TOKEN is missing in the browser task environment.",
+      browserUsePath: candidates[0]!.path,
+      browserUseUrl: candidates[0]!.url,
+    };
+  }
+
+  // Try candidates best-first; a download that is not a real PDF (an HTML
+  // error page, a truncated file) must never be attached as the receipt.
+  let selectedCandidate: (typeof candidates)[number] | undefined;
+  let buffer: Buffer | undefined;
+  const rejected: Array<{ path: string; reason: string }> = [];
+  for (const candidate of candidates) {
+    const response = await fetch(candidate.url);
+    if (!response.ok) {
+      rejected.push({ path: candidate.path, reason: `HTTP ${response.status}` });
+      continue;
+    }
+    const body = Buffer.from(await response.arrayBuffer());
+    if (!looksLikePdf(body)) {
+      rejected.push({ path: candidate.path, reason: "not a PDF (missing %PDF- header)" });
+      continue;
+    }
+    selectedCandidate = candidate;
+    buffer = body;
+    break;
+  }
+
+  if (!selectedCandidate || !buffer) {
+    await params.logFn("No completion PDF candidate could be verified", {
+      rejected,
+    });
+    return {
+      status: "failed",
+      error: `Completion PDF candidates could not be verified: ${rejected
+        .map((item) => `${item.path} (${item.reason})`)
+        .join("; ")}`,
+      browserUsePath: candidates[0]!.path,
     };
   }
 
@@ -837,37 +754,17 @@ async function captureCompletionPdf(params: {
     path: selectedCandidate.path,
     name: selectedCandidate.name,
     source: selectedCandidate.source,
+    size: buffer.length,
     lastModified: selectedCandidate.lastModified,
     keywordMatches: selectedCandidate.keywordMatches,
   });
-
-  if (!BLOB_READ_WRITE_TOKEN) {
-    return {
-      status: "failed",
-      error: "BLOB_READ_WRITE_TOKEN is missing in the browser task environment.",
-      browserUsePath: selectedCandidate.path,
-      browserUseUrl: selectedCandidate.url,
-    };
-  }
-
-  const response = await fetch(selectedCandidate.url);
-  if (!response.ok) {
-    return {
-      status: "failed",
-      error: `Failed to download completion PDF from Browser Use: ${response.status}`,
-      browserUsePath: selectedCandidate.path,
-      browserUseUrl: selectedCandidate.url,
-    };
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
   const now = new Date();
   const uploadedAt = now.toISOString();
   const blobPath = `portal/${params.orgId}/${params.taxReturnId}/supporting/${now.getTime()}-filed-return.pdf`;
 
   const blob = await put(
     blobPath,
-    new Blob([buffer], { type: "application/pdf" }),
+    new Blob([new Uint8Array(buffer)], { type: "application/pdf" }),
     {
       access: "public",
       contentType: "application/pdf",
@@ -932,7 +829,9 @@ async function captureCompletionPdf(params: {
       taskId: currentTaskId(),
       browserUseSessionId: sessionId,
       browserUsePath: selectedCandidate.path,
-      browserUseUrl: selectedCandidate.url,
+      browserUseSource: selectedCandidate.source,
+      // The signed Browser Use URL is not stored: it expires and file
+      // metadata is visible to client-portal users.
     },
   });
 
@@ -1052,6 +951,8 @@ async function persistClaimMetadata(runtime: ActiveJobRuntime) {
   const now = Date.now();
   runtime.resultData = mergeResultData(runtime.resultData, {
     submissionMode: runtime.submissionMode,
+    browserUseApiVersion: 4,
+    browserUseStartupPhase: "preparing_files",
     overrideSaved: runtime.overrideSaved,
     workerId: runtime.workerId,
     workerTaskArn: runtime.workerTaskArn,
@@ -1139,7 +1040,9 @@ async function prepareSingleJobRuntime(): Promise<ActiveJobRuntime> {
   const taxReturnId = ENV_TAX_RETURN_ID;
 
   if (!jobId || !taskId || !taxReturnId) {
-    throw new Error("JOB_ID, TASK_ID, and TAX_RETURN_ID are required in single mode");
+    throw new Error(
+      "JOB_ID, TASK_ID, and TAX_RETURN_ID are required in single mode",
+    );
   }
 
   const job = await db.query.jobs.findFirst({
@@ -1173,74 +1076,70 @@ async function prepareSingleJobRuntime(): Promise<ActiveJobRuntime> {
   return runtime;
 }
 
-async function initializeBrowserUseSession(
+async function listBrowserIdsSafely(
   client: BrowserUseClient,
-  useProxy: boolean,
-) {
-  const runtime = getRequiredRuntime();
-  const deadline = Date.now() + runtime.startupTimeoutMs;
-  let lastError: Error | null = null;
-
-  for (let attempt = 1; attempt <= 2 && Date.now() < deadline; attempt += 1) {
-    let createdSessionId: string | null = null;
-
-    try {
-      await publishStatus("starting", {
-        goal: "Connecting Browser Use session",
-        message: "Connecting Browser Use session",
-      });
-
-      await log("Creating Browser Use session", {
-        phase: "startup",
-        attempt,
-        useProxy,
-      });
-
-      const session = await client.createSession({
-        ...(useProxy && { proxyCountryCode: "uk" as const }),
-      });
-      createdSessionId = session.id;
-
-      if (!session.id) {
-        throw new Error("Browser Use did not return a session id");
-      }
-
-      const sessionDetails = await client.getSession(session.id);
-      const liveUrl = session.liveUrl || sessionDetails.liveUrl;
-      if (!liveUrl) {
-        throw new Error("Browser Use did not return a live URL");
-      }
-
-      await client.getMessages(session.id, null);
-
-      return {
-        ...sessionDetails,
-        id: session.id,
-        liveUrl,
-      };
-    } catch (error) {
-      lastError =
-        error instanceof Error ? error : new Error(String(error));
-
-      await log("Browser Use startup attempt failed", {
-        phase: "startup",
-        attempt,
-        error: lastError.message,
-      });
-
-      if (createdSessionId) {
-        try {
-          await client.stopSession(createdSessionId, "session");
-        } catch {}
-      }
-
-      if (attempt >= 2 || Date.now() >= deadline) {
-        break;
-      }
-    }
+  sessionId: string,
+): Promise<string[]> {
+  try {
+    return await client.listBrowserIds(sessionId);
+  } catch {
+    return [];
   }
+}
 
-  throw lastError ?? new Error("Browser Use session failed to initialize");
+async function captureReceiptSafely(params: {
+  client: BrowserUseClient;
+  sessionId: string;
+  workspaceId: string | null;
+  taxReturn: { orgId: string; entityName: string; taxYear: number };
+  financialStatementsFile: BrowserSessionInputFile | null;
+  baselineKeys: Set<string>;
+}): Promise<CompletionPdfIngestionResult> {
+  const runtime = getRequiredRuntime();
+  try {
+    const result = await captureCompletionPdfWithRetry({
+      client: params.client,
+      sessionId: params.sessionId,
+      workspaceId: params.workspaceId,
+      taxReturnId: runtime.taxReturnId,
+      orgId: params.taxReturn.orgId,
+      entityName: params.taxReturn.entityName,
+      taxYear: params.taxReturn.taxYear,
+      financialStatementsFile: params.financialStatementsFile,
+      baselineKeys: params.baselineKeys,
+      logFn: log,
+    });
+    if (result.status !== "uploaded") {
+      await log("Filed-return receipt was not saved", {
+        status: result.status,
+        error: result.error,
+        browserUsePath: result.browserUsePath,
+      });
+    }
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await log("Completion PDF ingestion threw an unexpected error", {
+      error: message,
+    });
+    return { status: "failed", error: message };
+  }
+}
+
+/**
+ * Never downgrade a return that is already "completed" (for example confirmed
+ * as Submitted by the tax-sync portal scrape): it is filed with GRS.
+ */
+async function setTaxReturnStatusUnlessCompleted(
+  taxReturnId: string,
+  status: "completed" | "review_required" | "failed",
+) {
+  await db
+    .update(taxReturns)
+    .set({ status })
+    .where(
+      sql`${taxReturns.id} = ${taxReturnId} AND ${taxReturns.status} <> 'completed'`,
+    );
 }
 
 async function markActiveRuntimeFailed(errorMessage: string) {
@@ -1260,10 +1159,7 @@ async function markActiveRuntimeFailed(errorMessage: string) {
     lastHeartbeatAt: Date.now(),
   });
 
-  await db
-    .update(taxReturns)
-    .set({ status: "failed" })
-    .where(eq(taxReturns.id, runtime.taxReturnId));
+  await setTaxReturnStatusUnlessCompleted(runtime.taxReturnId, "failed");
 
   await db
     .update(tasks)
@@ -1303,10 +1199,10 @@ async function markActiveRuntimeAwaitingReview(reason: string) {
     lastHeartbeatAt: Date.now(),
   });
 
-  await db
-    .update(taxReturns)
-    .set({ status: "review_required" })
-    .where(eq(taxReturns.id, runtime.taxReturnId));
+  await setTaxReturnStatusUnlessCompleted(
+    runtime.taxReturnId,
+    "review_required",
+  );
 
   await db
     .update(tasks)
@@ -1348,6 +1244,10 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     | null = null;
   let workspaceId: string | null = null;
   let retainWorkspaceForRecovery = false;
+  // Set once a browser run has been dispatched, so a fatal error after the
+  // portal may have accepted the filing still looks for the receipt.
+  let receiptRecovery: Parameters<typeof captureReceiptSafely>[0] | null =
+    null;
 
   try {
     await log("Fetching tax return data");
@@ -1363,15 +1263,28 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       throw new Error("Substance form not found");
     }
 
-    // LTS files as agent, so the GRS final contact is always LTS. The org's
-    // client-portal contact settings are client-facing and may name the CSP's
-    // own signatory, so they must not be used for the filing contact.
-    const filingContactInfo = GUERNSEY_FILING_CONTACT_INFO;
+    // The GRS final contact is the organisation's explicitly configured
+    // contact (e.g. NSM's). No LTS default or launching-user fallback: fail
+    // closed before any browser run starts when it is not configured.
+    const orgSettingsRow = await db.query.orgSettings.findFirst({
+      where: eq(orgSettings.orgId, taxReturn.orgId),
+      columns: { settings: true },
+    });
+    const filingContact = resolveGuernseyFilingContactInfo(
+      orgSettingsRow?.settings,
+    );
+    if (!filingContact.ok) {
+      throw new Error(describeFilingContactProblem(filingContact));
+    }
+    const filingContactInfo = filingContact.contact;
+    await log("Resolved organisation filing contact", {
+      phase: "startup",
+      contactSource: "org_settings.portalContactInfo",
+      hasPhone: Boolean(filingContactInfo.phone),
+    });
 
     const taxReturnFiles = getTaxReturnFiles(taxReturn.files);
     const useProxy = process.env.USE_UK_PROXY !== "false";
-
-    session = await initializeBrowserUseSession(client, useProxy);
 
     const latestJobStatus = await db.query.jobs.findFirst({
       where: eq(jobs.id, runtime.jobId),
@@ -1380,44 +1293,8 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
 
     if (latestJobStatus?.status === "cancelled") {
       await log("Job was cancelled during startup", { phase: "startup" });
-      try {
-        await client.stopSession(session.id, "session");
-      } catch {}
       return;
     }
-
-    runtime.resultData = mergeResultData(runtime.resultData, {
-      browserUseSessionId: session.id,
-      sessionId: session.id,
-      liveUrl: session.liveUrl ?? null,
-      startupCompletedAt: Date.now(),
-      startupError: null,
-      lastHeartbeatAt: Date.now(),
-    });
-
-    await db
-      .update(jobs)
-      .set({
-        status: "running",
-        startedAt: new Date(),
-        aiModel: BROWSER_USE_MODEL,
-        resultData: runtime.resultData,
-      })
-      .where(eq(jobs.id, runtime.jobId));
-
-    await publishJobEvent({
-      type: "job:started",
-      jobId: runtime.jobId,
-      timestamp: Date.now(),
-      data: {
-        liveUrl: session.liveUrl,
-        sessionId: session.id,
-        workspaceId: null,
-        taxReturnId: runtime.taxReturnId,
-        entityName: taxReturn.entityName,
-        submissionMode,
-      },
-    });
 
     let financialStatementsFile: BrowserSessionInputFile | null = null;
     let baselineBrowserFileKeys = new Set<string>();
@@ -1458,23 +1335,20 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     }
 
     try {
-      const [baselineSessionFiles, baselineWorkspaceFiles] = await Promise.all([
-        client.getAllSessionFiles(session.id),
-        workspaceId
-          ? client.getAllWorkspaceFiles(workspaceId)
-          : Promise.resolve([]),
-      ]);
+      // No run/browser exists yet. All current files are the uploaded sources.
+      const baselineSessionFiles: BrowserUseFileInfo[] = [];
+      const baselineWorkspaceFiles = workspaceId
+        ? await client.getAllWorkspaceFiles(workspaceId)
+        : [];
 
-      baselineBrowserFileKeys = new Set(
-        [
-          ...baselineSessionFiles.map((file) =>
-            getBrowserFileBaselineKey("session", file.path),
-          ),
-          ...baselineWorkspaceFiles.map((file) =>
-            getBrowserFileBaselineKey("workspace", file.path),
-          ),
-        ],
-      );
+      baselineBrowserFileKeys = new Set([
+        ...baselineSessionFiles.map((file) =>
+          getBrowserFileBaselineKey("session", file.path),
+        ),
+        ...baselineWorkspaceFiles.map((file) =>
+          getBrowserFileBaselineKey("workspace", file.path),
+        ),
+      ]);
 
       await log("Recorded Browser Use file baselines", {
         sessionFileCount: baselineSessionFiles.length,
@@ -1513,39 +1387,150 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       taxReturn.jurisdiction?.portalUrl ||
       "https://my.gov.gg";
 
-    await log("Starting Browser Use task", {
-      sessionId: session.id,
+    let prepareOnlyGuardStatus: PrepareOnlyGuardStatus =
+      evaluatePrepareOnlyGuard({
+        submissionMode,
+        configuredExtensionId: PREPARE_ONLY_GUARD_EXTENSION_ID,
+        installedExtensionIds: null,
+      });
+    if (prepareOnlyGuardStatus === "not_configured") {
+      const refusal = prepareOnlyGuardFailure({
+        status: prepareOnlyGuardStatus,
+        required: PREPARE_ONLY_GUARD_REQUIRED,
+      });
+      if (refusal) {
+        await log(refusal, { phase: "guardrail" });
+        await updateActiveJobRecord({
+          resultDataPatch: { prepareOnlyGuard: prepareOnlyGuardStatus },
+        });
+        throw new Error(refusal);
+      }
+      await log(
+        "Prepare-only guard explicitly disabled (BROWSER_USE_PREPARE_ONLY_GUARD_REQUIRED=false): final submission is prevented only by instructions and the event watchdog",
+        { phase: "guardrail" },
+      );
+    }
+    // Browser ids already verified to carry the guard, and when the browser
+    // run currently awaiting verification was dispatched.
+    const verifiedGuardBrowserIds = new Set<string>();
+    let guardVerificationStartedAt = Date.now();
+
+    async function dispatchBrowserTask(
+      task: string,
+      sessionId?: string,
+    ): Promise<BrowserUseSession> {
+      const beforeDispatch = await db.query.jobs.findFirst({
+        where: eq(jobs.id, runtime.jobId),
+        columns: { status: true },
+      });
+      if (
+        !beforeDispatch ||
+        beforeDispatch.status === "cancelled" ||
+        beforeDispatch.status === "paused" ||
+        beforeDispatch.status === "failed"
+      ) {
+        throw new Error("Browser run cancelled before dispatch");
+      }
+      if (!sessionId) {
+        await updateActiveJobRecord({
+          resultDataPatch: {
+            browserUseStartupPhase: "dispatching",
+            startupStartedAt: Date.now(),
+          },
+        });
+      }
+      const started = await client.runTask(task, {
+        sessionId,
+        model: BROWSER_USE_MODEL,
+        workspaceId: workspaceId ?? undefined,
+        proxyCountryCode: useProxy ? "uk" : null,
+        extensionIds:
+          submissionMode === "prepare_only" && PREPARE_ONLY_GUARD_EXTENSION_ID
+            ? [PREPARE_ONLY_GUARD_EXTENSION_ID]
+            : undefined,
+      });
+      if (prepareOnlyGuardStatus === "requested") {
+        guardVerificationStartedAt = Date.now();
+      }
+      try {
+        await updateActiveJobRecord({
+          resultDataPatch: {
+            browserUseApiVersion: 4,
+            browserUseSessionId: started.id,
+            sessionId: started.id,
+            browserUseRunId: started.runId,
+            browserUseBrowserId: started.browserId,
+            workspaceId: started.workspaceId,
+            liveUrl: started.liveUrl,
+            prepareOnlyGuard: prepareOnlyGuardStatus,
+          },
+        });
+      } catch (error) {
+        await client.stopSession(started.id, "session");
+        throw error;
+      }
+      return started;
+    }
+
+    await log("Starting Browser Use V4 run", {
       model: BROWSER_USE_MODEL,
       submissionMode,
     });
-
-    const runResponse = await client.runTask(prompt, {
+    session = await dispatchBrowserTask(prompt);
+    workspaceId = session.workspaceId;
+    receiptRecovery = {
+      client,
       sessionId: session.id,
-      model: BROWSER_USE_MODEL,
-      timeoutMs: MAX_RUNTIME_MS,
-      workspaceId: workspaceId ?? undefined,
+      workspaceId,
+      taxReturn,
+      financialStatementsFile,
+      baselineKeys: baselineBrowserFileKeys,
+    };
+
+    runtime.resultData = mergeResultData(runtime.resultData, {
+      browserUseSessionId: session.id,
+      sessionId: session.id,
+      liveUrl: session.liveUrl ?? null,
+      startupCompletedAt: Date.now(),
+      startupError: null,
+      lastHeartbeatAt: Date.now(),
     });
 
-    await log("runTask response", {
-      phase: "startup",
-      requestedSessionId: session.id,
-      returnedSessionId: runResponse.id,
-      returnedStatus: runResponse.status,
-      match: session.id === runResponse.id,
+    await db
+      .update(jobs)
+      .set({
+        status: "running",
+        startedAt: new Date(),
+        aiModel: BROWSER_USE_MODEL,
+        resultData: runtime.resultData,
+      })
+      .where(
+        sql`${jobs.id} = ${runtime.jobId} AND ${jobs.status} <> 'cancelled'`,
+      );
+
+    await publishJobEvent({
+      type: "job:started",
+      jobId: runtime.jobId,
+      timestamp: Date.now(),
+      data: {
+        liveUrl: session.liveUrl,
+        sessionId: session.id,
+        workspaceId,
+        taxReturnId: runtime.taxReturnId,
+        entityName: taxReturn.entityName,
+        submissionMode,
+      },
     });
 
-    // If the API returned a different session, poll that one instead
-    if (runResponse.id && runResponse.id !== session.id) {
-      await log("Session ID mismatch - switching to returned session", {
-        phase: "startup",
-        oldSessionId: session.id,
-        newSessionId: runResponse.id,
-        newLiveUrl: runResponse.liveUrl,
-      });
-      session = { ...runResponse, liveUrl: runResponse.liveUrl ?? session.liveUrl };
+    // Cancellation may arrive while the create-run request is in flight.
+    const afterDispatch = await db.query.jobs.findFirst({
+      where: eq(jobs.id, runtime.jobId),
+      columns: { status: true },
+    });
+    if (afterDispatch?.status === "cancelled") {
+      await client.stopSession(session.id, "session");
+      return;
     }
-
-    let currentRunPromise = Promise.resolve(runResponse);
 
     const startTime = Date.now();
     let lastStepCount = 0;
@@ -1567,7 +1552,6 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
         try {
           await client.stopSession(session.id, "session");
         } catch {}
-        void currentRunPromise.catch(() => undefined);
         terminalStateHandled = true;
         break;
       }
@@ -1592,12 +1576,16 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
             client,
             session.id,
           );
+          if (stoppedStatus === "running") {
+            throw new Error("Browser Use did not stop the run before the pause deadline");
+          }
           await log("Pause stop request processed", {
             sessionId: session.id,
             sessionStatus: stoppedStatus,
           });
-        } catch {}
-        void currentRunPromise.catch(() => undefined);
+        } catch (error) {
+          throw new Error(`Unable to safely pause Browser Use: ${error instanceof Error ? error.message : String(error)}`);
+        }
         const pausedCursor = await syncProgressCursorAfterPause(
           client,
           session.id,
@@ -1624,14 +1612,7 @@ Now proceed with the original task:
 
 ${prompt}
 `;
-            currentRunPromise = Promise.resolve(
-              client.runTask(continuePrompt, {
-                sessionId: session.id,
-                model: BROWSER_USE_MODEL,
-                timeoutMs: MAX_RUNTIME_MS,
-                workspaceId: workspaceId ?? undefined,
-              }),
-            );
+            session = await dispatchBrowserTask(continuePrompt, session.id);
             resumed = true;
             break;
           }
@@ -1670,17 +1651,37 @@ ${prompt}
 
       const browserSession = await client.getSession(session.id);
       const newMessages = await client.getMessages(session.id, lastMessageId);
+      session = browserSession;
+      if (
+        runtime.resultData.liveUrl !== session.liveUrl ||
+        runtime.resultData.browserUseBrowserId !== session.browserId ||
+        runtime.resultData.browserUseRunId !== session.runId
+      ) {
+        await updateActiveJobRecord({
+          resultDataPatch: {
+            browserUseApiVersion: 4,
+            browserUseRunId: session.runId,
+            browserUseBrowserId: session.browserId,
+            liveUrl: session.liveUrl,
+          },
+        });
+      }
 
-      await log("Poll cycle", {
-        phase: "run",
-        sessionStatus: browserSession.status,
-        stepCount: browserSession.stepCount,
-        messageCount: newMessages.messages.length,
-        lastMessageId,
-      }, { publish: false });
+      await log(
+        "Poll cycle",
+        {
+          phase: "run",
+          sessionStatus: browserSession.status,
+          stepCount: browserSession.stepCount,
+          messageCount: newMessages.messages.length,
+          lastMessageId,
+        },
+        { publish: false },
+      );
 
       const orderedMessages = [...newMessages.messages].sort(
-        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
       );
       const publishedMessageUpdate = orderedMessages.length > 0;
       let sawDetachedBrowserRecoveryError = false;
@@ -1712,6 +1713,133 @@ ${prompt}
           { publish: false },
         );
         lastMessageId = message.id;
+      }
+
+      if (
+        submissionMode === "prepare_only" &&
+        PREPARE_ONLY_GUARD_EXTENSION_ID
+      ) {
+        // Every browser (including one re-provisioned after a detach) must
+        // be verified; until then the status is "requested".
+        if (
+          prepareOnlyGuardStatus === "verified_installed" &&
+          session.browserId &&
+          !verifiedGuardBrowserIds.has(session.browserId)
+        ) {
+          prepareOnlyGuardStatus = "requested";
+          guardVerificationStartedAt = Date.now();
+        }
+        if (prepareOnlyGuardStatus === "requested" && session.browserId) {
+          let installed: string[] | null = null;
+          try {
+            installed = await client.getBrowserExtensionIds(session.browserId);
+          } catch (error) {
+            await log("Prepare-only guard verification request failed", {
+              phase: "guardrail",
+              browserId: session.browserId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          if (installed) {
+            prepareOnlyGuardStatus = evaluatePrepareOnlyGuard({
+              submissionMode,
+              configuredExtensionId: PREPARE_ONLY_GUARD_EXTENSION_ID,
+              installedExtensionIds: installed,
+            });
+            if (prepareOnlyGuardStatus === "verified_installed") {
+              verifiedGuardBrowserIds.add(session.browserId);
+            }
+            await updateActiveJobRecord({
+              resultDataPatch: {
+                prepareOnlyGuard: prepareOnlyGuardStatus,
+                prepareOnlyGuardCheckedAt: Date.now(),
+                prepareOnlyGuardBrowserId: session.browserId,
+              },
+            });
+            await log("Prepare-only guard verification", {
+              phase: "guardrail",
+              status: prepareOnlyGuardStatus,
+              browserId: session.browserId,
+            });
+          }
+        }
+        // Fail closed: missing extension, or not verifiable in time.
+        const guardFailure = prepareOnlyGuardFailure({
+          status: prepareOnlyGuardStatus,
+          required: PREPARE_ONLY_GUARD_REQUIRED,
+          elapsedSinceDispatchMs: Date.now() - guardVerificationStartedAt,
+        });
+        if (guardFailure) {
+          await updateActiveJobRecord({
+            resultDataPatch: { prepareOnlyGuard: prepareOnlyGuardStatus },
+          });
+          await client.stopSession(session.id, "session");
+          throw new Error(guardFailure);
+        }
+      }
+
+      if (submissionMode === "prepare_only" && orderedMessages.length > 0) {
+        const breach = detectPrepareOnlyBreach(orderedMessages);
+        if (breach) {
+          await log("Prepare-only breach detected - cancelling run", {
+            phase: "guardrail",
+            kind: breach.kind,
+            evidence: breach.evidence,
+          });
+          try {
+            await client.stopSession(session.id, "task");
+          } catch {}
+          let completionPdf: CompletionPdfIngestionResult | undefined;
+          if (breach.kind === "submission_reported") {
+            // It may really be filed: secure the receipt for recovery.
+            completionPdf = await captureReceiptSafely({
+              client,
+              sessionId: session.id,
+              workspaceId,
+              taxReturn,
+              financialStatementsFile,
+              baselineKeys: baselineBrowserFileKeys,
+            });
+            if (completionPdf.status !== "uploaded") {
+              retainWorkspaceForRecovery = true;
+            }
+            await recordFiledReturnPdfOutcome({
+              taxReturnId: runtime.taxReturnId,
+              sessionId: session.id,
+              workspaceId,
+              browserIds: await listBrowserIdsSafely(client, session.id),
+              completionPdf,
+              // Blocks a later submit run until staff check the portal.
+              receiptGate: "prepare_only_submission_reported",
+              workspaceRetained: retainWorkspaceForRecovery,
+            });
+          }
+          await updateActiveJobRecord({
+            resultDataPatch: {
+              prepareOnlyBreach: { ...breach, detectedAt: Date.now() },
+              prepareOnlyLikelySubmitted:
+                breach.kind === "submission_reported" || undefined,
+              completionPdf,
+            },
+          });
+          await publishJobEvent({
+            type: "job:failed",
+            jobId: runtime.jobId,
+            timestamp: Date.now(),
+            data: {
+              error: "Prepare-only run attempted or reported a final submission",
+              prepareOnlyBreach: breach,
+              completionPdf,
+            },
+          });
+          await markActiveRuntimeAwaitingReview(
+            breach.kind === "submission_attempt_blocked"
+              ? "Prepare-only guard blocked a final submission attempt; run cancelled"
+              : "Prepare-only run reported a submission; run cancelled and receipt checked",
+          );
+          terminalStateHandled = true;
+          break;
+        }
       }
 
       if (orderedMessages.length > 0) {
@@ -1767,10 +1895,10 @@ ${prompt}
 The browser entered an unstable state after a bad click or detached tab.
 
 RECOVERY RULES:
-- Use only Browser Use native tools: switch, close, navigate, go_back, click, input, upload_file, evaluate, screenshot.
-- Do NOT use Python or browser-wrapper recovery helpers such as get_tabs.
-- If a stray tab or blank page is open, use switch or close to return to the main Guernsey portal tab.
-- If you cannot recover the portal tab quickly, navigate directly to: ${recoveryReturnUrl}
+- Use the browser controls exposed by this session's current tool schema and their documented signatures.
+- Do not assume legacy V3 tool names or invoke unavailable helpers such as get_tabs.
+- If a stray tab or blank page is open, switch back to the main Guernsey portal tab or close the stray tab using the available controls.
+- If you cannot recover the portal tab quickly, return directly to: ${recoveryReturnUrl}
 - If you land on a page ending in reviewAndSubmit/summary, ${
             submissionMode === "submit_and_capture_pdf"
               ? "treat it as a draft summary until every section has been rechecked in this run. Only use the final submit path after the filing is fully validated and you are ready to download the portal-generated completion PDF."
@@ -1784,14 +1912,7 @@ Continue the original task now:
 ${prompt}
 `;
 
-          currentRunPromise = Promise.resolve(
-            client.runTask(recoveryPrompt, {
-              sessionId: session.id,
-              model: BROWSER_USE_MODEL,
-              timeoutMs: MAX_RUNTIME_MS,
-              workspaceId: workspaceId ?? undefined,
-            }),
-          );
+          session = await dispatchBrowserTask(recoveryPrompt, session.id);
           hasAttemptedDetachedBrowserRecovery = true;
           detachedBrowserRecoveryFailures = 0;
           continue;
@@ -1839,16 +1960,12 @@ ${prompt}
           break;
         }
 
-        const runResult = await currentRunPromise.catch(() => null);
-        const output = normalizeBrowserUseOutput(
-          runResult?.output ?? browserSession.output,
-        );
+        const output = normalizeBrowserUseOutput(browserSession.output);
         const outcome = classifyRunOutcome({
           submissionMode,
           sessionStatus: browserSession.status,
           output,
-          isTaskSuccessful:
-            runResult?.isTaskSuccessful ?? browserSession.isTaskSuccessful,
+          isTaskSuccessful: browserSession.isTaskSuccessful,
         });
         const {
           success,
@@ -1920,14 +2037,7 @@ Now proceed with the original task:
 
 ${prompt}
 `;
-              currentRunPromise = Promise.resolve(
-                client.runTask(continuePrompt, {
-                  sessionId: session.id,
-                  model: BROWSER_USE_MODEL,
-                  timeoutMs: MAX_RUNTIME_MS,
-                  workspaceId: workspaceId ?? undefined,
-                }),
-              );
+              session = await dispatchBrowserTask(continuePrompt, session.id);
 
               break;
             }
@@ -1969,53 +2079,51 @@ ${prompt}
         );
 
         let completionPdf: CompletionPdfIngestionResult | undefined;
-        if (shouldCaptureFiledReturnPdf(submissionMode, outcome)) {
-          try {
-            completionPdf = await captureCompletionPdfWithRetry({
-              client,
-              sessionId: session.id,
-              workspaceId,
-              taxReturnId: runtime.taxReturnId,
-              orgId: taxReturn.orgId,
-              entityName: taxReturn.entityName,
-              taxYear: taxReturn.taxYear,
-              financialStatementsFile,
-              baselineKeys: baselineBrowserFileKeys,
-              logFn: log,
-            });
+        const captureReceipt = shouldCaptureFiledReturnPdf(
+          submissionMode,
+          outcome,
+        );
+        if (captureReceipt) {
+          completionPdf = await captureReceiptSafely({
+            client,
+            sessionId: session.id,
+            workspaceId,
+            taxReturn,
+            financialStatementsFile,
+            baselineKeys: baselineBrowserFileKeys,
+          });
+        }
 
-            if (completionPdf.status === "missing") {
-              await log("No completion PDF was ingested after submission", {
-                error: completionPdf.error,
-              });
-            } else if (completionPdf.status === "failed") {
-              await log("Completion PDF ingestion failed after submission", {
-                error: completionPdf.error,
-                browserUsePath: completionPdf.browserUsePath,
-              });
-            }
-          } catch (error) {
-            completionPdf = {
-              status: "failed",
-              error: error instanceof Error ? error.message : String(error),
-            };
-            await log("Completion PDF ingestion threw an unexpected error", {
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
+        const finalStatuses = resolveFinalRunStatuses(
+          submissionMode,
+          outcome,
+          completionPdf?.status ?? "not_attempted",
+        );
 
+        if (completionPdf) {
+          // The return may already be filed with GRS: keep the Browser Use
+          // workspace whenever the receipt was not saved, so it can be
+          // recovered, and record the outcome on the return either way.
           if (completionPdf.status !== "uploaded") {
-            // The return may already be filed with GRS: keep the Browser Use
-            // workspace so the filed return can be recovered, and record the
-            // gap on the return instead of silently reporting success.
             retainWorkspaceForRecovery = true;
-            await recordMissingFiledReturnPdf({
-              taxReturnId: runtime.taxReturnId,
-              sessionId: session.id,
-              workspaceId,
-              completionPdf,
-            });
           }
+          await recordFiledReturnPdfOutcome({
+            taxReturnId: runtime.taxReturnId,
+            sessionId: session.id,
+            workspaceId,
+            browserIds: await listBrowserIdsSafely(client, session.id),
+            completionPdf,
+            receiptGate: finalStatuses.receiptGate,
+            workspaceRetained: retainWorkspaceForRecovery,
+          });
+        }
+
+        if (finalStatuses.receiptGate) {
+          await log("Return held for review: filed-return receipt gate", {
+            phase: "guardrail",
+            receiptGate: finalStatuses.receiptGate,
+            receiptStatus: completionPdf?.status ?? "not_attempted",
+          });
         }
 
         await publishJobEvent({
@@ -2027,6 +2135,7 @@ ${prompt}
             isSuccess: success,
             browserUseSessionId: session.id,
             completionPdf,
+            receiptGate: finalStatuses.receiptGate,
           },
         });
 
@@ -2037,28 +2146,20 @@ ${prompt}
         });
         if (preUpdateJob?.status !== "cancelled") {
           // prepare_only success means: the agent reached the review/submit page
-          // and left it ready for a human to click the Review/Submit button in the
-          // platform. The TASK itself is fully done (mark `completed` so the UI
-          // stops showing a running state), but the TAX RETURN still needs human
-          // review before final filing (hence `review_required`, which the portal
-          // already filters/badges). Full-submit mode completes both.
-          const taxReturnStatus = getTaxReturnStatusForOutcome(
-            submissionMode,
-            outcome,
+          // and left it ready for a human. The TASK is done, but the TAX RETURN
+          // still needs human review (`review_required`). Submit mode only
+          // completes the return when the filed-return receipt was saved.
+          await setTaxReturnStatusUnlessCompleted(
+            runtime.taxReturnId,
+            finalStatuses.taxReturnStatus,
           );
-          const successTaskStatus = "completed";
-
-          await db
-            .update(taxReturns)
-            .set({ status: taxReturnStatus })
-            .where(eq(taxReturns.id, runtime.taxReturnId));
           await db
             .update(tasks)
-            .set({ status: success ? successTaskStatus : "failed" })
+            .set({ status: finalStatuses.taskStatus })
             .where(eq(tasks.id, runtime.taskId));
           await updateActiveJobRecord({
             set: {
-              status: success ? "completed" : "failed",
+              status: finalStatuses.jobStatus,
               completedAt: new Date(),
             },
             resultDataPatch: {
@@ -2067,6 +2168,7 @@ ${prompt}
               liveUrl: session.liveUrl,
               workspaceId,
               completionPdf,
+              receiptGate: finalStatuses.receiptGate,
               prepareOnlyReadyAt:
                 success && prepareOnlyReady ? Date.now() : undefined,
               prepareOnlyLikelySubmitted:
@@ -2105,6 +2207,44 @@ ${prompt}
       error instanceof Error ? error.message : String(error);
 
     await log("Fatal error", { error: errorMessage });
+
+    if (receiptRecovery && runtime.submissionMode === "submit_and_capture_pdf") {
+      const completionPdf = await captureReceiptSafely(receiptRecovery);
+      if (completionPdf.status !== "uploaded") {
+        retainWorkspaceForRecovery = true;
+      }
+      try {
+        await recordFiledReturnPdfOutcome({
+          taxReturnId: runtime.taxReturnId,
+          sessionId: receiptRecovery.sessionId,
+          workspaceId: receiptRecovery.workspaceId,
+          browserIds: await listBrowserIdsSafely(
+            receiptRecovery.client,
+            receiptRecovery.sessionId,
+          ),
+          completionPdf,
+          receiptGate:
+            completionPdf.status === "uploaded"
+              ? "receipt_from_unsuccessful_run"
+              : null,
+          workspaceRetained: retainWorkspaceForRecovery,
+        });
+      } catch {}
+      if (completionPdf.status === "uploaded") {
+        // A receipt exists, so the portal probably accepted the filing:
+        // hold for a human instead of reporting the return as failed.
+        await publishJobEvent({
+          type: "job:failed",
+          jobId: runtime.jobId,
+          timestamp: Date.now(),
+          data: { error: errorMessage, completionPdf },
+        });
+        await markActiveRuntimeAwaitingReview(
+          `Run errored after a filed-return receipt was saved: ${errorMessage}`,
+        );
+        return;
+      }
+    }
     await publishJobEvent({
       type: "job:failed",
       jobId: runtime.jobId,
@@ -2129,7 +2269,7 @@ ${prompt}
     } else if (workspaceId) {
       try {
         await client.deleteWorkspace(workspaceId);
-        await log("Workspace deleted", { workspaceId });
+        await log("Workspace archived", { workspaceId });
       } catch {}
     }
 
@@ -2175,7 +2315,10 @@ async function failActiveRuntimeForShutdown() {
       const client = new BrowserUseClient(BROWSER_USE_API_KEY);
       await client.stopSession(sessionId, "session");
     } catch (error) {
-      console.error("Failed to stop active Browser Use session on shutdown", error);
+      console.error(
+        "Failed to stop active Browser Use session on shutdown",
+        error,
+      );
     }
   }
 }

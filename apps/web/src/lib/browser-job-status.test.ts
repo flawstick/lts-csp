@@ -6,6 +6,45 @@ const options = { startupTimeoutMs: 45_000 };
 const job = { status: "queued", createdAt: new Date(now - 300_001) };
 
 describe("browser job timeouts", () => {
+  it("uses the worker heartbeat while V4 prepares source files, then bounds run dispatch", () => {
+    const preparing = {
+      ...job,
+      status: "starting",
+      resultData: {
+        browserUseApiVersion: 4,
+        browserUseStartupPhase: "preparing_files",
+        startupStartedAt: now - 90_000,
+        lastHeartbeatAt: now - 1_000,
+      },
+    };
+    expect(getBrowserJobStaleReason(preparing, options, now)).toBeNull();
+    expect(
+      getBrowserJobStaleReason(
+        {
+          ...preparing,
+          resultData: {
+            ...preparing.resultData,
+            lastHeartbeatAt: now - 60_001,
+          },
+        },
+        options,
+        now,
+      ),
+    ).toBe("Browser worker heartbeat lost");
+    expect(
+      getBrowserJobStaleReason(
+        {
+          ...preparing,
+          resultData: {
+            ...preparing.resultData,
+            browserUseStartupPhase: "dispatching",
+          },
+        },
+        options,
+        now,
+      ),
+    ).toBe("Browser Use session failed to initialize");
+  });
   it.each([300_000, 300_001, 30 * 60_000, 24 * 60 * 60_000])(
     "keeps jobs queued after waiting %i ms for a busy worker",
     (queueAgeMs) => {

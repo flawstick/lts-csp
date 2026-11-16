@@ -41,6 +41,11 @@ import {
 import * as cheerio from "cheerio";
 import { decryptPortalCredentials } from "@repo/database/portal-credentials";
 import { launchBrowserTask } from "@/lib/ecs";
+import {
+  getBrowserUseApiVersion,
+  stopBrowserUseSession,
+  waitForBrowserUseSessionToPause,
+} from "@/lib/browser-use-control";
 import { getBrowserJobStaleReason } from "@/lib/browser-job-status";
 import { getFilingStartBlocker } from "@/lib/filing-start-guard";
 import { triggerTaxSync } from "@/lib/tax-sync-launcher";
@@ -337,81 +342,6 @@ function getBrowserUseSessionId(
   }
 
   return null;
-}
-
-async function stopBrowserUseSession(
-  sessionId: string,
-  strategy: "task" | "session",
-): Promise<void> {
-  const apiKey = process.env.BROWSER_USE_API_KEY?.trim();
-  if (!apiKey) {
-    return;
-  }
-
-  const response = await fetch(
-    `https://api.browser-use.com/api/v3/sessions/${sessionId}/stop`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "X-Browser-Use-API-Key": apiKey,
-      },
-      body: JSON.stringify({ strategy }),
-    },
-  );
-
-  if (!response.ok && response.status !== 404) {
-    throw new Error(
-      `Browser Use stop failed: ${response.status} ${response.statusText}`,
-    );
-  }
-}
-
-async function getBrowserUseSessionStatus(
-  sessionId: string,
-): Promise<string | null> {
-  const apiKey = process.env.BROWSER_USE_API_KEY?.trim();
-  if (!apiKey) {
-    return null;
-  }
-
-  const response = await fetch(
-    `https://api.browser-use.com/api/v3/sessions/${sessionId}`,
-    {
-      headers: {
-        "X-Browser-Use-API-Key": apiKey,
-      },
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `Browser Use session lookup failed: ${response.status} ${response.statusText}`,
-    );
-  }
-
-  const data = (await response.json()) as { status?: string };
-  return typeof data.status === "string" ? data.status : null;
-}
-
-async function waitForBrowserUseSessionToPause(
-  sessionId: string,
-  timeoutMs = 10_000,
-): Promise<string | null> {
-  const deadline = Date.now() + timeoutMs;
-  let lastStatus: string | null = null;
-
-  while (Date.now() < deadline) {
-    lastStatus = await getBrowserUseSessionStatus(sessionId);
-    if (lastStatus !== "running") {
-      return lastStatus;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-
-  return lastStatus;
 }
 
 function getBrowserJobLogWindowStartMs(job: {
@@ -873,33 +803,31 @@ export const taxReturnRouter = createTRPCRouter({
 
       // Apply in-scope-only requirements (operating expenditure) to the stored
       // completion so readiness reflects the form's current data.
-      const rows = queriedRows.map(
-        ({ substanceMissingFields, ...row }) => {
-          if (
-            row.returnType !== "economic_substance" ||
-            row.isSubstanceComplete === null
-          ) {
-            return row;
-          }
-          const reconciled = reconcileGuernseyFormCompletion({
-            isComplete: row.isSubstanceComplete,
-            missingFields: substanceMissingFields,
-            form: {
-              certificateType: row.substanceCertificateType,
-              relevantActivity: row.substanceRelevantActivity,
-              adequacyExpenditureDetails: row.substanceOperatingExpenditure,
-            },
-          });
-          return {
-            ...row,
-            isSubstanceComplete: reconciled.isComplete,
-            missingSubstanceFieldCount: Math.max(
-              row.missingSubstanceFieldCount,
-              reconciled.missingFields.length,
-            ),
-          };
-        },
-      );
+      const rows = queriedRows.map(({ substanceMissingFields, ...row }) => {
+        if (
+          row.returnType !== "economic_substance" ||
+          row.isSubstanceComplete === null
+        ) {
+          return row;
+        }
+        const reconciled = reconcileGuernseyFormCompletion({
+          isComplete: row.isSubstanceComplete,
+          missingFields: substanceMissingFields,
+          form: {
+            certificateType: row.substanceCertificateType,
+            relevantActivity: row.substanceRelevantActivity,
+            adequacyExpenditureDetails: row.substanceOperatingExpenditure,
+          },
+        });
+        return {
+          ...row,
+          isSubstanceComplete: reconciled.isComplete,
+          missingSubstanceFieldCount: Math.max(
+            row.missingSubstanceFieldCount,
+            reconciled.missingFields.length,
+          ),
+        };
+      });
 
       const filteredReturns = rows.filter((row) => {
         if (
@@ -930,8 +858,10 @@ export const taxReturnRouter = createTRPCRouter({
         if (readiness && rowReadiness !== readiness) return false;
         if (
           status &&
-          getReturnDisplayStatus({ status: row.status, readiness: rowReadiness }) !==
-            status
+          getReturnDisplayStatus({
+            status: row.status,
+            readiness: rowReadiness,
+          }) !== status
         ) {
           return false;
         }
@@ -1302,7 +1232,10 @@ export const taxReturnRouter = createTRPCRouter({
     .input(z.object({ orgId: z.string().uuid().optional() }).optional())
     .query(async ({ ctx, input }) => {
       const filters = [
-        or(eq(taxSyncJobs.status, "pending"), eq(taxSyncJobs.status, "running")),
+        or(
+          eq(taxSyncJobs.status, "pending"),
+          eq(taxSyncJobs.status, "running"),
+        ),
       ];
 
       if (input?.orgId) {
@@ -1426,16 +1359,14 @@ export const taxReturnRouter = createTRPCRouter({
             missingFields: substanceForms.missingFields,
             certificateType: substanceForms.certificateType,
             relevantActivity: substanceForms.relevantActivity,
-            adequacyExpenditureDetails: substanceForms.adequacyExpenditureDetails,
+            adequacyExpenditureDetails:
+              substanceForms.adequacyExpenditureDetails,
           },
         })
         .from(tasks)
         .leftJoin(taxReturns, eq(tasks.taxReturnId, taxReturns.id))
         .leftJoin(jurisdictions, eq(tasks.jurisdictionId, jurisdictions.id))
-        .leftJoin(
-          substanceForms,
-          eq(taxReturns.id, substanceForms.taxReturnId),
-        )
+        .leftJoin(substanceForms, eq(taxReturns.id, substanceForms.taxReturnId))
         .where(whereClause)
         .orderBy(desc(tasks.createdAt));
 
@@ -1477,7 +1408,9 @@ export const taxReturnRouter = createTRPCRouter({
             continue;
           }
 
-          const relatedTask = filteredTaskList.find((task) => task.id === job.taskId);
+          const relatedTask = filteredTaskList.find(
+            (task) => task.id === job.taskId,
+          );
           const normalizedJob = await maybeMarkBrowserJobStale(ctx.db, job, {
             taskId: job.taskId,
             taxReturnId: relatedTask?.taxReturn?.id ?? null,
@@ -1753,10 +1686,12 @@ export const taxReturnRouter = createTRPCRouter({
         taxReturn.jurisdiction?.code === "GG" &&
         taxReturn.returnType === "economic_substance"
       ) {
-        const certificateResolution = getGuernseyCertificateResolutionForReturn({
-          metadata: taxReturn.metadata,
-          substanceForm: taxReturn.substanceForm,
-        });
+        const certificateResolution = getGuernseyCertificateResolutionForReturn(
+          {
+            metadata: taxReturn.metadata,
+            substanceForm: taxReturn.substanceForm,
+          },
+        );
 
         if (certificateResolution.unresolved) {
           return {
@@ -1930,10 +1865,12 @@ export const taxReturnRouter = createTRPCRouter({
         task.taxReturn.jurisdiction?.code === "GG" &&
         task.taxReturn.returnType === "economic_substance"
       ) {
-        const certificateResolution = getGuernseyCertificateResolutionForReturn({
-          metadata: task.taxReturn.metadata,
-          substanceForm: task.taxReturn.substanceForm,
-        });
+        const certificateResolution = getGuernseyCertificateResolutionForReturn(
+          {
+            metadata: task.taxReturn.metadata,
+            substanceForm: task.taxReturn.substanceForm,
+          },
+        );
 
         if (certificateResolution.unresolved) {
           throw new TRPCError({
@@ -1985,7 +1922,7 @@ export const taxReturnRouter = createTRPCRouter({
           taskId: input.taskId,
           jobNumber,
           status: "queued",
-          aiModel: "bu-max",
+          aiModel: "claude-opus-5-5",
           cloudwatchLogGroup: env.ECS_LOG_GROUP,
           resultData: {
             submissionMode: input.submissionMode,
@@ -2079,8 +2016,15 @@ export const taxReturnRouter = createTRPCRouter({
       const sessionId = getBrowserUseSessionId(job.resultData);
       if (sessionId) {
         try {
-          await stopBrowserUseSession(sessionId, "task");
-          await waitForBrowserUseSessionToPause(sessionId);
+          await stopBrowserUseSession(
+            sessionId,
+            "task",
+            getBrowserUseApiVersion(job.resultData),
+          );
+          await waitForBrowserUseSessionToPause(
+            sessionId,
+            getBrowserUseApiVersion(job.resultData),
+          );
         } catch (error) {
           console.error("Failed to stop Browser Use task immediately:", error);
         }
@@ -2129,8 +2073,15 @@ export const taxReturnRouter = createTRPCRouter({
       const sessionId = getBrowserUseSessionId(job.resultData);
       if (sessionId) {
         try {
-          await stopBrowserUseSession(sessionId, "session");
-          await waitForBrowserUseSessionToPause(sessionId);
+          await stopBrowserUseSession(
+            sessionId,
+            "session",
+            getBrowserUseApiVersion(job.resultData),
+          );
+          await waitForBrowserUseSessionToPause(
+            sessionId,
+            getBrowserUseApiVersion(job.resultData),
+          );
         } catch (error) {
           console.error(
             "Failed to stop Browser Use session immediately:",

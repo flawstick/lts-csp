@@ -46,6 +46,14 @@
       "types": "./src/guernsey-filing.ts",
       "default": "./src/guernsey-filing.ts"
     },
+    "./extraction-sources": {
+      "types": "./src/extraction-sources.ts",
+      "default": "./src/extraction-sources.ts"
+    },
+    "./filed-return-receipt": {
+      "types": "./src/filed-return-receipt.ts",
+      "default": "./src/filed-return-receipt.ts"
+    },
     "./return-readiness": {
       "types": "./src/return-readiness.ts",
       "default": "./src/return-readiness.ts"

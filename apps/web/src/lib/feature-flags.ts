@@ -77,7 +77,7 @@ export const FEATURE_FLAGS: Record<FeatureFlagKey, FeatureFlag> = {
   },
   ai_extraction_model: {
     key: "ai_extraction_model",
-    defaultValue: "deepseek/deepseek-v4-flash",
+    defaultValue: "openai/gpt-6.1-sol",
     description: "AI model to use for document extraction",
     category: "ai",
   },

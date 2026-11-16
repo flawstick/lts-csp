@@ -21,6 +21,9 @@ const STRONG_SUBMISSION_MARKERS = [
   "post-submission confirmation",
   "downloaded completion pdf",
   "downloaded the receipt",
+  // Filenames the GRS portal gives the post-submission receipt.
+  "company-tax-submitted",
+  "submitted.pdf",
 ];
 
 // Phrases an agent also uses when describing the next (not yet taken) step,
@@ -159,29 +162,83 @@ export function classifyRunOutcome(input: {
 }
 
 /**
- * Tax return status after a finished run. A prepared draft and an
- * unexpected/unverified submission both need a person to look at the return,
- * which is "review_required" — not "failed" — for the client.
+ * Tax return status after a finished run, before receipt gating. A prepared
+ * draft and an unexpected/unverified submission both need a person to look at
+ * the return, which is "review_required" — not "failed" — for the client.
  */
 export function getTaxReturnStatusForOutcome(
   submissionMode: SubmissionMode,
-  outcome: Pick<RunOutcome, "success" | "prepareOnlyLikelySubmitted">,
+  outcome: Pick<RunOutcome, "success" | "prepareOnlyLikelySubmitted"> &
+    Partial<Pick<RunOutcome, "likelySubmitted">>,
 ): "completed" | "review_required" | "failed" {
   if (outcome.prepareOnlyLikelySubmitted) return "review_required";
+  // A run can error out after the portal accepted the filing (e.g. while
+  // downloading the receipt). It may be filed with GRS: never mark it failed.
+  if (!outcome.success && outcome.likelySubmitted) return "review_required";
   if (!outcome.success) return "failed";
   return submissionMode === "prepare_only" ? "review_required" : "completed";
 }
 
 /**
- * Whether the filed-return PDF must be captured. Any run that may have filed
- * the return needs its artifact, including a prepare_only run that submitted.
+ * Whether to look for the filed-return PDF. Any run that may have filed the
+ * return needs its receipt — including failed runs that claim a submission and
+ * prepare_only runs that submitted anyway. Submit-mode runs always look,
+ * because the agent can file and then fail before reporting it.
  */
 export function shouldCaptureFiledReturnPdf(
   submissionMode: SubmissionMode,
-  outcome: Pick<RunOutcome, "success" | "prepareOnlyLikelySubmitted">,
+  outcome: Pick<RunOutcome, "success" | "prepareOnlyLikelySubmitted"> &
+    Partial<Pick<RunOutcome, "likelySubmitted">>,
 ) {
   return (
-    (submissionMode === "submit_and_capture_pdf" && outcome.success) ||
-    outcome.prepareOnlyLikelySubmitted
+    submissionMode === "submit_and_capture_pdf" ||
+    outcome.prepareOnlyLikelySubmitted ||
+    outcome.likelySubmitted === true
   );
+}
+
+export type ReceiptStatus = "uploaded" | "missing" | "failed" | "not_attempted";
+
+export type FinalRunStatuses = {
+  taxReturnStatus: "completed" | "review_required" | "failed";
+  jobStatus: "completed" | "failed";
+  taskStatus: "completed" | "failed";
+  /**
+   * Why a run that otherwise looked filed was held back from "completed".
+   * Null when no receipt gate applied.
+   */
+  receiptGate: "receipt_missing" | "receipt_from_unsuccessful_run" | null;
+};
+
+/**
+ * Receipt-gated final statuses. A return is only "completed" by the worker
+ * when the portal-generated receipt was saved to the return; a likely filing
+ * without a saved receipt is held at "review_required" so staff recover the
+ * receipt instead of the client seeing a completed return with no PDF.
+ */
+export function resolveFinalRunStatuses(
+  submissionMode: SubmissionMode,
+  outcome: Pick<
+    RunOutcome,
+    "success" | "prepareOnlyLikelySubmitted" | "likelySubmitted"
+  >,
+  receiptStatus: ReceiptStatus,
+): FinalRunStatuses {
+  let taxReturnStatus = getTaxReturnStatusForOutcome(submissionMode, outcome);
+  let receiptGate: FinalRunStatuses["receiptGate"] = null;
+
+  if (taxReturnStatus === "completed" && receiptStatus !== "uploaded") {
+    taxReturnStatus = "review_required";
+    receiptGate = "receipt_missing";
+  }
+
+  // An unsuccessful run that nonetheless produced a new receipt PDF probably
+  // filed: keep it for a human to confirm rather than failing the return.
+  if (taxReturnStatus === "failed" && receiptStatus === "uploaded") {
+    taxReturnStatus = "review_required";
+    receiptGate = "receipt_from_unsuccessful_run";
+  }
+
+  const jobStatus = outcome.success ? "completed" : "failed";
+  return { taxReturnStatus, jobStatus, taskStatus: jobStatus, receiptGate };
 }

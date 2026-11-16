@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getFilingStartBlocker } from "./filing-start-guard";
+import { getFilingStartBlocker, getPossibleFilingEvidence } from "./filing-start-guard";
 
 const guernseyReturn = {
   status: "pending",
@@ -151,5 +151,50 @@ describe("getFilingStartBlocker", () => {
         }),
       ).toBeNull();
     });
+  });
+});
+
+describe("no resubmission of a possibly filed return", () => {
+  const signedOff = {
+    ...guernseyReturn,
+    status: "review_required",
+    readyForSubmissionAt: new Date(),
+    substanceForm: {
+      ...guernseyReturn.substanceForm,
+      certificateType: "Certificate 2",
+      relevantActivity: "None of the above",
+    },
+  };
+
+  it("allows a first submission", () => {
+    expect(
+      getFilingStartBlocker({ taxReturn: signedOff, submissionMode: "submit_and_capture_pdf" }),
+    ).toBeNull();
+  });
+
+  it.each([
+    ["an attached filed-return PDF", { files: [{ url: "u", role: "filed_return_pdf" }] }],
+    ["a captured receipt", { metadata: { filedReturnPdf: { status: "uploaded" } } }],
+    ["a receipt gate", { metadata: { filedReturnPdf: { status: "missing", receiptGate: "receipt_missing" } } }],
+    [
+      "a prepare-only run that reported a submission",
+      { metadata: { filedReturnPdf: { status: "missing", receiptGate: "prepare_only_submission_reported" } } },
+    ],
+  ])("blocks submission after %s", (_label, extra) => {
+    const taxReturn = { ...signedOff, ...extra };
+    expect(getPossibleFilingEvidence(taxReturn)).not.toBeNull();
+    expect(
+      getFilingStartBlocker({ taxReturn, submissionMode: "submit_and_capture_pdf" }),
+    ).toContain("may already have filed");
+    // Preparing a draft never files, so it stays allowed.
+    expect(getFilingStartBlocker({ taxReturn, submissionMode: "prepare_only" })).toBeNull();
+  });
+
+  it("does not block after a failed run with no filing evidence", () => {
+    expect(
+      getPossibleFilingEvidence({
+        metadata: { filedReturnPdf: { status: "missing", receiptGate: null } },
+      }),
+    ).toBeNull();
   });
 });

@@ -65,6 +65,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { hasManagerSignoff } from "@repo/database/return-readiness";
+import { getFiledReturnReceiptState } from "@repo/database/filed-return-receipt";
 import { toast } from "sonner";
 
 type FileInfo = {
@@ -627,6 +628,7 @@ export default function ReturnDetailPage() {
   const status =
     statusConfig[taxReturn.status as keyof typeof statusConfig] ??
     statusConfig.pending;
+  const receiptState = getFiledReturnReceiptState(taxReturn);
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return "0 B";
@@ -784,6 +786,41 @@ export default function ReturnDetailPage() {
               )}
             </div>
           </div>
+
+          {receiptState.state === "missing" ? (
+            <div
+              role="status"
+              className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm"
+            >
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <div className="space-y-1">
+                <p className="font-medium text-amber-700 dark:text-amber-400">
+                  {receiptState.reason === "return_completed"
+                    ? "Filed return receipt is missing"
+                    : "Return may be filed, but no receipt was saved"}
+                </p>
+                <p className="text-muted-foreground">
+                  The client portal shows no filed-return PDF for this return.
+                  Recover the receipt from the government portal or the
+                  automation browser downloads and upload it as the filed
+                  return. Do not run the submission again.
+                </p>
+                {receiptState.captureError || receiptState.browserUseSessionId ? (
+                  <p className="text-muted-foreground font-mono text-xs break-all">
+                    {receiptState.captureError
+                      ? `Last capture: ${receiptState.captureError}`
+                      : null}
+                    {receiptState.browserUseSessionId
+                      ? ` · Agent session ${receiptState.browserUseSessionId}`
+                      : null}
+                    {receiptState.browserUseBrowserIds.length
+                      ? ` · Browser ${receiptState.browserUseBrowserIds.join(", ")}`
+                      : null}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           {/* Extraction Progress Banner */}
           {isExtracting && (

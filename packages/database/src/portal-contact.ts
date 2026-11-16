@@ -16,14 +16,6 @@ export const DEFAULT_PORTAL_CONTACT_INFO: ResolvedOrgPortalContactInfo = {
   phone: "+44 1481 755862",
 };
 
-/**
- * Contact entered on the Guernsey Tax Portal's final contact step. LTS files
- * as agent, so this is always the LTS contact. It is deliberately separate from
- * an organisation's client portal contact settings, which CSPs may point at
- * their own staff (e.g. a signatory) for client-facing communication.
- */
-export const GUERNSEY_FILING_CONTACT_INFO: ResolvedOrgPortalContactInfo =
-  DEFAULT_PORTAL_CONTACT_INFO;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -89,4 +81,51 @@ export function mergeOrgPortalContactInfoSettings(
   nextSettings.portalContactInfo =
     sanitizeOrgPortalContactInfoSettings(contactInfo);
   return nextSettings;
+}
+
+export type GuernseyFilingContactResolution =
+  | { ok: true; contact: { name: string; email: string; phone: string | null } }
+  | { ok: false; missing: Array<"name" | "email">; invalid: Array<"email"> };
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Contact entered on the Guernsey Tax Portal's final contact step. It must be
+ * the organisation's (e.g. NSM's) explicitly configured contact. Unlike
+ * `resolveOrgPortalContactInfo`, there is NO fallback to the LTS default or to
+ * the person launching the run: a missing name or email fails closed so the
+ * filing never carries invented or personal contact details. Phone is
+ * optional here; the agent is told to stop if the portal requires it.
+ */
+export function resolveGuernseyFilingContactInfo(
+  settings: unknown,
+): GuernseyFilingContactResolution {
+  const configured = parseOrgPortalContactInfoSettings(settings);
+  const missing: Array<"name" | "email"> = [];
+  const invalid: Array<"email"> = [];
+  if (!configured.name) missing.push("name");
+  if (!configured.email) missing.push("email");
+  else if (!EMAIL_PATTERN.test(configured.email)) invalid.push("email");
+
+  if (missing.length || invalid.length || !configured.name || !configured.email) {
+    return { ok: false, missing, invalid };
+  }
+  return {
+    ok: true,
+    contact: {
+      name: configured.name,
+      email: configured.email,
+      phone: configured.phone,
+    },
+  };
+}
+
+export function describeFilingContactProblem(
+  resolution: Extract<GuernseyFilingContactResolution, { ok: false }>,
+): string {
+  const parts = [
+    ...resolution.missing.map((field) => `missing contact ${field}`),
+    ...resolution.invalid.map((field) => `invalid contact ${field}`),
+  ];
+  return `Organisation filing contact is not configured (${parts.join(", ")}). Set the organisation's portal contact name and email before running a Guernsey filing.`;
 }

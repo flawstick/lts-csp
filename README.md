@@ -88,7 +88,7 @@ Important entities:
 ### 4.4 ECS Workers
 
 `containers/task`:
-- Browser Use Cloud client + polling loop.
+- Browser Use Cloud V4 client (`claude-opus-5-5`, adaptive thinking, high effort) with run-status and event polling.
 - Handles pause/resume/cancel states.
 - Publishes job events to Redis.
 - Updates `jobs`/`tax_returns` statuses.
@@ -136,16 +136,17 @@ outage cannot block automation; the UI also polls durable job state from Postgre
 3. `substanceForm.extractFromFiles` fetches files and normalizes:
    - PDFs/images as file parts
    - Excel converted to CSV text
-4. AI model returns structured object.
+4. GPT-6.1 Sol (`openai/gpt-6.1-sol`) returns a structured object, using native PDFs/images alongside parsed text; there is no fallback to an older model.
 5. Data merged into `substance_forms`, `missingFields` recalculated.
 
 ### Flow C: Browser Automation Job
 1. User starts a task job (`taxReturn.startJob`).
 2. tRPC creates `job` + ECS launch via `launchBrowserTask`.
-3. Worker creates Browser Use session/task.
+3. Worker stages source files in a V4 workspace, creates a run, and records separate session, run, and browser IDs.
 4. Worker publishes live events to Redis.
 5. SSE endpoint streams filtered events to UI.
-6. User can pause/resume/cancel from task page.
+6. Runs request a 15-minute browser keep-alive. Pause cancels the active run; Resume creates a follow-up run in the same session. Cancel closes the session's owned browsers while preserving audit history.
+7. Dashboard controls use the recorded API version; older jobs without V4 metadata continue to use V3 controls during rollout.
 
 ## 6) Local Development
 

@@ -1,3 +1,9 @@
+import {
+  classifyExtractionSource,
+  decodeCsv,
+  normalizeExtractedEmployees,
+  shouldKeepExistingEmployees,
+} from "@repo/database/extraction-sources";
 import { env } from "@/env";
 import { TRPCError } from "@trpc/server";
 import type { User } from "@supabase/supabase-js";
@@ -105,30 +111,7 @@ type ValidationIssue = ReturnType<
 const ECONOMIC_CLASSIFICATION_CODE_PATTERN = /\b\d{1,3}(?:\.\d{1,3})+\b/;
 const ECONOMIC_CLASSIFICATION_CODE_CONTEXT_PATTERN =
   /\b\d{1,3}(?:\.\d{1,3}){2,}\b/;
-/**
- * Ordered list of AI Gateway model ids to try for document extraction.
- * The first available model wins; later entries are fallbacks used when the
- * gateway reports the model as not found / retired.
- */
-const PORTAL_EXTRACTION_MODEL_CANDIDATES = [
-  // DeepSeek V4 Flash is the fast OCR/text extraction path. It does not accept
-  // native PDF/image inputs, so GPT-5.4 remains the multimodal fallback.
-  { id: "deepseek/deepseek-v4-flash", textOnly: true },
-  { id: "openai/gpt-5.4", textOnly: false },
-] as const;
-
-function isGatewayModelUnavailableError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const name = (error as { name?: unknown }).name;
-  const statusCode = (error as { statusCode?: unknown }).statusCode;
-  const message = (error as { message?: unknown }).message;
-  if (name === "GatewayModelNotFoundError") return true;
-  if (statusCode === 404) return true;
-  return (
-    typeof message === "string" &&
-    /model .* not found|model_not_found|unknown model|deprecated/i.test(message)
-  );
-}
+const EXTRACTION_MODEL_ID = "openai/gpt-6.1-sol";
 
 const FIRECRAWL_PDF_MAX_PAGES = 50;
 const FIRECRAWL_PDF_MAX_CHARS = 120_000;
@@ -1459,39 +1442,29 @@ export async function extractSubstanceFormFromFilesInternal(input: {
     }
   });
 
-  const supportedFileTypes = [
-    "application/pdf",
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-    "image/gif",
-  ];
-  const excelTypes = [
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-excel",
-  ];
-
   for (let index = 0; index < input.fileUrls.length; index++) {
     const url = input.fileUrls[index]!;
     const displayName = sourceFileNames[index] ?? url;
     const response = await fetch(url);
     if (!response.ok) {
-      continue;
+      throw new Error(
+        `Unable to read source file "${displayName}" (${response.status}). Extraction stopped to avoid incomplete results.`,
+      );
     }
 
-    const mediaType =
-      response.headers.get("content-type") ?? "application/octet-stream";
-    const normalizedMedia = mediaType.toLowerCase();
-    const isCsv =
-      normalizedMedia.includes("text/csv") ||
-      url.toLowerCase().endsWith(".csv");
-    const isExcel =
-      excelTypes.some((type) => normalizedMedia.includes(type)) ||
-      normalizedMedia.includes("spreadsheet") ||
-      normalizedMedia.includes("excel");
+    const buffer = await response.arrayBuffer();
+    const source = classifyExtractionSource({
+      contentType: response.headers.get("content-type"),
+      fileName: displayName,
+      urlPath: new URL(url).pathname,
+      bytes: new Uint8Array(buffer),
+    });
+    const mediaType = source.mediaType;
+    const isCsv = source.kind === "csv";
+    const isExcel = source.kind === "excel";
 
     if (isCsv) {
-      const csvText = await response.text();
+      const csvText = decodeCsv(new Uint8Array(buffer));
       if (csvText.trim().length > 0) {
         const text: TextContent = {
           type: "text",
@@ -1503,8 +1476,6 @@ export async function extractSubstanceFormFromFilesInternal(input: {
       continue;
     }
 
-    const buffer = await response.arrayBuffer();
-
     if (isExcel) {
       try {
         const workbook = XLSX.read(buffer, { type: "array" });
@@ -1515,7 +1486,7 @@ export async function extractSubstanceFormFromFilesInternal(input: {
           if (!sheet) {
             continue;
           }
-          const csv = XLSX.utils.sheet_to_csv(sheet);
+          const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
           csvParts.push(`--- Sheet: ${sheetName} ---\n${csv}`);
         }
 
@@ -1529,21 +1500,15 @@ export async function extractSubstanceFormFromFilesInternal(input: {
           documentBlocks.push({ fileName: displayName, contents: [text] });
         }
       } catch {
-        // Ignore malformed spreadsheets and continue processing valid files.
+        throw new Error(
+          `Unable to read spreadsheet "${displayName}". Extraction stopped to avoid incomplete results.`,
+        );
       }
       continue;
     }
 
-    if (
-      supportedFileTypes.some(
-        (type) =>
-          normalizedMedia === type ||
-          normalizedMedia.startsWith(type.split("/")[0]!),
-      )
-    ) {
-      const isPdf =
-        normalizedMedia.includes("application/pdf") ||
-        url.toLowerCase().endsWith(".pdf");
+    if (source.kind === "pdf" || source.kind === "image") {
+      const isPdf = source.kind === "pdf";
       const kind = isPdf ? "PDF" : "image";
       const header: TextContent = {
         type: "text",
@@ -1575,7 +1540,12 @@ export async function extractSubstanceFormFromFilesInternal(input: {
       }
 
       documentBlocks.push(block);
+      continue;
     }
+
+    throw new Error(
+      `Unsupported source file "${displayName}" (${mediaType}). Supported: PDF, images, Excel (.xlsx/.xls) and CSV. Extraction stopped to avoid incomplete results.`,
+    );
   }
 
   if (fileContents.length === 0 && textContents.length === 0) {
@@ -1674,10 +1644,6 @@ export async function extractSubstanceFormFromFilesInternal(input: {
   });
   // The model receives each PDF natively plus the Firecrawl parsed text so it
   // can cross-check tables/stamps/handwriting against OCR.
-  //
-  // Model ids can be retired from the gateway without notice. Try each
-  // candidate in order and fall back on "model not found" style errors.
-  const modelCandidates = PORTAL_EXTRACTION_MODEL_CANDIDATES;
 
   const cigaOptionsText = Object.entries(CIGA_BY_ACTIVITY)
     .map(([activity, options]) => `${activity}:\n  - ${options.join("\n  - ")}`)
@@ -1698,6 +1664,14 @@ You are receiving ${documentBlocks.length} source document${documentBlocks.lengt
 Treat vision as the authoritative source. Use the parsed text only to cross-check spellings/numbers when the visual rendering is ambiguous, unclear, or low-resolution. If the parsed text and the visual PDF disagree, trust what you SEE in the PDF. Never hallucinate a value that is not visible in either source.
 
 Read all attached files carefully and return values only when they are explicitly stated or clearly inferable from the documents. If a value is unknown or uncertain, leave it empty — never guess.
+
+EMPLOYEE EXTRACTION:
+- Inspect every source file, worksheet, PDF table and scanned page for employees, staff, personnel, chargeable units, hours and FTE schedules. Do not stop after finding financial figures.
+- Extract every explicitly identified employee row, including partial rows. A missing qualification, units or FTE column must not cause the employee to be omitted; leave only that field null.
+- Keep unitsOnCompany and totalUnits in the same units. Calculate fteFraction only when both are provided and totalUnits is greater than zero; otherwise preserve an explicitly stated FTE or leave it null.
+- Do not infer qualifiedForReporting from a job title. Use an explicit qualification/reporting indication; otherwise leave it null. Do not assume directors or service-provider contacts are employees.
+- Extract explicitly stated totalFte and totalQualifiedFte even when no individual names are given. Never invent employee names to represent an aggregate headcount.
+- Missing employee information is unknown, not zero: return null for absent employees/totals. Use [] or 0 only when the documents explicitly state there are no employees or zero FTE.
 
 ${existingContextText ? `=== EXISTING FORM CONTEXT ===\n${existingContextText}\n` : ""}
 
@@ -1722,7 +1696,7 @@ Use these strict output rules:
 - allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey are helpful but not required. Extract them when the documents state them, otherwise leave them empty.
 - activityGrossIncome should be the turnover or gross income from the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
 - adequacyExpenditureDetails should be the operating expenditure relating to the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
-- If the entity has no relevant activity ("None of the above"), leave adequacy, CIGA, employees, outsourcing, and beneficial ownership sections empty.
+- If the entity has no relevant activity ("None of the above"), leave adequacy, CIGA, outsourcing, and beneficial ownership sections empty. Still extract employee information explicitly present in source documents; do not discard it because of the relevant activity selection.
 ${
   certificateTwoDefaults
     ? `
@@ -1741,7 +1715,7 @@ ${cigaOptionsText}
 
   // Pair each source document inline: "FILE N header → native file → parsed
   // text". Keeping vision and OCR adjacent (rather than all files, then all
-  // text) gives Gemini a much cleaner cross-reference signal per document.
+  // text) keeps document identity clear when matching extracted values.
   const pairedDocumentContent: Array<TextContent | FileContent> =
     documentBlocks.flatMap((block) => block.contents);
 
@@ -1749,39 +1723,13 @@ ${cigaOptionsText}
     { type: "text", text: prompt },
     ...pairedDocumentContent,
   ];
-  const textOnlyMessageContent: TextContent[] = [
-    { type: "text", text: prompt },
-    ...pairedDocumentContent.filter(
-      (content): content is TextContent => content.type === "text",
-    ),
-  ];
-  const hasTextForEveryDocument = documentBlocks.every((block) => {
-    const hasNativeFile = block.contents.some(
-      (content) => content.type === "file",
-    );
-    if (!hasNativeFile) return true;
-
-    return block.contents.some(
-      (content) =>
-        content.type === "text" &&
-        content.text.includes("Firecrawl parsed text for FILE"),
-    );
-  });
-
   const MAX_RETRIES = 2;
   let result: Awaited<
     ReturnType<typeof generateObject<typeof aiExtractionSchema>>
   >;
-  let modelIndex = hasTextForEveryDocument ? 0 : 1;
-  let usedModelId: string = modelCandidates[modelIndex]!.id;
-  if (!hasTextForEveryDocument) {
-    console.warn(
-      "[AI Extraction] Skipping text-only DeepSeek V4 because at least one source file has no parsed text; using the native-file fallback",
-    );
-  }
+  const usedModelId = EXTRACTION_MODEL_ID;
   for (let attempt = 0; ; attempt++) {
-    const candidate = modelCandidates[modelIndex]!;
-    const modelId: string = candidate.id;
+    const modelId = usedModelId;
     try {
       result = await generateObject({
         model: gateway(modelId),
@@ -1800,28 +1748,13 @@ ${cigaOptionsText}
         messages: [
           {
             role: "user",
-            content: candidate.textOnly
-              ? textOnlyMessageContent
-              : nativeMessageContent,
+            content: nativeMessageContent,
           },
         ],
       });
-      usedModelId = modelId;
       break;
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      const hasFallback = modelIndex < modelCandidates.length - 1;
-      const shouldFallback =
-        hasFallback &&
-        (candidate.textOnly || isGatewayModelUnavailableError(error));
-      if (shouldFallback) {
-        console.warn(
-          `[AI Extraction] Model ${modelId} failed on AI Gateway (${message}); falling back to ${modelCandidates[modelIndex + 1]!.id}`,
-        );
-        modelIndex += 1;
-        attempt = -1;
-        continue;
-      }
       const isTransient =
         message.includes("input stream") ||
         message.includes("ECONNRESET") ||
@@ -1843,6 +1776,27 @@ ${cigaOptionsText}
   ) as Partial<SubstanceFormData>;
   // A manager signoff is an approval a person records, never an extracted value.
   stripManagerSignoffFields(extractedData);
+
+  // Employees: keep partial rows, derive FTE only from explicit units, and
+  // never let an empty extraction wipe employees already saved.
+  const employeeResult = normalizeExtractedEmployees({
+    employees: extractedData.employees,
+    totalFte: extractedData.totalFte,
+    totalQualifiedFte: extractedData.totalQualifiedFte,
+  });
+  const employeeWarnings = [...employeeResult.warnings];
+  if (shouldKeepExistingEmployees(employeeResult.employees, form.employees)) {
+    delete extractedData.employees;
+    employeeWarnings.push(
+      "No employee rows were found in the documents; the saved employees were kept.",
+    );
+  } else if (employeeResult.employees !== undefined) {
+    extractedData.employees = employeeResult.employees;
+  }
+  if (employeeResult.totalFte !== undefined)
+    extractedData.totalFte = employeeResult.totalFte;
+  if (employeeResult.totalQualifiedFte !== undefined)
+    extractedData.totalQualifiedFte = employeeResult.totalQualifiedFte;
 
   extractedData.certificateType = certificateResolution.certificateType;
   extractedData.taxReferenceNumber = normalizeTaxReferenceNumber({
@@ -2003,6 +1957,7 @@ ${cigaOptionsText}
         .filter((issue) => issue.severity === "warning")
         .map((issue) => issue.message),
       ...(financialFigures?.warning ? [financialFigures.warning] : []),
+      ...employeeWarnings,
     ],
   };
 }

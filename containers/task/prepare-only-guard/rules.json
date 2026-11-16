@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "regexFilter": "^https://([a-z0-9-]+\\.)*gov\\.gg/company-tax-api/v[0-9]+/draftTaxReturn/[^/?#]+/submitDeclaration([/?#]|$)",
+      "isUrlFilterCaseSensitive": false,
+      "resourceTypes": ["xmlhttprequest", "main_frame", "sub_frame", "ping", "other", "websocket", "script"]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "regexFilter": "^https://([a-z0-9-]+\\.)*gov\\.gg/company-tax-api/[^?#]*/submitDeclaration",
+      "isUrlFilterCaseSensitive": false,
+      "requestMethods": ["post", "put", "patch", "delete"]
+    }
+  }
+]
