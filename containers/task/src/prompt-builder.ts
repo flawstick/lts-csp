@@ -9,6 +9,8 @@ import {
   type TaxReturn,
 } from "@repo/database";
 
+import { NEEDS_FILING_CONTACT_MARKER } from "./run-outcome";
+
 interface Employee {
   name?: string;
   qualifiedForReporting?: boolean;
@@ -130,6 +132,9 @@ export function buildSubstanceFormPrompt(
     relevantActivity: substanceForm.relevantActivity ?? null,
   });
   const isPrepareOnly = submissionMode === "prepare_only";
+  // The contact is all-or-nothing: without both a configured name and email
+  // the agent gets no contact values at all and must not touch the fields.
+  const hasFilingContact = Boolean(contactName?.trim() && contactEmail?.trim());
   const missingFields = Array.isArray(substanceForm.missingFields)
     ? substanceForm.missingFields
     : [];
@@ -238,21 +243,13 @@ If the redirected form already contains completed or pre-filled answers, still o
 - If parent company / UBO / ownership information is not provided, do **NOT** try to look it up elsewhere. Use a portal-native "No", "None", or empty-list path only if the portal explicitly supports that flow. Otherwise STOP and report **REQUIRES_ATTENTION**.
 - Do **NOT** infer **Relevant Activity** if it is missing. That is a material field and should pause if the saved form and documents do not provide it clearly.
 - Prefer pausing over guessing for any field that could materially change the filing.
-${
-  contactName || contactEmail || contactPhone
-    ? `
-
-## FILING CONTACT INFORMATION
-- The contact email is requested **at the end of the filing flow** (on the final contact / declaration step before the review and submit page), not on the earlier substance sections. Do not enter it into earlier fields, and do not go looking for it before you reach that step — keep going through the form and fill it in when that final contact field appears.
-- The filing contact is the organisation's configured filing contact given below. Use exactly these values; do NOT substitute a director, authorised signatory, the logged-in user, or any other person shown on the portal.
-- If the portal asks for a contact name, use: ${contactName ?? "[MISSING - STOP if required]"}
-- When the portal asks for a contact email at the end of the form, use: ${contactEmail ?? "[MISSING - STOP if required]"}
-- If the portal asks for a contact telephone number, use: ${contactPhone ?? "[MISSING - STOP if required]"}
-- These contact fields are often PRE-FILLED from a previous filing or the client's account (for example with a signatory's name or email). Always clear and REPLACE any pre-filled contact name, email or telephone with the values above. Do not keep a pre-filled contact.
-- Do not invent other contact details. If the portal requires more than name/email/phone and it is not already visible on the portal, STOP and report **REQUIRES_ATTENTION**.
-`
-    : ""
-}
+${buildFilingContactSection({
+  hasFilingContact,
+  isPrepareOnly,
+  contactName,
+  contactEmail,
+  contactPhone,
+})}
 ${
   !isCertificateTwo && financialStatementsFile && financialStatementsUrl
     ? `
@@ -368,7 +365,9 @@ ${blockingMissingFields.map((f) => `- ${f}`).join("\n")}
   }
 
   // Final instructions
-  sections.push(`
+  sections.push(
+    hasFilingContact
+      ? `
 ## COMPLETION
 After filling all sections:
 1. Review the entire form for accuracy
@@ -388,9 +387,100 @@ ${
 7. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action under any circumstances
 8. If there are validation errors, report them exactly as shown`
 }
-`);
+`
+      : `
+## COMPLETION — STOP AT THE CONTACT STEP (NO FILING CONTACT CONFIGURED)
+After filling all other sections:
+1. Review the entire form for accuracy
+2. Continue only as far as the final contact step (contact name / email / telephone). Leave every contact field exactly as the portal shows it — do not type, clear, select or change anything there
+3. **STOP on the contact step.** Do NOT click Save, Continue, Next or any button that moves past it, and do NOT go to the review/submit page from there
+4. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action under any circumstances
+5. Do **NOT** output READY_FOR_MANUAL_SUBMISSION in this run — the return is not ready until a person completes the contact step
+6. Your final output MUST start with exactly: **REQUIRES_ATTENTION: ${NEEDS_FILING_CONTACT_MARKER}:**
+7. Then state which sections are complete, that you stopped on the contact step for a person to enter the organisation's filing contact, and whether the contact fields are currently blank or pre-filled (do not repeat any pre-filled values)
+8. If something else stops you **before** the contact step (a validation error, login problem or another missing field), do NOT use the ${NEEDS_FILING_CONTACT_MARKER} marker: report that blocker with **REQUIRES_ATTENTION** exactly as shown, and mention that the organisation filing contact is also not configured
+`,
+  );
 
   return sections.join("\n");
+}
+
+/**
+ * The GRS contact step. Always rendered: with no section at all the agent
+ * would happily keep a pre-filled signatory contact or make one up.
+ */
+function buildFilingContactSection(options: {
+  hasFilingContact: boolean;
+  isPrepareOnly: boolean;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+}): string {
+  const { hasFilingContact, isPrepareOnly, contactName, contactEmail, contactPhone } =
+    options;
+
+  if (hasFilingContact) {
+    return `
+
+## FILING CONTACT INFORMATION
+- The contact email is requested **at the end of the filing flow** (on the final contact / declaration step before the review and submit page), not on the earlier substance sections. Do not enter it into earlier fields, and do not go looking for it before you reach that step — keep going through the form and fill it in when that final contact field appears.
+- The filing contact is the organisation's configured filing contact given below. Use exactly these values; do NOT substitute a director, authorised signatory, the logged-in user, or any other person shown on the portal.
+- If the portal asks for a contact name, use: ${contactName?.trim()}
+- When the portal asks for a contact email at the end of the form, use: ${contactEmail?.trim()}
+- If the portal asks for a contact telephone number, use: ${contactPhone?.trim() || "[MISSING - STOP if required]"}
+- These contact fields are often PRE-FILLED from a previous filing or the client's account (for example with a signatory's name or email). Always clear and REPLACE any pre-filled contact name, email or telephone with the values above. Do not keep a pre-filled contact.
+- Do not invent other contact details. If the portal requires more than name/email/phone and it is not already visible on the portal, STOP and report **REQUIRES_ATTENTION**.
+`;
+  }
+
+  return `
+
+## FILING CONTACT INFORMATION — NOT CONFIGURED: A PERSON MUST COMPLETE THE CONTACT STEP
+- This organisation has **no valid filing contact configured**. You have NO contact name, email or telephone to use in this run.
+- The contact fields are on the **final contact / declaration step** before the review and submit page. Fill every other section as normal; this rule only changes what you do on that contact step.
+- On the contact step, **leave every contact name, email and telephone field exactly as the portal shows it** — blank or pre-filled. Do NOT type into, clear, select, edit or replace any of them.
+- Do NOT invent a contact. Do NOT use a director, authorised signatory, the logged-in user, the case assignee, LTS, or any other person, email or phone number seen on the portal or in the documents as the contact.
+- ${
+    isPrepareOnly
+      ? "Stop on the contact step for a person to enter the organisation's filing contact, and report it as described in **COMPLETION** below."
+      : "This run must NOT file the return. Stop on the contact step, do not submit, and report it as described in **COMPLETION** below."
+  }
+- This rule overrides any other instruction to fill every field, re-enter all fields, or replace pre-filled values.
+`;
+}
+
+/**
+ * Prompt for a run resumed after a pause. A run paused because it stopped at
+ * the contact step (no configured filing contact) must not walk back to the
+ * contact step and stop again: the person has handled it.
+ */
+export function buildResumePrompt(
+  originalPrompt: string,
+  options: { afterFilingContactStop: boolean },
+): string {
+  if (options.afterFilingContactStop) {
+    return `
+Continue from where you left off. You stopped on the final contact step because no filing contact was configured, and a person has now handled that step in the browser.
+
+RULES FOR THIS CONTINUATION (these override the FILING CONTACT and COMPLETION sections of the original task below):
+- Do NOT type into, clear, edit or replace any contact name, email or telephone field. Leave whatever the person entered (or left) exactly as it is.
+- If the portal still shows the contact step, use its normal Save/Continue button to move to the final review/submit page. If the portal rejects the contact step (for example a required contact field is empty), do not fill it: STOP and report output starting with exactly **REQUIRES_ATTENTION: ${NEEDS_FILING_CONTACT_MARKER}:** and quote the portal's message.
+- Do NOT go back through earlier sections unless the portal shows a validation error there.
+- Once on the final review/submit page, follow the original COMPLETION steps for a prepare-only run: stop BEFORE submitting, leave the submit button visible, and start your final output with exactly **READY_FOR_MANUAL_SUBMISSION:**
+- Do **NOT** click Submit, Confirm, Print, Download, or any final filing action under any circumstances.
+
+Original task, for reference:
+
+${originalPrompt}
+`;
+  }
+
+  return `
+Continue from where you left off. The user has completed the login/authentication.
+Now proceed with the original task:
+
+${originalPrompt}
+`;
 }
 
 function buildBackgroundSection(form: SubstanceForm): string {

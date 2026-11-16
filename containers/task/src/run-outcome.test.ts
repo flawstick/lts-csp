@@ -76,6 +76,53 @@ describe("classifyRunOutcome", () => {
     expect(outcome.success).toBe(false);
   });
 
+  it("flags a prepare-only run that stopped at the contact step for a filing contact", () => {
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output:
+        "**REQUIRES_ATTENTION: NEEDS_FILING_CONTACT:** All sections are complete. I stopped on the contact step; the contact fields are pre-filled and were left untouched.",
+      // Browser Use may judge a deliberate stop as successful.
+      isTaskSuccessful: true,
+    });
+
+    expect(outcome).toMatchObject({
+      needsFilingContact: true,
+      needsAttention: true,
+      prepareOnlyReady: false,
+      prepareOnlyLikelySubmitted: false,
+    });
+  });
+
+  it("does not flag a filing-contact stop once the run reached the review page", () => {
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output: `${readyOutput}\nThe NEEDS_FILING_CONTACT step was completed by a person.`,
+      isTaskSuccessful: true,
+    });
+
+    expect(outcome.needsFilingContact).toBe(false);
+    expect(outcome.needsAttention).toBe(false);
+    expect(getTaxReturnStatusForOutcome("prepare_only", outcome)).toBe(
+      "review_required",
+    );
+  });
+
+  it("never treats a likely submission as a filing-contact stop", () => {
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output:
+        "REQUIRES_ATTENTION: NEEDS_FILING_CONTACT: the return was submitted successfully.",
+      isTaskSuccessful: true,
+    });
+
+    expect(outcome.prepareOnlyLikelySubmitted).toBe(true);
+    expect(outcome.needsFilingContact).toBe(false);
+    expect(outcome.needsAttention).toBe(false);
+  });
+
   it("pauses when an unsuccessful run reports a login problem", () => {
     expect(
       classifyRunOutcome({
