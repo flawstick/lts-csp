@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildSubmissionSignoffRevocation } from "@repo/database/return-readiness";
 import { getFilingStartBlocker, getPossibleFilingEvidence } from "./filing-start-guard";
 
 const guernseyReturn = {
@@ -194,6 +195,48 @@ describe("no resubmission of a possibly filed return", () => {
     expect(
       getPossibleFilingEvidence({
         metadata: { filedReturnPdf: { status: "missing", receiptGate: null } },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("getFilingStartBlocker after signed-off data changes", () => {
+  const signedOff = {
+    ...guernseyReturn,
+    status: "review_required",
+    readyForSubmissionAt: new Date("2026-11-05T09:00:00Z"),
+    readyForSubmissionBy: "signatory-1",
+  };
+  const edited = {
+    ...signedOff,
+    ...buildSubmissionSignoffRevocation({
+      taxReturn: signedOff,
+      changedFields: ["adequacyExpenditureDetails"],
+      actor: { source: "web" },
+      now: new Date("2026-11-12T14:00:00Z"),
+    })!,
+  };
+
+  it("blocks final submission until the signatory approves the changed data", () => {
+    expect(
+      getFilingStartBlocker({
+        taxReturn: edited,
+        submissionMode: "submit_and_capture_pdf",
+      }),
+    ).toContain("Edits made after signoff require a new signoff");
+  });
+
+  it("still lets LTS prepare a draft without the fresh signoff", () => {
+    expect(
+      getFilingStartBlocker({ taxReturn: edited, submissionMode: "prepare_only" }),
+    ).toBeNull();
+  });
+
+  it("allows final submission once the signatory approves again", () => {
+    expect(
+      getFilingStartBlocker({
+        taxReturn: { ...edited, readyForSubmissionAt: new Date("2026-11-16T10:00:00Z") },
+        submissionMode: "submit_and_capture_pdf",
       }),
     ).toBeNull();
   });

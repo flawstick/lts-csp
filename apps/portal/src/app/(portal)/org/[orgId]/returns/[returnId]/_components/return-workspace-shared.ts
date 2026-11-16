@@ -7,6 +7,7 @@ import {
 } from "@/lib/schemas/substance-form";
 import type { FORM_SECTIONS } from "@/lib/schemas/substance-form";
 import type { RouterOutputs } from "@/trpc/react";
+import { MANAGER_SIGNOFF_REQUIRED_MESSAGE } from "@repo/database/return-readiness";
 import {
   GUERNSEY_OPERATING_EXPENDITURE_FIELD,
   isGuernseyOperatingExpenditureRequired,
@@ -279,4 +280,43 @@ export function normalizeRelevantActivity(
     return value as SubstanceFormData["relevantActivity"];
   }
   return undefined;
+}
+
+/**
+ * Plain-language list of the form fields an edit changed, for telling a
+ * signatory what they are re-approving.
+ */
+export function describeChangedFields(fields: string[], limit = 4): string {
+  const labels = [
+    ...new Set(fields.map((field) => FIELD_LABELS[field] ?? field)),
+  ];
+  if (labels.length <= limit) return labels.join(", ");
+  const rest = labels.length - limit;
+  return `${labels.slice(0, limit).join(", ")} and ${rest} more`;
+}
+
+/**
+ * Why an admin or authorised signatory cannot yet submit a return for filing
+ * from the return workspace, or null when they can. Mirrors the server check
+ * in markReadyForSubmission so the button never looks available but fails,
+ * or looks blocked without saying why.
+ */
+export function getApprovalBlocker(input: {
+  isFormComplete: boolean;
+  isManagerSignedOff: boolean;
+  requiresFinancialStatements: boolean;
+  hasFinancialStatements: boolean;
+  pendingGbpConversionMessage?: string | null;
+}): string | null {
+  if (!input.isFormComplete) {
+    return "Complete every required field in the substance form first.";
+  }
+  if (!input.isManagerSignedOff) return MANAGER_SIGNOFF_REQUIRED_MESSAGE;
+  if (input.requiresFinancialStatements && !input.hasFinancialStatements) {
+    return "Attach the signed financial statements before marking this Certificate 3 ready.";
+  }
+  if (input.requiresFinancialStatements && input.pendingGbpConversionMessage) {
+    return input.pendingGbpConversionMessage;
+  }
+  return null;
 }

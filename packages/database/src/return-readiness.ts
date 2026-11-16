@@ -259,6 +259,70 @@ export function buildSubmissionSignoffRevocation(input: {
   };
 }
 
+export type SubmissionSignoffRevocation = {
+  at: string | null;
+  source: string | null;
+  changedFields: string[];
+  previousSignoffAt: string | null;
+};
+
+/**
+ * The record left on a return when edits revoked an earlier client signoff,
+ * but only while that is still the current state: no new signoff has been
+ * given and the return has not been filed. Used to show the signatory that
+ * the return needs re-approval and which data changed.
+ */
+export function getPendingReapproval(input: {
+  status?: string | null;
+  readyForSubmissionAt?: Date | string | null;
+  metadata?: unknown;
+}): SubmissionSignoffRevocation | null {
+  if (input.readyForSubmissionAt || input.status === "completed") return null;
+  if (!isRecord(input.metadata)) return null;
+  const value = input.metadata[SIGNOFF_REVOCATION_METADATA_KEY];
+  if (!isRecord(value)) return null;
+
+  const str = (key: string) =>
+    typeof value[key] === "string" ? (value[key] as string) : null;
+
+  return {
+    at: str("at"),
+    source: str("source"),
+    changedFields: Array.isArray(value.changedFields)
+      ? value.changedFields.filter(
+          (field): field is string => typeof field === "string",
+        )
+      : [],
+    previousSignoffAt: str("previousSignoffAt"),
+  };
+}
+
+function toTimestamp(value: Date | string | null | undefined) {
+  if (!value) return null;
+  const time = (value instanceof Date ? value : new Date(value)).getTime();
+  return Number.isNaN(time) ? null : time;
+}
+
+export const STALE_APPROVAL_MESSAGE =
+  "This return changed after you opened it. Review the latest figures, then submit it for filing again.";
+
+/**
+ * True when the signatory approved what they saw, but the form was edited
+ * after it was loaded. The approval must then be refused, so a signoff only
+ * ever covers data the signatory has seen. `seenLastEditedAt` undefined
+ * means the caller did not report a version, which is not checked.
+ */
+export function isApprovalOfStaleForm(input: {
+  seenLastEditedAt: Date | string | null | undefined;
+  currentLastEditedAt: Date | string | null | undefined;
+}) {
+  if (input.seenLastEditedAt === undefined) return false;
+  return (
+    toTimestamp(input.seenLastEditedAt) !==
+    toTimestamp(input.currentLastEditedAt)
+  );
+}
+
 // ============================================================================
 // Financial statement currency
 // ============================================================================

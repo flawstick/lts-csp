@@ -6,9 +6,11 @@ import {
   getChangedFormFields,
   getFilingApprovalCapacity,
   getPendingGbpConversionMessage,
+  getPendingReapproval,
   getReturnDisplayStatus,
   getReturnReadinessState,
   hasManagerSignoff,
+  isApprovalOfStaleForm,
   isPendingGbpConversion,
   normalizeCurrencyCode,
   requiresManagerSignoff,
@@ -380,5 +382,125 @@ describe("return display status", () => {
     expect(getReturnDisplayStatus({ status: "failed", readiness: "signed_off" })).toBe(
       "failed",
     );
+  });
+});
+
+describe("re-approval after signed-off data changes", () => {
+  const signedOff = {
+    status: "review_required",
+    readyForSubmissionAt: new Date("2026-11-05T09:00:00Z"),
+    readyForSubmissionBy: "signatory-1",
+    metadata: withSubmissionSignoffMetadata(null, {
+      at: new Date("2026-11-05T09:00:00Z"),
+      accountId: "signatory-1",
+      capacity: "admin",
+    }),
+  };
+
+  function revokeForEdit() {
+    const revocation = buildSubmissionSignoffRevocation({
+      taxReturn: signedOff,
+      changedFields: ["adequacyExpenditureDetails", "hasAdequateEmployees"],
+      actor: { source: "web" },
+      now: new Date("2026-11-12T14:00:00Z"),
+    });
+    expect(revocation).not.toBeNull();
+    return { ...signedOff, ...revocation! };
+  }
+
+  it("moves an edited, signed-off return back to awaiting signoff and says what changed", () => {
+    const edited = revokeForEdit();
+
+    expect(
+      getReturnReadinessState({
+        status: edited.status,
+        readyForSubmissionAt: edited.readyForSubmissionAt,
+        isFormComplete: true,
+        requiresManagerSignoff: true,
+        hasManagerSignoff: true,
+      }),
+    ).toBe("awaiting_signoff");
+
+    expect(getPendingReapproval(edited)).toEqual({
+      at: "2026-11-12T14:00:00.000Z",
+      source: "web",
+      changedFields: ["adequacyExpenditureDetails", "hasAdequateEmployees"],
+      previousSignoffAt: "2026-11-05T09:00:00.000Z",
+    });
+  });
+
+  it("clears the re-approval notice once the signatory approves again", () => {
+    const edited = revokeForEdit();
+    const reapprovedAt = new Date("2026-11-16T10:00:00Z");
+    const reapproved = {
+      ...edited,
+      readyForSubmissionAt: reapprovedAt,
+      metadata: withSubmissionSignoffMetadata(edited.metadata, {
+        at: reapprovedAt,
+        accountId: "signatory-1",
+        capacity: "admin",
+      }),
+    };
+
+    expect(getPendingReapproval(reapproved)).toBeNull();
+    expect(
+      getReturnReadinessState({
+        status: reapproved.status,
+        readyForSubmissionAt: reapproved.readyForSubmissionAt,
+        isFormComplete: true,
+        requiresManagerSignoff: true,
+        hasManagerSignoff: true,
+      }),
+    ).toBe("signed_off");
+  });
+
+  it("does not ask for re-approval of a completed return or one never signed off", () => {
+    expect(getPendingReapproval({ ...revokeForEdit(), status: "completed" })).toBeNull();
+    expect(
+      getPendingReapproval({ status: "pending", readyForSubmissionAt: null, metadata: {} }),
+    ).toBeNull();
+    expect(
+      getPendingReapproval({ status: "pending", readyForSubmissionAt: null, metadata: null }),
+    ).toBeNull();
+  });
+});
+
+describe("isApprovalOfStaleForm", () => {
+  const seen = "2026-11-12T14:00:00.123Z";
+
+  it("accepts an approval of the form version that is still current", () => {
+    expect(
+      isApprovalOfStaleForm({
+        seenLastEditedAt: seen,
+        currentLastEditedAt: new Date(seen),
+      }),
+    ).toBe(false);
+    expect(
+      isApprovalOfStaleForm({ seenLastEditedAt: null, currentLastEditedAt: null }),
+    ).toBe(false);
+  });
+
+  it("refuses an approval when the form was edited after it was loaded", () => {
+    expect(
+      isApprovalOfStaleForm({
+        seenLastEditedAt: seen,
+        currentLastEditedAt: new Date("2026-11-16T09:30:00Z"),
+      }),
+    ).toBe(true);
+    expect(
+      isApprovalOfStaleForm({
+        seenLastEditedAt: null,
+        currentLastEditedAt: new Date("2026-11-16T09:30:00Z"),
+      }),
+    ).toBe(true);
+  });
+
+  it("does not check callers that report no version", () => {
+    expect(
+      isApprovalOfStaleForm({
+        seenLastEditedAt: undefined,
+        currentLastEditedAt: new Date(),
+      }),
+    ).toBe(false);
   });
 });
