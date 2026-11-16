@@ -9,6 +9,7 @@ type FilingStartTaxReturn = {
   status: string;
   returnType: string | null;
   metadata?: unknown;
+  files?: unknown;
   readyForSubmissionAt?: Date | string | null;
   jurisdiction?: { code: string } | null;
   substanceForm?: {
@@ -19,6 +20,40 @@ type FilingStartTaxReturn = {
     adequacyExpenditureDetails?: string | null;
   } | null;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Evidence that an earlier run may already have filed this return: a saved
+ * portal receipt, or a worker receipt gate (a run reported or produced a
+ * submission without the return being completed). Submitting again could
+ * file twice, so staff must check the portal and recover the receipt instead.
+ */
+export function getPossibleFilingEvidence(taxReturn: {
+  files?: unknown;
+  metadata?: unknown;
+}): string | null {
+  const files = Array.isArray(taxReturn.files) ? taxReturn.files : [];
+  if (
+    files.some(
+      (file) => isRecord(file) && file.role === "filed_return_pdf",
+    )
+  ) {
+    return "filed_return_pdf_attached";
+  }
+  const capture = isRecord(taxReturn.metadata)
+    ? taxReturn.metadata.filedReturnPdf
+    : undefined;
+  if (isRecord(capture)) {
+    if (capture.status === "uploaded") return "receipt_captured";
+    if (typeof capture.receiptGate === "string" && capture.receiptGate) {
+      return capture.receiptGate;
+    }
+  }
+  return null;
+}
 
 /**
  * Reason a browser filing run must not start, or null when it may.
@@ -43,6 +78,11 @@ export function getFilingStartBlocker(input: {
 
   if (taxReturn.status === "completed") {
     return "This return is already completed in the Guernsey Tax Portal.";
+  }
+
+  const filingEvidence = getPossibleFilingEvidence(taxReturn);
+  if (filingEvidence) {
+    return `An earlier run may already have filed this return (${filingEvidence}). Check the Guernsey Tax Portal and recover the filed-return PDF instead of submitting again.`;
   }
 
   // In-scope-only requirements are checked against the current form data, so

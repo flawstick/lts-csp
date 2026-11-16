@@ -37,6 +37,18 @@ export function getBrowserJobStaleReason(
   // Queue age does not indicate worker failure: all workers may be busy.
   // Keep unclaimed jobs available until a worker claims or a user cancels them.
   if (job.status === "starting") {
+    const resultData = getResultDataRecord(job.resultData);
+    // V4 stages uploads before creating a run; a live worker preparing files
+    // has not yet started the browser dispatch timeout.
+    if (
+      resultData?.browserUseApiVersion === 4 &&
+      resultData.browserUseStartupPhase === "preparing_files"
+    ) {
+      const heartbeat = getResultDataNumber(job.resultData, "lastHeartbeatAt");
+      if (heartbeat && now - heartbeat <= BROWSER_HEARTBEAT_STALE_MS)
+        return null;
+      if (heartbeat) return "Browser worker heartbeat lost";
+    }
     const startupStartedAt =
       getResultDataNumber(job.resultData, "startupStartedAt") ??
       (job.startedAt ? new Date(job.startedAt).getTime() : undefined) ??

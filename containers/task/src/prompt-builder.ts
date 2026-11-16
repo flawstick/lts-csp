@@ -226,7 +226,7 @@ If the redirected form already contains completed or pre-filled answers, still o
     : 'If the portal lands on a page ending in **reviewAndSubmit/summary**, treat it as a saved draft summary. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action from that page. Use the summary page\'s **Change** or **Edit** links to re-enter the filing sections and continue the return.'
 }
 
-**TAB / BLANK PAGE RECOVERY:** Use Browser Use native tools only: **switch**, **close**, **navigate**, **go_back**, **click**, **input**, **upload_file**, **evaluate**, **screenshot**. Do **NOT** use Python or browser-wrapper tab recovery helpers such as **get_tabs**. If a bad click opens a stray tab or leaves you on **about:blank**, use **switch** or **close** to get back to the main Guernsey portal tab. If that fails quickly, use **navigate** to return to the filing URL and continue.
+**TAB / BLANK PAGE RECOVERY:** Use the browser controls exposed by this session's current tool schema and their documented signatures. Do not assume legacy V3 tool names or invoke unavailable helpers such as **get_tabs**. If a bad click opens a stray tab or leaves you on **about:blank**, switch back to the main Guernsey portal tab or close the stray tab using the available controls. If that fails quickly, return directly to the filing URL and continue.
 
 ## INFERENCE RULES FOR GUERNSEY FILING
 - You may make only LOW-RISK inferences from the saved form, attached documents, and text already visible inside the current return.
@@ -244,7 +244,7 @@ ${
 
 ## FILING CONTACT INFORMATION
 - The contact email is requested **at the end of the filing flow** (on the final contact / declaration step before the review and submit page), not on the earlier substance sections. Do not enter it into earlier fields, and do not go looking for it before you reach that step — keep going through the form and fill it in when that final contact field appears.
-- The filing contact is the filing agent (LTS Tax), NOT a director, authorised signatory or other client representative.
+- The filing contact is the organisation's configured filing contact given below. Use exactly these values; do NOT substitute a director, authorised signatory, the logged-in user, or any other person shown on the portal.
 - If the portal asks for a contact name, use: ${contactName ?? "[MISSING - STOP if required]"}
 - When the portal asks for a contact email at the end of the form, use: ${contactEmail ?? "[MISSING - STOP if required]"}
 - If the portal asks for a contact telephone number, use: ${contactPhone ?? "[MISSING - STOP if required]"}

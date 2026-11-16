@@ -1,3 +1,4 @@
+import { describe, expect, it } from "vitest";
 import { buildSubstanceFormPrompt } from "./prompt-builder";
 
 const baseTaxReturn = {
@@ -109,7 +110,7 @@ describe("buildSubstanceFormPrompt", () => {
     expect(submitPrompt).not.toContain("Do not skip fields merely because they are already populated");
   });
 
-  it("files with the LTS contact and replaces pre-filled signatory details", () => {
+  it("files with the organisation's configured contact and replaces pre-filled details", () => {
     const prompt = buildSubstanceFormPrompt({
       taxReturn: baseTaxReturn,
       substanceForm: {
@@ -118,15 +119,18 @@ describe("buildSubstanceFormPrompt", () => {
         relevantActivity: "None of the above",
       } as any,
       portalUrl: "https://my.gov.gg",
-      contactName: "Jonny Woodgate",
-      contactEmail: "taxenquiries@lts-tax.com",
-      contactPhone: "+44 1481 755862",
+      contactName: "NSM Filings Team",
+      contactEmail: "filings@nsm.example",
+      contactPhone: null,
     });
 
-    expect(prompt).toContain("use: Jonny Woodgate");
-    expect(prompt).toContain("use: taxenquiries@lts-tax.com");
+    expect(prompt).toContain("use: NSM Filings Team");
+    expect(prompt).toContain("use: filings@nsm.example");
+    expect(prompt).toContain("telephone number, use: [MISSING - STOP if required]");
     expect(prompt).toContain("REPLACE any pre-filled contact");
-    expect(prompt).toContain("NOT a director, authorised signatory");
+    expect(prompt).toContain("organisation's configured filing contact");
+    expect(prompt).not.toContain("filing agent (LTS Tax)");
+    expect(prompt).not.toContain("lts-tax.com");
   });
 
   it("does not let the agent infer Guernsey incorporation", () => {

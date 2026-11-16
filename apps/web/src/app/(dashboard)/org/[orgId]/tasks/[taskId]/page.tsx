@@ -666,7 +666,7 @@ export default function TaskDetailPage() {
 
   const handleStart = ({
     overrideSaved = false,
-    submissionMode = "submit_and_capture_pdf",
+    submissionMode = "prepare_only",
   }: {
     overrideSaved?: boolean;
     submissionMode?: SubmissionMode;

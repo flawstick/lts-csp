@@ -32,6 +32,12 @@ import { createGateway } from "@ai-sdk/gateway";
 import { generateObject } from "ai";
 import { trackServer } from "@/lib/analytics";
 import * as XLSX from "xlsx";
+import {
+  classifyExtractionSource,
+  decodeCsv,
+  normalizeExtractedEmployees,
+  shouldKeepExistingEmployees,
+} from "@repo/database/extraction-sources";
 import { env } from "@/env";
 import {
   substanceFormSchema,
@@ -42,10 +48,7 @@ import {
 } from "@/lib/schemas/substance-form";
 
 const DEFAULT_CERTIFICATE_TYPE = "Certificate 3";
-const EXTRACTION_MODEL_CANDIDATES = [
-  { id: "deepseek/deepseek-v4-flash", textOnly: true },
-  { id: "openai/gpt-5.4", textOnly: false },
-] as const;
+const EXTRACTION_MODEL_ID = "openai/gpt-6.1-sol";
 
 /**
  * Normalise a financial figure extracted from accounts while preserving its sign.
@@ -1271,23 +1274,10 @@ export const substanceFormRouter = createTRPCRouter({
       });
 
       // Build file content for AI
-      const supportedFileTypes = [
-        "application/pdf",
-        "image/png",
-        "image/jpeg",
-        "image/webp",
-        "image/gif",
-      ];
-      const excelTypes = [
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
-        "application/vnd.ms-excel", // .xls
-      ];
-
       type FileContent = { type: "file"; data: string; mediaType: string };
       type TextContent = { type: "text"; text: string };
       const fileContents: FileContent[] = [];
       const textContents: TextContent[] = [];
-      let hasTextForEveryDocument = true;
       const taxReturnFiles = Array.isArray(taxReturn.files)
         ? taxReturn.files
         : [];
@@ -1304,97 +1294,90 @@ export const substanceFormRouter = createTRPCRouter({
         }
       });
 
-      for (const url of input.fileUrls) {
+      for (const [index, url] of input.fileUrls.entries()) {
+        const displayName = sourceFileNames[index] ?? `File ${index + 1}`;
         const response = await fetch(url);
-        const mediaType =
-          response.headers.get("content-type") ?? "application/pdf";
-        const buffer = await response.arrayBuffer();
-
-        // Handle Excel files - convert to CSV
-        if (
-          excelTypes.some(
-            (t) =>
-              mediaType.includes(t) ||
-              mediaType.includes("spreadsheet") ||
-              mediaType.includes("excel"),
-          )
-        ) {
-          console.log(
-            `[AI Extraction] Converting Excel file to CSV: ${mediaType}`,
+        if (!response.ok) {
+          throw new Error(
+            `Unable to read source file "${displayName}" (${response.status}). Extraction stopped to avoid incomplete results.`,
           );
+        }
+        const buffer = await response.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        const source = classifyExtractionSource({
+          contentType: response.headers.get("content-type"),
+          fileName: displayName,
+          urlPath: new URL(url).pathname,
+          bytes,
+        });
+        const mediaType = source.mediaType;
+
+        if (source.kind === "csv") {
+          textContents.push({
+            type: "text",
+            text: `=== FILE: ${displayName} (CSV) ===\n${decodeCsv(bytes)}`,
+          });
+          continue;
+        }
+
+        if (source.kind === "excel") {
           try {
             const workbook = XLSX.read(buffer, { type: "array" });
-            const csvParts: string[] = [];
-
-            // Convert each sheet to CSV
+            const sheets: string[] = [];
             for (const sheetName of workbook.SheetNames) {
               const sheet = workbook.Sheets[sheetName];
               if (sheet) {
-                const csv = XLSX.utils.sheet_to_csv(sheet);
-                csvParts.push(`=== Sheet: ${sheetName} ===\n${csv}`);
+                // Keep blank rows out but every worksheet in, so employee
+                // schedules on later tabs are not lost.
+                const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+                sheets.push(`--- Sheet: ${sheetName} ---\n${csv}`);
               }
             }
-
-            const fullCsv = csvParts.join("\n\n");
+            const fullCsv = sheets.join("\n\n");
             console.log(
               `[AI Extraction] Converted Excel to CSV: ${fullCsv.length} chars, ${workbook.SheetNames.length} sheets`,
             );
             textContents.push({
               type: "text" as const,
-              text: `[Excel File Content]\n${fullCsv}`,
+              text: `=== FILE: ${displayName} (Excel) ===\n${fullCsv}`,
             });
           } catch (err) {
-            hasTextForEveryDocument = false;
-            console.error(
-              `[AI Extraction] Failed to convert Excel to CSV:`,
-              err,
+            console.error(`[AI Extraction] Failed to convert Excel to CSV:`, err);
+            throw new Error(
+              `Unable to read spreadsheet "${displayName}". Extraction stopped to avoid incomplete results.`,
             );
           }
           continue;
         }
 
-        // Handle supported file types (PDF, images)
-        if (
-          supportedFileTypes.some(
-            (t) => mediaType.startsWith(t.split("/")[0]!) || mediaType === t,
-          )
-        ) {
-          if (
-            mediaType.includes("application/pdf") ||
-            url.toLowerCase().endsWith(".pdf")
-          ) {
+        if (source.kind === "pdf" || source.kind === "image") {
+          if (source.kind === "pdf") {
+            // OCR/markdown is supplementary: the native PDF is always sent too.
             const firecrawlMarkdown = await scrapePdfMarkdownWithFirecrawl(url);
             if (firecrawlMarkdown) {
               textContents.push({
                 type: "text" as const,
-                text: `[Firecrawl PDF Parse]\n${firecrawlMarkdown}`,
+                text: `=== FILE: ${displayName} (PDF text/OCR) ===\n${firecrawlMarkdown}`,
               });
-            } else {
-              hasTextForEveryDocument = false;
             }
-          } else {
-            // DeepSeek V4 Flash is text-only; images require the native-file
-            // fallback unless an OCR representation is added in the future.
-            hasTextForEveryDocument = false;
           }
 
-          const base64 = Buffer.from(buffer).toString("base64");
           fileContents.push({
             type: "file" as const,
-            data: base64,
+            data: Buffer.from(buffer).toString("base64"),
             mediaType,
           });
           continue;
         }
 
-        console.log(
-          `[AI Extraction] Skipping unsupported file type: ${mediaType}`,
+        throw new Error(
+          `Unsupported source file "${displayName}" (${mediaType}). Supported: PDF, images, Excel (.xlsx/.xls) and CSV. Extraction stopped to avoid incomplete results.`,
         );
       }
 
       if (fileContents.length === 0 && textContents.length === 0) {
         throw new Error(
-          "No supported files to extract from. Supported: PDF, images, Excel (.xlsx/.xls).",
+          "No supported files to extract from. Supported: PDF, images, Excel (.xlsx/.xls) and CSV.",
         );
       }
 
@@ -1469,8 +1452,7 @@ export const substanceFormRouter = createTRPCRouter({
           ? buildGuernseyCertificateTwoDefaults(taxReturn.taxYear)
           : null;
 
-      // Prefer DeepSeek V4 Flash for parsed text, with GPT-5.4 retaining the
-      // native PDF/image path when OCR is unavailable.
+      // Always send native PDFs/images as well as parsed text, including when OCR succeeds.
       const gateway = createGateway({
         apiKey,
         baseURL: "https://ai-gateway.vercel.sh/v3/ai",
@@ -1493,6 +1475,14 @@ export const substanceFormRouter = createTRPCRouter({
       const prompt = `You are an expert at extracting information from financial and corporate documents for Guernsey ${certificateResolution.certificateType} Economic Substance Register reporting.
 
 Analyze the provided document(s) and extract all relevant information to fill out a Guernsey Economic Substance Register form.
+
+EMPLOYEE EXTRACTION:
+- Inspect every source file, worksheet, PDF table and scanned page for employees, staff, personnel, chargeable units, hours and FTE schedules. Do not stop after finding financial figures.
+- Extract every explicitly identified employee row, including partial rows. A missing qualification, units or FTE column must not cause the employee to be omitted; leave only that field null.
+- Keep unitsOnCompany and totalUnits in the same units. Calculate fteFraction only when both are provided and totalUnits is greater than zero; otherwise preserve an explicitly stated FTE or leave it null.
+- Do not infer qualifiedForReporting from a job title. Use an explicit qualification/reporting indication; otherwise leave it null. Do not assume directors or service-provider contacts are employees.
+- Extract explicitly stated totalFte and totalQualifiedFte even when no individual names are given. Never invent employee names to represent an aggregate headcount.
+- Missing employee information is unknown, not zero: return null for absent employees/totals. Use [] or 0 only when the documents explicitly state there are no employees or zero FTE.
 
 ${existingContextText ? `=== EXISTING FORM CONTEXT ===\n${existingContextText}\n` : ""}
 
@@ -1597,7 +1587,7 @@ IMPORTANT RULES:
 - allBoardMeetingsInGuernsey, totalBoardMeetings, boardMeetingsInGuernsey are helpful but not required. Extract them when the documents state them, otherwise leave them empty.
 - activityGrossIncome should be the turnover or gross income from the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
 - adequacyExpenditureDetails should be the operating expenditure relating to the relevant activity when the documents clearly state it. Leave it empty if it is not identifiable.
-- If the entity has no relevant activity ("None of the above"), leave sections 6B, 7, 8, 9, and 10 empty.
+- If the entity has no relevant activity ("None of the above"), leave sections 6B, 7, 9, and 10 empty. Still extract employee data explicitly present in the source documents; do not discard it because of the relevant activity selection.
 ${
   certificateTwoDefaults
     ? `
@@ -1623,67 +1613,17 @@ IMPORTANT CERTIFICATE 2 RULES:
         ...fileContents,
         ...textContents,
       ];
-      const textOnlyMessageContent: TextContent[] = [
-        { type: "text" as const, text: prompt },
-        ...textContents,
-      ];
-      let modelIndex = hasTextForEveryDocument ? 0 : 1;
-      let usedModelId = EXTRACTION_MODEL_CANDIDATES[modelIndex]!.id;
-      let result;
-
-      if (!hasTextForEveryDocument) {
-        console.warn(
-          "[AI Extraction] Skipping text-only DeepSeek V4 because at least one source file has no parsed text; using the native-file fallback",
-        );
-      }
-
-      for (;;) {
-        const candidate = EXTRACTION_MODEL_CANDIDATES[modelIndex]!;
-        try {
-          result = await generateObject({
-            model: gateway(candidate.id),
-            providerOptions: {
-              gateway: {
-                sort: "tps",
-              },
-            },
-            output: "object",
-            schema: aiExtractionSchema,
-            schemaName: "GuernseySubstanceForm",
-            schemaDescription:
-              "Guernsey Economic Substance Register form data extracted from corporate documents",
-            messages: [
-              {
-                role: "user",
-                content: candidate.textOnly
-                  ? textOnlyMessageContent
-                  : nativeMessageContent,
-              },
-            ],
-          });
-          usedModelId = candidate.id;
-          break;
-        } catch (error) {
-          if (
-            candidate.textOnly &&
-            modelIndex < EXTRACTION_MODEL_CANDIDATES.length - 1
-          ) {
-            console.warn(
-              `[AI Extraction] Model ${candidate.id} failed; falling back to ${EXTRACTION_MODEL_CANDIDATES[modelIndex + 1]!.id}`,
-              error,
-            );
-            modelIndex += 1;
-            continue;
-          }
-
-          console.error("[AI Extraction] generateObject failed:", error);
-          console.error(
-            "[AI Extraction] Error details:",
-            JSON.stringify(error, Object.getOwnPropertyNames(error), 2),
-          );
-          throw error;
-        }
-      }
+      const usedModelId = EXTRACTION_MODEL_ID;
+      const result = await generateObject({
+        model: gateway(usedModelId),
+        providerOptions: { gateway: { sort: "tps" } },
+        output: "object",
+        schema: aiExtractionSchema,
+        schemaName: "GuernseySubstanceForm",
+        schemaDescription:
+          "Guernsey Economic Substance Register form data extracted from corporate documents",
+        messages: [{ role: "user", content: nativeMessageContent }],
+      });
 
       console.log(
         "[AI Extraction] Success! Extracted fields:",
@@ -1694,6 +1634,27 @@ IMPORTANT CERTIFICATE 2 RULES:
       ) as Partial<SubstanceFormData>;
       // A manager signoff is an approval a person records, never an extracted value.
       stripManagerSignoffFields(extractedData);
+
+      // Employees: keep partial rows, derive FTE only from explicit units, and
+      // never let an empty extraction wipe employees already saved.
+      const employeeResult = normalizeExtractedEmployees({
+        employees: extractedData.employees,
+        totalFte: extractedData.totalFte,
+        totalQualifiedFte: extractedData.totalQualifiedFte,
+      });
+      const employeeWarnings = [...employeeResult.warnings];
+      if (shouldKeepExistingEmployees(employeeResult.employees, form.employees)) {
+        delete extractedData.employees;
+        employeeWarnings.push(
+          "No employee rows were found in the documents; the saved employees were kept.",
+        );
+      } else if (employeeResult.employees !== undefined) {
+        extractedData.employees = employeeResult.employees;
+      }
+      if (employeeResult.totalFte !== undefined)
+        extractedData.totalFte = employeeResult.totalFte;
+      if (employeeResult.totalQualifiedFte !== undefined)
+        extractedData.totalQualifiedFte = employeeResult.totalQualifiedFte;
 
       extractedData.certificateType = certificateResolution.certificateType;
       extractedData.taxReferenceNumber = normalizeTaxReferenceNumber({
@@ -1881,6 +1842,7 @@ IMPORTANT CERTIFICATE 2 RULES:
             .filter((issue) => issue.severity === "warning")
             .map((issue) => issue.message),
           ...(financialFigures?.warning ? [financialFigures.warning] : []),
+          ...employeeWarnings,
         ],
       };
     }),

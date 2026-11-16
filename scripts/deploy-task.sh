@@ -91,7 +91,8 @@ jq \
   --arg databaseUrl "${DATABASE_URL:-}" \
   --arg redisUrl "${REDIS_URL:-}" \
   --arg browserUseApiKey "${BROWSER_USE_API_KEY:-}" \
-  --arg blobReadWriteToken "${BLOB_READ_WRITE_TOKEN:-}" '
+  --arg blobReadWriteToken "${BLOB_READ_WRITE_TOKEN:-}" \
+  --arg guardExtensionId "${BROWSER_USE_PREPARE_ONLY_GUARD_EXTENSION_ID:-}" '
   def upsert_env($name; $value):
     ((. // []) | map(select(.name != $name))) + [{ name: $name, value: $value }];
   def delete_env($name):
@@ -130,6 +131,10 @@ jq \
                 .environment |= upsert_env($setting.name; $setting.value)
               end
             )
+          # Only set the guard id when supplied; never blank an existing one.
+          | if $guardExtensionId != "" and (any(.secrets[]?; .name == "BROWSER_USE_PREPARE_ONLY_GUARD_EXTENSION_ID") | not) then
+              .environment |= upsert_env("BROWSER_USE_PREPARE_ONLY_GUARD_EXTENSION_ID"; $guardExtensionId)
+            else . end
         )
     ),
     volumes,
@@ -145,6 +150,19 @@ jq \
   }
   | del(.. | nulls)
 ' "$TMP_TASK_DEF" >"$TMP_REGISTER_PAYLOAD"
+
+# The worker refuses prepare_only runs without the guard extension id
+# (containers/task/src/prepare-only-guard.ts). Do not ship a revision that
+# would silently fail every prepare run unless explicitly allowed.
+if ! jq -e 'any(.containerDefinitions[]; any((.environment // [])[], (.secrets // [])[]; .name == "BROWSER_USE_PREPARE_ONLY_GUARD_EXTENSION_ID"))' "$TMP_REGISTER_PAYLOAD" >/dev/null; then
+  echo "Error: BROWSER_USE_PREPARE_ONLY_GUARD_EXTENSION_ID is not set in $ENV_FILE or the current task definition."
+  echo "Upload the guard with: (cd containers/task && bun scripts/upload-prepare-only-guard.ts --upload)"
+  if [[ "${ALLOW_MISSING_PREPARE_ONLY_GUARD:-}" != "1" ]]; then
+    echo "Set ALLOW_MISSING_PREPARE_ONLY_GUARD=1 to deploy anyway (prepare-only runs will be refused)."
+    exit 1
+  fi
+  echo "Continuing because ALLOW_MISSING_PREPARE_ONLY_GUARD=1."
+fi
 
 echo "Registering ECS task definition revision..."
 REGISTER_OUTPUT="$(aws ecs register-task-definition --region "$AWS_REGION" --cli-input-json "file://${TMP_REGISTER_PAYLOAD}")"

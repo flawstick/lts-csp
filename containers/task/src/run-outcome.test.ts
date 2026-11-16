@@ -4,6 +4,7 @@ import {
   classifyRunOutcome,
   getTaxReturnStatusForOutcome,
   isLikelySubmittedOutput,
+  resolveFinalRunStatuses,
   shouldCaptureFiledReturnPdf,
 } from "./run-outcome";
 
@@ -113,5 +114,98 @@ describe("classifyRunOutcome", () => {
     expect(outcome.success).toBe(false);
     expect(getTaxReturnStatusForOutcome("prepare_only", outcome)).toBe("failed");
     expect(shouldCaptureFiledReturnPdf("prepare_only", outcome)).toBe(false);
+  });
+});
+
+describe("receipt-gated completion", () => {
+  const submitted = classifyRunOutcome({
+    submissionMode: "submit_and_capture_pdf",
+    sessionStatus: "idle",
+    output: "Submitted successfully and downloaded the completion PDF.",
+    isTaskSuccessful: true,
+  });
+
+  it("completes a submit run only when the receipt was saved", () => {
+    expect(
+      resolveFinalRunStatuses("submit_and_capture_pdf", submitted, "uploaded"),
+    ).toEqual({
+      taxReturnStatus: "completed",
+      jobStatus: "completed",
+      taskStatus: "completed",
+      receiptGate: null,
+    });
+  });
+
+  it.each(["missing", "failed", "not_attempted"] as const)(
+    "holds a successful submit run for review when the receipt is %s",
+    (receiptStatus) => {
+      expect(
+        resolveFinalRunStatuses("submit_and_capture_pdf", submitted, receiptStatus),
+      ).toMatchObject({
+        taxReturnStatus: "review_required",
+        receiptGate: "receipt_missing",
+      });
+    },
+  );
+
+  it("looks for the receipt even when a submit run failed (Minoru pattern)", () => {
+    // The run errored but its output says the receipt was saved.
+    const failed = classifyRunOutcome({
+      submissionMode: "submit_and_capture_pdf",
+      sessionStatus: "error",
+      output:
+        "Saved the receipt to /workspace/downloads/company-tax-submitted.pdf",
+      isTaskSuccessful: false,
+    });
+    expect(failed.success).toBe(false);
+    expect(failed.likelySubmitted).toBe(true);
+    expect(shouldCaptureFiledReturnPdf("submit_and_capture_pdf", failed)).toBe(
+      true,
+    );
+    // Possibly filed: never "failed", even without a receipt.
+    expect(
+      resolveFinalRunStatuses("submit_and_capture_pdf", failed, "missing"),
+    ).toMatchObject({ taxReturnStatus: "review_required", jobStatus: "failed" });
+    expect(
+      resolveFinalRunStatuses("submit_and_capture_pdf", failed, "uploaded"),
+    ).toMatchObject({ taxReturnStatus: "review_required" });
+  });
+
+  it("holds an unsuccessful run with a new receipt for review instead of failing it", () => {
+    const failed = classifyRunOutcome({
+      submissionMode: "submit_and_capture_pdf",
+      sessionStatus: "error",
+      output: "Something went wrong.",
+      isTaskSuccessful: false,
+    });
+    expect(shouldCaptureFiledReturnPdf("submit_and_capture_pdf", failed)).toBe(
+      true,
+    );
+    expect(
+      resolveFinalRunStatuses("submit_and_capture_pdf", failed, "uploaded"),
+    ).toMatchObject({
+      taxReturnStatus: "review_required",
+      receiptGate: "receipt_from_unsuccessful_run",
+    });
+    expect(
+      resolveFinalRunStatuses("submit_and_capture_pdf", failed, "missing"),
+    ).toMatchObject({ taxReturnStatus: "failed", receiptGate: null });
+  });
+
+  it("keeps prepare-only drafts at review_required without a receipt", () => {
+    const ready = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output: readyOutput,
+      isTaskSuccessful: true,
+    });
+    expect(shouldCaptureFiledReturnPdf("prepare_only", ready)).toBe(false);
+    expect(
+      resolveFinalRunStatuses("prepare_only", ready, "not_attempted"),
+    ).toMatchObject({
+      taxReturnStatus: "review_required",
+      jobStatus: "completed",
+      receiptGate: null,
+    });
   });
 });

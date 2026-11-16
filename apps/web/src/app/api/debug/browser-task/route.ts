@@ -98,7 +98,7 @@ export async function POST(request: Request) {
         taskId: task.id,
         jobNumber: 1,
         status: "queued",
-        aiModel: "bu-max",
+        aiModel: "claude-opus-5-5",
         cloudwatchLogGroup: env.ECS_LOG_GROUP,
         resultData: {
           submissionMode: "prepare_only",

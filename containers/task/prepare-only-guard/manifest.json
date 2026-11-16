@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "LTS Prepare-Only Submission Guard",
+  "version": "1.1.0",
+  "description": "Blocks the Guernsey Revenue Service final-submission request (submitDeclaration) at the network layer and final-submission controls in the page during prepare-only automation runs.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.gov.gg/*"
+      ],
+      "js": [
+        "guard-core.js",
+        "guard-isolated.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*.gov.gg/*"
+      ],
+      "js": [
+        "guard-core.js",
+        "guard-main.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ],
+  "permissions": [
+    "declarativeNetRequest"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "lts_prepare_only_block_submit",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  }
+}
