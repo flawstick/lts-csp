@@ -11,6 +11,27 @@ const baseTaxReturn = {
 } as any;
 
 describe("buildSubstanceFormPrompt", () => {
+  it.each(["prepare_only", "submit_and_capture_pdf"] as const)(
+    "formats Cauvery's small positive totals before the agent sees them (%s)",
+    (submissionMode) => {
+      const prompt = buildSubstanceFormPrompt({
+        taxReturn: baseTaxReturn,
+        substanceForm: {
+          certificateType: "Certificate 3",
+          relevantActivity: "Financing and leasing",
+          totalFte: 0.0013,
+          totalQualifiedFte: 0.0013,
+          employees: [{ name: "Source employee", fteFraction: 0.0013 }],
+        } as any,
+        portalUrl: "https://my.gov.gg",
+        submissionMode,
+      });
+      const totals = prompt.split("\n").filter((line) => /^- Total (Qualified )?FTE:/.test(line));
+      expect(totals).toEqual(['- Total FTE: "0.01"', '- Total Qualified FTE: "0.01"']);
+      expect(prompt.includes("FTE=0.0013")).toBe(true);
+      expect(prompt.includes("Do not round these totals to whole employees")).toBe(true);
+    },
+  );
   it("builds a simplified certificate 3 prompt without deprecated declaration fields", () => {
     const prompt = buildSubstanceFormPrompt({
       taxReturn: baseTaxReturn,

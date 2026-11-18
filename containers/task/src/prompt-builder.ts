@@ -10,6 +10,7 @@ import {
 } from "@repo/database";
 
 import { NEEDS_FILING_CONTACT_MARKER } from "./run-outcome";
+import { formatPortalFte } from "./portal-fte";
 
 interface Employee {
   name?: string;
@@ -633,8 +634,13 @@ function buildEmployeesSection(form: SubstanceForm): string {
 
   return `
 ## SECTION 8: EMPLOYEES (FTE CALCULATION)
-${field("Total FTE", form.totalFte?.toString())}
-${field("Total Qualified FTE", form.totalQualifiedFte?.toString())}
+${field("Total FTE", formatPortalFte(form.totalFte))}
+${field("Total Qualified FTE", formatPortalFte(form.totalQualifiedFte))}
+
+**GRS FTE ENTRY — use the totals above exactly:**
+- These aggregate totals are already formatted to the portal's two decimal places. A positive total that would round to zero is entered as 0.01; a genuine zero stays 0.00.
+- Do not round these totals to whole employees or recalculate them from the employee detail rows below. The detail rows retain source precision for reference only.
+- After saving, check that the portal summary shows these values for both employee totals. If a positive total displays as 0, correct it before continuing. If the portal will not accept the supplied value, STOP and report REQUIRES_ATTENTION rather than substituting zero.
 
 ### Employee Details:
 ${employeeList}
