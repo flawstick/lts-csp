@@ -48,6 +48,13 @@ import {
 } from "@/lib/browser-use-control";
 import { getBrowserJobStaleReason } from "@/lib/browser-job-status";
 import { getFilingStartBlocker } from "@/lib/filing-start-guard";
+import {
+  ACTIVE_JOB_STATUSES,
+  MANUAL_COMPLETION_FROM_STATUSES,
+  planManualCompletion,
+  planManualCompletionRevert,
+} from "@/lib/manual-completion";
+import { requireStaffAccount } from "@/server/api/staff-auth";
 import { triggerTaxSync } from "@/lib/tax-sync-launcher";
 import {
   jerseyCompanyReturnFormSchema,
@@ -252,7 +259,10 @@ async function maybeMarkBrowserJobStale<
       .set({
         status: job.status === "paused" ? "review_required" : "failed",
       })
-      .where(eq(taxReturns.id, ids.taxReturnId));
+      .where(and(
+        eq(taxReturns.id, ids.taxReturnId),
+        sql`${taxReturns.status} <> 'completed'`,
+      ));
   }
 
   return {
@@ -1892,7 +1902,7 @@ export const taxReturnRouter = createTRPCRouter({
         });
       }
 
-      const normalizedJobs = await Promise.all(
+      await Promise.all(
         task.jobs.map((job) =>
           maybeMarkBrowserJobStale(ctx.db, job, {
             taskId: task.id,
@@ -1901,26 +1911,60 @@ export const taxReturnRouter = createTRPCRouter({
         ),
       );
 
-      const activeJob = normalizedJobs.find((job) =>
-        isActiveBrowserJobStatus(job.status),
-      );
-      if (activeJob) {
-        throw new Error("A job is already running for this task");
-      }
+      const taxReturnId = task.taxReturn.id;
+      const newJob = await ctx.db.transaction(async (tx) => {
+        // Serialize enqueueing with staff completion on the same return.
+        const [currentReturn] = await tx
+          .select()
+          .from(taxReturns)
+          .where(eq(taxReturns.id, taxReturnId))
+          .for("update");
+        if (!currentReturn) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        }
+        if (currentReturn.status === "completed") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "This return is already completed.",
+          });
+        }
+        const currentForm = await tx.query.substanceForms.findFirst({
+          where: eq(substanceForms.taxReturnId, taxReturnId),
+        });
+        const currentBlocker = getFilingStartBlocker({
+          taxReturn: {
+            ...currentReturn,
+            jurisdiction: task.taxReturn?.jurisdiction,
+            substanceForm: currentForm,
+          },
+          submissionMode: input.submissionMode,
+        });
+        if (currentBlocker) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: currentBlocker });
+        }
 
-      // Get the next job number
-      const jobNumber =
-        normalizedJobs.reduce(
-          (maxJobNumber, job) => Math.max(maxJobNumber, job.jobNumber),
-          0,
-        ) + 1;
+        const [activeJob] = await tx
+          .select({ id: jobs.id })
+          .from(jobs)
+          .innerJoin(tasks, eq(jobs.taskId, tasks.id))
+          .where(and(
+            eq(tasks.taxReturnId, taxReturnId),
+            inArray(jobs.status, [...ACTIVE_JOB_STATUSES]),
+          ))
+          .limit(1);
+        if (activeJob) {
+          throw new Error("A job is already running for this return");
+        }
 
-      // Create job record
-      const [newJob] = await ctx.db
-        .insert(jobs)
-        .values({
+        const [lastJob] = await tx
+          .select({ jobNumber: jobs.jobNumber })
+          .from(jobs)
+          .where(eq(jobs.taskId, input.taskId))
+          .orderBy(desc(jobs.jobNumber))
+          .limit(1);
+        const [job] = await tx.insert(jobs).values({
           taskId: input.taskId,
-          jobNumber,
+          jobNumber: (lastJob?.jobNumber ?? 0) + 1,
           status: "queued",
           aiModel: "claude-opus-5-5",
           cloudwatchLogGroup: env.ECS_LOG_GROUP,
@@ -1929,18 +1973,15 @@ export const taxReturnRouter = createTRPCRouter({
             overrideSaved: input.overrideSaved,
             startupTimeoutMs: env.BROWSER_STARTUP_TIMEOUT_MS,
           },
-        })
-        .returning();
-
-      if (!newJob) {
-        throw new Error("Failed to create job");
-      }
-
-      // Update task status
-      await ctx.db
-        .update(tasks)
-        .set({ status: "in_progress" })
-        .where(eq(tasks.id, input.taskId));
+        }).returning();
+        if (!job) {
+          throw new Error("Failed to create job");
+        }
+        await tx.update(tasks)
+          .set({ status: "in_progress" })
+          .where(eq(tasks.id, input.taskId));
+        return job;
+      });
 
       if (env.BROWSER_TASK_EXECUTION_MODE === "ecs_runtask") {
         try {
@@ -2185,6 +2226,135 @@ export const taxReturnRouter = createTRPCRouter({
         .where(eq(jobs.id, input.jobId));
 
       return { success: true };
+    }),
+
+  // Staff: record that a return was already filed outside LTS, linking an
+  // official filed-return PDF already attached to it. Never files anything.
+  markCompletedWithFiledPdf: publicProcedure
+    .input(
+      z.object({
+        taxReturnId: z.string().uuid(),
+        fileUrl: z.string().url(),
+        expectedStatus: z.enum(MANUAL_COMPLETION_FROM_STATUSES),
+        confirmAlreadyFiled: z.literal(true),
+        note: z.string().trim().max(500).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const staff = await requireStaffAccount();
+
+      return ctx.db.transaction(async (tx) => {
+        const [taxReturn] = await tx
+          .select({
+            id: taxReturns.id,
+            status: taxReturns.status,
+            files: taxReturns.files,
+            metadata: taxReturns.metadata,
+          })
+          .from(taxReturns)
+          .where(eq(taxReturns.id, input.taxReturnId))
+          .for("update");
+
+        if (!taxReturn) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        }
+
+        const [activeJob] = await tx
+          .select({ id: jobs.id })
+          .from(jobs)
+          .innerJoin(tasks, eq(jobs.taskId, tasks.id))
+          .where(
+            and(
+              eq(tasks.taxReturnId, taxReturn.id),
+              inArray(jobs.status, [...ACTIVE_JOB_STATUSES]),
+            ),
+          )
+          .limit(1);
+
+        const plan = planManualCompletion({
+          taxReturn,
+          fileUrl: input.fileUrl,
+          expectedStatus: input.expectedStatus,
+          actorAccountId: staff.id,
+          hasActiveJob: !!activeJob,
+          note: input.note,
+          now: new Date(),
+        });
+        if (!plan.ok) {
+          throw new TRPCError({ code: plan.code, message: plan.message });
+        }
+
+        const [updated] = await tx
+          .update(taxReturns)
+          .set({
+            status: plan.status,
+            files: plan.files as TaxReturnFileRecord[],
+            metadata: plan.metadata,
+            updatedAt: new Date(),
+          })
+          .where(eq(taxReturns.id, taxReturn.id))
+          .returning({ id: taxReturns.id, status: taxReturns.status });
+
+        return updated;
+      });
+    }),
+
+  // Staff: undo a completion recorded by markCompletedWithFiledPdf. The PDF
+  // is kept as a superseded filed PDF and portal submission stays gated.
+  revertManualCompletion: publicProcedure
+    .input(
+      z.object({
+        taxReturnId: z.string().uuid(),
+        expectedFileUrl: z.string().url(),
+        expectedCompletedAt: z.iso.datetime(),
+        confirmEnteredInError: z.literal(true),
+        reason: z.string().trim().min(5).max(500),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const staff = await requireStaffAccount();
+
+      return ctx.db.transaction(async (tx) => {
+        const [taxReturn] = await tx
+          .select({
+            id: taxReturns.id,
+            status: taxReturns.status,
+            files: taxReturns.files,
+            metadata: taxReturns.metadata,
+          })
+          .from(taxReturns)
+          .where(eq(taxReturns.id, input.taxReturnId))
+          .for("update");
+
+        if (!taxReturn) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        }
+
+        const plan = planManualCompletionRevert({
+          taxReturn,
+          expectedFileUrl: input.expectedFileUrl,
+          expectedCompletedAt: input.expectedCompletedAt,
+          actorAccountId: staff.id,
+          reason: input.reason,
+          now: new Date(),
+        });
+        if (!plan.ok) {
+          throw new TRPCError({ code: plan.code, message: plan.message });
+        }
+
+        const [updated] = await tx
+          .update(taxReturns)
+          .set({
+            status: plan.status,
+            files: plan.files as TaxReturnFileRecord[],
+            metadata: plan.metadata,
+            updatedAt: new Date(),
+          })
+          .where(eq(taxReturns.id, taxReturn.id))
+          .returning({ id: taxReturns.id, status: taxReturns.status });
+
+        return updated;
+      });
     }),
 
   dismissReturn: publicProcedure
