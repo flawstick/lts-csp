@@ -42,6 +42,7 @@ import {
   resolveGuernseyCertificateType,
 } from "@repo/database/guernsey-filing";
 import { JerseyCompanyReturnWorkspace } from "@/components/jersey-company-return-workspace";
+import { ManualCompletionControls } from "@/components/manual-completion-controls";
 import { SubstanceFormEditor } from "@/components/substance-form-editor";
 import { DirectionalTransition } from "@/components/view-transition";
 import { useNavigateWithTransition } from "@/lib/navigate-with-transition";
@@ -734,6 +735,7 @@ export default function ReturnDetailPage() {
               >
                 {taxReturn.status.replace("_", " ")}
               </Badge>
+              <ManualCompletionControls taxReturn={taxReturn} />
               {taxReturn.link && (
                 <Button variant="outline" size="sm" asChild>
                   <a
@@ -802,8 +804,11 @@ export default function ReturnDetailPage() {
                 <p className="text-muted-foreground">
                   The client portal shows no filed-return PDF for this return.
                   Recover the receipt from the government portal or the
-                  automation browser downloads and upload it as the filed
-                  return. Do not run the submission again.
+                  automation browser downloads, upload it in Files, then use
+                  {taxReturn.status === "completed"
+                    ? " Link filed PDF"
+                    : " Mark completed"}{" "}
+                  to link it. Do not run the submission again.
                 </p>
                 {receiptState.captureError || receiptState.browserUseSessionId ? (
                   <p className="text-muted-foreground font-mono text-xs break-all">
