@@ -4,8 +4,8 @@ import { AlertCircle } from "@/lib/icons";
 
 export default function NotFound() {
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="bg-card w-full max-w-2xl space-y-6 rounded-lg border p-8 text-center shadow-lg">
+    <div className="flex min-h-0 flex-1 overflow-auto p-4">
+      <div className="bg-card m-auto w-full max-w-2xl space-y-6 rounded-lg border p-8 text-center shadow-lg">
         <div className="flex flex-col items-center gap-4">
           <div className="bg-muted flex size-16 shrink-0 items-center justify-center rounded-full">
             <AlertCircle className="text-muted-foreground size-8" />

@@ -417,7 +417,7 @@ export default function OrgSettingsPage() {
         </Breadcrumb>
       </PageHeader>
 
-      <div className="flex flex-1 flex-col p-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto p-6">
         <div className="mx-auto w-full max-w-2xl space-y-6">
           <div className="flex items-start justify-between">
             <div>

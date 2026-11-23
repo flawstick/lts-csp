@@ -178,7 +178,8 @@ export default function NewTaskPage() {
             </Breadcrumb>
         </PageHeader>
 
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0 max-w-3xl">
+        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="flex max-w-3xl flex-col gap-4 p-4 pt-0">
           <Card>
             <CardHeader>
               <CardTitle>Create New Task</CardTitle>
@@ -353,6 +354,7 @@ export default function NewTaskPage() {
               </form>
             </CardContent>
           </Card>
+        </div>
         </div>
     </>
   )

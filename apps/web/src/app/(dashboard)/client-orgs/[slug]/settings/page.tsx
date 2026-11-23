@@ -219,7 +219,7 @@ export default function ClientOrgSettingsPage() {
           </Breadcrumb>
       </PageHeader>
 
-      <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4 pt-0">
         <div className="flex items-center gap-3">
           <Building2 className="h-8 w-8 text-muted-foreground" />
           <div>

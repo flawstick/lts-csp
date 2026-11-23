@@ -181,7 +181,7 @@ export default function OrgMembersPage() {
         <PageHeader>
             <Skeleton className="h-4 w-48" />
         </PageHeader>
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4 pt-0">
           <Skeleton className="h-64 w-full" />
         </div>
       </>
@@ -207,7 +207,7 @@ export default function OrgMembersPage() {
               </BreadcrumbList>
             </Breadcrumb>
         </PageHeader>
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4 pt-0">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-semibold">Members</h1>

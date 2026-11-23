@@ -234,7 +234,7 @@ export default function BillingPage() {
     return (
       <SidebarProvider>
         <AppSidebar />
-        <SidebarInset>
+        <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
           <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur sticky top-0 z-10 px-4">
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="mr-2 h-4" />
@@ -251,7 +251,7 @@ export default function BillingPage() {
             </Breadcrumb>
           </header>
 
-          <div className="flex flex-1 flex-col items-center justify-center p-6 bg-muted/10 min-h-[calc(100vh-4rem)]">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto p-6 bg-muted/10">
             <Card className="w-full max-w-md">
               <CardHeader className="text-center">
                 <div className="p-4 bg-destructive/10 rounded-full w-fit mx-auto mb-4">
@@ -272,7 +272,7 @@ export default function BillingPage() {
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset>
+      <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
         <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur sticky top-0 z-10 px-4">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />
@@ -289,7 +289,7 @@ export default function BillingPage() {
           </Breadcrumb>
         </header>
 
-        <div className="flex flex-1 flex-col gap-6 p-6 bg-muted/10">
+        <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-auto p-6 bg-muted/10">
           <div className="flex items-start justify-between">
             <div className="space-y-1">
               <h2 className="text-2xl font-bold tracking-tight">Invoices</h2>

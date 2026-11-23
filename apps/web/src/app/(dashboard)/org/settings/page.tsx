@@ -41,7 +41,7 @@ export default function OrgSettingsRedirect() {
       <PageHeader>
         <Skeleton className="h-4 w-32" />
       </PageHeader>
-      <div className="flex flex-1 flex-col p-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto p-6">
         <div className="mx-auto w-full max-w-2xl space-y-6">
           <div className="space-y-1">
             <Skeleton className="h-7 w-48" />
