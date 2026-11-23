@@ -49,8 +49,8 @@ export default function Error({
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="w-full max-w-2xl space-y-6 rounded-lg border bg-card p-8 shadow-lg">
+    <div className="flex min-h-0 flex-1 overflow-auto p-4">
+      <div className="m-auto w-full max-w-2xl space-y-6 rounded-lg border bg-card p-8 shadow-lg">
         <div className="flex items-center gap-4">
           <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-destructive/10">
             <AlertCircle className="size-6 text-destructive" />

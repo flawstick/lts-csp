@@ -551,7 +551,7 @@ export default function ReturnDetailPage() {
   if (isLoading) {
     return (
       <DirectionalTransition>
-        <div className="flex min-h-screen items-center justify-center">
+        <div className="flex min-h-0 flex-1 items-center justify-center">
           <Loader2 className="text-muted-foreground h-8 w-8 animate-spin" />
         </div>
       </DirectionalTransition>
@@ -561,7 +561,7 @@ export default function ReturnDetailPage() {
   if (error || !taxReturn) {
     return (
       <DirectionalTransition>
-        <div className="flex min-h-screen flex-col items-center justify-center gap-4">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-4">
           <AlertCircle className="text-destructive h-12 w-12" />
           <h2 className="text-xl font-semibold">Tax Return Not Found</h2>
           <Button
