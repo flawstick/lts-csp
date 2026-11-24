@@ -30,8 +30,13 @@ import {
   type PreparedDraftRecord,
 } from "@repo/database/prepared-draft";
 import {
+  buildStatusReply,
+  deliveryAcknowledgement,
   extractAgentQuestionText,
+  extractAgentReplyToReviewer,
   getPendingOperatorMessages,
+  getPendingStatusQuestions,
+  isQuestionLike,
   hasPendingOperatorInterrupt,
   parsePendingAgentQuestion,
   withOperatorMessages,
@@ -41,6 +46,7 @@ import {
 import {
   markOperatorMessagesDeliveredSql,
   preserveWebOwnedResultDataSql,
+  setAgentReplySql,
 } from "@repo/database/operator-messages-sql";
 import {
   BrowserUseClient,
@@ -63,6 +69,7 @@ import {
 import { decideFilingContactStartup } from "./filing-contact-policy";
 import {
   isBudgetExhausted,
+  modelTakesNoParams,
   profileForSubmissionMode,
   resolveBrowserUseRunConfig,
 } from "./browser-use-config";
@@ -1466,7 +1473,9 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     await updateActiveJobRecord({
       resultDataPatch: {
         browserUseModel: runProfile.model,
-        browserUseEffort: runProfile.effort,
+        browserUseEffort: modelTakesNoParams(runProfile.model)
+          ? null
+          : runProfile.effort,
         browserUseMaxCostUsd: runProfile.maxCostUsd,
         [PORTAL_NET_BOOK_VALUE_KEY]: netBookValueRecord(),
       },
@@ -1765,6 +1774,105 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       return question;
     }
 
+    // Progress the worker already has, used to answer chat/status questions
+    // without stopping the browser run (see classifyOperatorMessage).
+    const recentAgentUpdates: string[] = [];
+    let runStartedAt: number | null = null;
+    // Delivered reviewer questions still waiting for the agent's own answer.
+    let awaitingAgentReplyIds: string[] = [];
+
+    function rememberAgentUpdate(summary: string) {
+      const text = summary.trim();
+      // Browser Use falls back to raw event types ("browser.ready").
+      if (!text || /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/i.test(text)) return;
+      if (recentAgentUpdates[recentAgentUpdates.length - 1] === text) return;
+      recentAgentUpdates.push(text);
+      if (recentAgentUpdates.length > 10) recentAgentUpdates.shift();
+    }
+
+    /** Answer pending chat/status questions; never touches the browser run. */
+    async function answerStatusQuestions(
+      resultData: unknown,
+      phase: "running" | "paused",
+    ): Promise<void> {
+      const pending = getPendingStatusQuestions(resultData);
+      if (pending.length === 0) return;
+      const now = Date.now();
+      const content = buildStatusReply({
+        phase,
+        recentUpdates: recentAgentUpdates,
+        stepCount: session?.stepCount ?? 0,
+        runStartedAt,
+        now,
+        question: phase === "paused" ? parsePendingAgentQuestion(resultData) : null,
+      });
+      const ids = pending.map((message) => message.id);
+      try {
+        await db
+          .update(jobs)
+          .set({
+            resultData: markOperatorMessagesDeliveredSql({
+              ids,
+              runId: session?.runId ?? null,
+              deliveredAt: now,
+              reply: { content, createdAt: now, source: "worker" },
+            }),
+          })
+          .where(eq(jobs.id, runtime.jobId));
+        await log("Answered reviewer status question without pausing", {
+          count: ids.length,
+          phase,
+        });
+        await publishJobEvent({
+          type: "job:operator_reply",
+          jobId: runtime.jobId,
+          timestamp: now,
+          data: { messageIds: ids },
+        });
+      } catch (error) {
+        await log("Failed to answer reviewer status question", {
+          count: ids.length,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    /** Attach the agent's "Reply to reviewer:" text to the questions it answers. */
+    async function captureAgentReply(texts: string[]): Promise<void> {
+      if (awaitingAgentReplyIds.length === 0) return;
+      const content = texts
+        .map((text) => extractAgentReplyToReviewer(text))
+        .find((reply): reply is string => reply !== null);
+      if (!content) return;
+      const ids = awaitingAgentReplyIds;
+      awaitingAgentReplyIds = [];
+      const now = Date.now();
+      try {
+        await db
+          .update(jobs)
+          .set({
+            resultData: setAgentReplySql({
+              ids,
+              reply: { content, createdAt: now, source: "agent" },
+            }),
+          })
+          .where(eq(jobs.id, runtime.jobId));
+        await log("Recorded the agent's answer to a reviewer question", {
+          count: ids.length,
+        });
+        await publishJobEvent({
+          type: "job:operator_reply",
+          jobId: runtime.jobId,
+          timestamp: now,
+          data: { messageIds: ids },
+        });
+      } catch (error) {
+        await log("Failed to record the agent's answer", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     /** One pause-loop check: resume, stop waiting, or keep waiting. */
     async function checkPausedJob(): Promise<
       "resume" | "cancelled" | "ended" | "wait"
@@ -1776,6 +1884,9 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       if (!row || row.status === "failed") return "ended";
       if (row.status === "cancelled") return "cancelled";
       if (row.status === "running") return "resume";
+      if (row.status === "paused") {
+        await answerStatusQuestions(row.resultData, "paused");
+      }
       if (
         row.status === "paused" &&
         getPendingOperatorMessages(row.resultData).length > 0
@@ -1885,16 +1996,38 @@ LTS read the reviewer's reply as the tangible-asset Net Book Value${resolved.neg
       const deliveredIds = pending.map((message) => message.id);
       if (deliveredIds.length > 0) {
         try {
-          await db
-            .update(jobs)
-            .set({
-              resultData: markOperatorMessagesDeliveredSql({
-                ids: deliveredIds,
-                runId: resumed.runId ?? null,
-                deliveredAt: resumedAt,
-              }),
-            })
-            .where(eq(jobs.id, runtime.jobId));
+          // A visible acknowledgement under each message; questions also ask
+          // the agent to answer ("Reply to reviewer:"), which replaces it.
+          for (const interrupted of [true, false]) {
+            for (const questionLike of [true, false]) {
+              const ids = pending
+                .filter(
+                  (message) =>
+                    (message.interrupt === true) === interrupted &&
+                    isQuestionLike(message.content) === questionLike,
+                )
+                .map((message) => message.id);
+              if (ids.length === 0) continue;
+              await db
+                .update(jobs)
+                .set({
+                  resultData: markOperatorMessagesDeliveredSql({
+                    ids,
+                    runId: resumed.runId ?? null,
+                    deliveredAt: resumedAt,
+                    reply: {
+                      content: deliveryAcknowledgement({ questionLike, interrupted }),
+                      createdAt: resumedAt,
+                      source: "worker",
+                    },
+                  }),
+                })
+                .where(eq(jobs.id, runtime.jobId));
+            }
+          }
+          awaitingAgentReplyIds = pending
+            .filter((message) => isQuestionLike(message.content))
+            .map((message) => message.id);
         } catch (error) {
           await log("Failed to mark reviewer messages delivered", {
             count: deliveredIds.length,
@@ -1926,11 +2059,12 @@ LTS read the reviewer's reply as the tangible-asset Net Book Value${resolved.neg
 
     await log("Starting Browser Use V4 run", {
       model: runProfile.model,
-      effort: runProfile.effort,
+      effort: modelTakesNoParams(runProfile.model) ? null : runProfile.effort,
       maxCostUsd: runProfile.maxCostUsd,
       submissionMode,
     });
     session = await dispatchBrowserTask(prompt);
+    runStartedAt = Date.now();
     workspaceId = session.workspaceId;
     receiptRecovery = {
       client,
@@ -2008,6 +2142,10 @@ LTS read the reviewer's reply as the tangible-asset Net Book Value${resolved.neg
         } catch {}
         terminalStateHandled = true;
         break;
+      }
+
+      if (currentJobStatus?.status === "running") {
+        await answerStatusQuestions(currentJobStatus.resultData, "running");
       }
 
       if (currentJobStatus?.status === "paused") {
@@ -2170,6 +2308,13 @@ ${basePrompt}
         }
 
         const summary = message.summary?.trim() || message.type;
+        rememberAgentUpdate(summary);
+        await captureAgentReply([
+          summary,
+          ...Object.values(message.data ?? {}).filter(
+            (value): value is string => typeof value === "string",
+          ),
+        ]);
         await publishStatus("step", {
           stepNumber: browserSession.stepCount,
           goal: summary,

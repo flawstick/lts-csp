@@ -222,7 +222,7 @@ describe("deriveComposerState", () => {
       jobStatus: "running",
       isPrepareOnly: false,
     });
-    expect(state).toMatchObject({ mode: "interrupt", submitLabel: "Pause & send" });
+    expect(state).toMatchObject({ mode: "interrupt", submitLabel: "Send" });
     expect(state.hint).not.toContain("will not submit");
   });
 
@@ -248,5 +248,53 @@ describe("helpers", () => {
 
   it("creates ids the API accepts", () => {
     expect(createClientMessageId()).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  });
+});
+
+describe("replies under reviewer messages", () => {
+  it("shows the worker's status answer and the agent's own answer after the message", () => {
+    const timeline = buildChatTimeline({
+      chatMessages: [],
+      jobStatus: "running",
+      operatorMessages: [
+        {
+          id: "op_status",
+          content: "what are you doing?",
+          kind: "status",
+          status: "delivered",
+          createdAt: 10,
+          reply: { content: "Still working in the browser.", createdAt: 12, source: "worker" },
+        },
+        {
+          id: "op_why",
+          content: "why 3 employees?",
+          kind: "instruction",
+          status: "delivered",
+          createdAt: 20,
+          // A clock skew must never put the answer above the question.
+          reply: { content: "The payroll lists 3.", createdAt: 5, source: "agent" },
+        },
+      ],
+    });
+    expect(timeline.map((item) => [item.kind, item.id])).toEqual([
+      ["operator", "op_status"],
+      ["reply", "reply-op_status"],
+      ["operator", "op_why"],
+      ["reply", "reply-op_why"],
+    ]);
+    expect(timeline[1]).toMatchObject({ source: "worker", toMessageId: "op_status" });
+    expect(timeline[3]).toMatchObject({ source: "agent", content: "The payroll lists 3." });
+  });
+
+  it("says status questions do not stop a running agent", () => {
+    const state = deriveComposerState({
+      jobStatus: "running",
+      question: null,
+      hasPendingDelivery: false,
+      isSending: false,
+      isPrepareOnly: true,
+    });
+    expect(state.hint).toContain("answered without stopping the agent");
+    expect(state.hint).toContain("will not submit");
   });
 });

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserUseClient } from "./browser-use-client";
 import {
+  BROWSER_SCREEN_SIZE,
   DEFAULT_FINAL_PROFILE,
   DEFAULT_PREPARE_PROFILE,
 } from "./browser-use-config";
@@ -92,7 +93,11 @@ describe("Browser Use V4 lifecycle", () => {
         maxCostUsd: 4,
         workspaceId: "workspace",
         keepAlive: 900,
-        browserSettings: { proxyCountryCode: "uk" },
+        browserSettings: {
+          proxyCountryCode: "uk",
+          screenWidth: 1280,
+          screenHeight: 1024,
+        },
       }),
     );
     expect(sdk.runs.create.mock.calls[0]![0].sessionId).toBeUndefined();
@@ -113,6 +118,36 @@ describe("Browser Use V4 lifecycle", () => {
     expect(sdk.runs.create.mock.calls[1]![0]).not.toHaveProperty(
       "browserSettings",
     );
+  });
+
+  it("provisions new browsers at a pane-shaped standard screen size without enabling resizing", async () => {
+    const client = new BrowserUseClient("key");
+    await client.runTask("Prepare only", {
+      profile,
+      extensionIds: ["guard"],
+    });
+    const settings = sdk.runs.create.mock.calls[0]![0].browserSettings;
+    expect(settings).toEqual({
+      proxyCountryCode: null,
+      screenWidth: BROWSER_SCREEN_SIZE.width,
+      screenHeight: BROWSER_SCREEN_SIZE.height,
+      extensionIds: ["guard"],
+    });
+    // Taller than 16:9 so the live view fills the task page's browser pane.
+    expect(BROWSER_SCREEN_SIZE.width / BROWSER_SCREEN_SIZE.height).toBeLessThan(
+      16 / 9,
+    );
+    expect(BROWSER_SCREEN_SIZE.width).toBeGreaterThanOrEqual(1280);
+    expect(settings).not.toHaveProperty("allowResizing");
+  });
+
+  it("never resizes a running session's browser on follow-ups", async () => {
+    const client = new BrowserUseClient("key");
+    sdk.runs.create.mockResolvedValue(createdRun("run-2"));
+    await client.runTask("Reviewer reply", { sessionId: "session", profile });
+    const followUp = sdk.runs.create.mock.calls[0]![0];
+    expect(followUp.sessionId).toBe("session");
+    expect(followUp).not.toHaveProperty("browserSettings");
   });
 
   it("keeps the session budget and model on follow-ups (budget sent only at creation)", async () => {
@@ -412,5 +447,31 @@ describe("Browser Use V4 lifecycle", () => {
       new BrowserUseClient("key").stopSession("session"),
     ).rejects.toThrow("fully stop");
     expect(sdk.browsers.stop).toHaveBeenCalledWith("owned");
+  });
+});
+
+describe("bu-ultrafast prepare profile", () => {
+  const ultrafast = { ...DEFAULT_PREPARE_PROFILE, model: "bu-ultrafast" as const };
+
+  it("sends no modelParams (the preset rejects any), keeping budget and model checks", async () => {
+    sdk.runs.create.mockResolvedValue({ ...createdRun(), model: "bu-ultrafast" });
+    const client = new BrowserUseClient("key");
+    const state = await client.runTask("Prepare only", { profile: ultrafast });
+    expect(state.model).toBe("bu-ultrafast");
+    const body = sdk.runs.create.mock.calls[0]![0];
+    expect(body).not.toHaveProperty("modelParams");
+    expect(body).toMatchObject({ model: "bu-ultrafast", maxCostUsd: 4 });
+
+    sdk.runs.create.mockResolvedValue({ ...createdRun("run-2"), model: "bu-ultrafast" });
+    await client.runTask("Reviewer reply", { sessionId: "session", profile: ultrafast });
+    expect(sdk.runs.create.mock.calls[1]![0]).not.toHaveProperty("modelParams");
+  });
+
+  it("still cancels a run Browser Use started on another model", async () => {
+    sdk.runs.create.mockResolvedValue({ ...createdRun("swapped"), model: "gpt-6-luna" });
+    await expect(
+      new BrowserUseClient("key").runTask("Prepare only", { profile: ultrafast }),
+    ).rejects.toThrow("unexpected model");
+    expect(sdk.runs.cancel).toHaveBeenCalledWith("swapped");
   });
 });

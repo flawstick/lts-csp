@@ -10,6 +10,7 @@ import {
   type WorkspaceInfo,
 } from "browser-use-sdk/v4";
 import {
+  BROWSER_SCREEN_SIZE,
   modelParamsForProfile,
   type BrowserUseRunProfile,
 } from "./browser-use-config";
@@ -150,10 +151,11 @@ export class BrowserUseClient {
       : undefined;
     const workspaceId =
       request.workspaceId ?? previous?.workspaceId ?? undefined;
+    const modelParams = modelParamsForProfile(request.profile);
     const body: RunCreateBody = {
       task,
       model: request.profile.model,
-      modelParams: modelParamsForProfile(request.profile),
+      ...(modelParams ? { modelParams } : {}),
       sessionId: request.sessionId,
       // The budget covers the whole session. Follow-ups omit it so Browser
       // Use keeps the current budget (and the spend so far) instead of
@@ -170,6 +172,9 @@ export class BrowserUseClient {
         ? {
             browserSettings: {
               proxyCountryCode: request.proxyCountryCode ?? null,
+              // Fit the task page's live-view pane instead of a 16:9 screen.
+              screenWidth: BROWSER_SCREEN_SIZE.width,
+              screenHeight: BROWSER_SCREEN_SIZE.height,
               ...(request.extensionIds?.length
                 ? { extensionIds: request.extensionIds }
                 : {}),

@@ -121,7 +121,15 @@ function PanelHeader({
   const waiting = jobStatus === "paused";
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
+    // Beside the browser, match the toolbar's h-10 row so both headers share
+    // a content center and bottom border. The mobile sheet (onClose) keeps
+    // the taller row for its 32px close button.
+    <div
+      className={cn(
+        "flex shrink-0 items-center gap-2 border-b px-3",
+        onClose ? "h-11" : "h-10",
+      )}
+    >
       <span className="relative flex size-2 shrink-0" aria-hidden>
         {live || waiting ? (
           <span
@@ -220,6 +228,30 @@ function AgentMessage({ item }: { item: Extract<ChatTimelineItem, { kind: "agent
         <div className={cn(MARKDOWN_CLASS, "text-foreground/90")}>
           <ReactMarkdown>{item.content}</ReactMarkdown>
         </div>
+        <p className="text-muted-foreground/60 mt-0.5 text-[10px] tabular-nums opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+          {timeLabel(item.timestamp)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** Reply under a reviewer message: the agent's own answer, or LTS's from run progress. */
+function ReplyMessage({ item }: { item: Extract<ChatTimelineItem, { kind: "reply" }> }) {
+  return (
+    <div className="group flex min-w-0 gap-2.5">
+      <div className="bg-muted text-muted-foreground mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg">
+        <Bot className="size-3.5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        {item.source === "worker" ? (
+          <p className="text-muted-foreground mb-0.5 text-[10px] font-semibold tracking-wide uppercase">
+            Run status
+          </p>
+        ) : null}
+        <p className={cn("text-foreground/90 text-[13px] leading-relaxed whitespace-pre-wrap", WRAP_ANYWHERE)}>
+          {item.content}
+        </p>
         <p className="text-muted-foreground/60 mt-0.5 text-[10px] tabular-nums opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
           {timeLabel(item.timestamp)}
         </p>
@@ -767,6 +799,8 @@ export function AgentPanel({
                   <AgentUpdates key={block.id} items={block.items} />
                 ) : block.kind === "agent" ? (
                   <AgentMessage key={block.id} item={block} />
+                ) : block.kind === "reply" ? (
+                  <ReplyMessage key={block.id} item={block} />
                 ) : (
                   <OperatorMessage key={block.id} item={block} />
                 ),

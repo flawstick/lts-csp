@@ -9,7 +9,9 @@
  *
  * Supported models and modelParams follow the Browser Use V4 thinking-levels
  * table: these Claude models accept `thinking.type: "adaptive"` and
- * `output_config.effort` in low|medium|high|xhigh|max.
+ * `output_config.effort` in low|medium|high|xhigh|max. `bu-ultrafast` is a
+ * prepare-only opt-in (BROWSER_USE_PREPARE_MODEL=bu-ultrafast) and sends no
+ * modelParams; it is never the default.
  */
 
 import type { SubmissionMode } from "./run-outcome";
@@ -19,7 +21,21 @@ export const SUPPORTED_BROWSER_USE_MODELS = [
   "claude-opus-5",
   "claude-opus-5-5",
 ] as const;
-export type BrowserUseModel = (typeof SUPPORTED_BROWSER_USE_MODELS)[number];
+/**
+ * Browser Use's own early-access preset. It takes no modelParams (the V4 API
+ * rejects any), so effort does not apply. Opt-in for prepare-only runs only:
+ * those never file and stay behind the prepare-only guard extension. Final
+ * filing modes refuse it.
+ */
+export const PREPARE_ONLY_BROWSER_USE_MODELS = ["bu-ultrafast"] as const;
+export type BrowserUseModel =
+  | (typeof SUPPORTED_BROWSER_USE_MODELS)[number]
+  | (typeof PREPARE_ONLY_BROWSER_USE_MODELS)[number];
+
+/** Presets that accept no modelParams. */
+export function modelTakesNoParams(model: BrowserUseModel): boolean {
+  return (PREPARE_ONLY_BROWSER_USE_MODELS as readonly string[]).includes(model);
+}
 
 export const BROWSER_USE_EFFORTS = [
   "low",
@@ -32,6 +48,22 @@ export type BrowserUseEffort = (typeof BROWSER_USE_EFFORTS)[number];
 
 /** Final filing never runs with reduced reasoning. */
 const FINAL_MIN_EFFORTS: readonly BrowserUseEffort[] = ["high", "xhigh", "max"];
+
+/**
+ * Screen size for newly provisioned filing browsers.
+ *
+ * The task page embeds the Browser Use live view in a pane that is roughly
+ * 1.1–1.3 wide-to-tall on desktop. The live view keeps the browser's own
+ * aspect ratio, so Browser Use's undocumented landscape default (16:9 in its
+ * embed examples) fits the pane width and leaves a blank band at the bottom.
+ * 1280×1024 (5:4) is a standard desktop resolution, so it does not need
+ * `allowResizing` (which Browser Use warns makes the browser easier to
+ * detect), and it keeps portals at their 1280px desktop layout.
+ *
+ * V4 applies these only when a run provisions a new browser; follow-ups omit
+ * browser settings so running sessions keep their current browser untouched.
+ */
+export const BROWSER_SCREEN_SIZE = { width: 1280, height: 1024 } as const;
 
 /** Browser Use's own default session budget, kept as the hard ceiling. */
 export const MAX_SESSION_BUDGET_USD = 25;
@@ -83,18 +115,23 @@ function parseProfile(
   const profile = { ...defaults };
 
   const model = readEnv(env, `${prefix}_MODEL`);
+  const allowedModels: readonly string[] =
+    defaults.kind === "prepare"
+      ? [...SUPPORTED_BROWSER_USE_MODELS, ...PREPARE_ONLY_BROWSER_USE_MODELS]
+      : SUPPORTED_BROWSER_USE_MODELS;
   if (model !== undefined) {
-    if ((SUPPORTED_BROWSER_USE_MODELS as readonly string[]).includes(model)) {
+    if (allowedModels.includes(model)) {
       profile.model = model as BrowserUseModel;
     } else {
-      errors.push(
-        `${prefix}_MODEL must be one of ${SUPPORTED_BROWSER_USE_MODELS.join(", ")}`,
-      );
+      errors.push(`${prefix}_MODEL must be one of ${allowedModels.join(", ")}`);
     }
   }
 
   const effort = readEnv(env, `${prefix}_EFFORT`);
-  if (effort !== undefined) {
+  if (effort !== undefined && modelTakesNoParams(profile.model)) {
+    // Refuse rather than silently ignore a setting that cannot apply.
+    errors.push(`${prefix}_EFFORT cannot be set for ${profile.model}, which takes no model parameters`);
+  } else if (effort !== undefined) {
     const allowed =
       defaults.kind === "final" ? FINAL_MIN_EFFORTS : BROWSER_USE_EFFORTS;
     if ((allowed as readonly string[]).includes(effort)) {
@@ -156,7 +193,11 @@ export function profileForSubmissionMode(
   return submissionMode === "prepare_only" ? config.prepare : config.final;
 }
 
-export function modelParamsForProfile(profile: BrowserUseRunProfile) {
+/** undefined: omit `modelParams` entirely (an empty object is still a parameter set). */
+export function modelParamsForProfile(
+  profile: BrowserUseRunProfile,
+): Record<string, unknown> | undefined {
+  if (modelTakesNoParams(profile.model)) return undefined;
   return {
     thinking: { type: "adaptive" },
     output_config: { effort: profile.effort },
