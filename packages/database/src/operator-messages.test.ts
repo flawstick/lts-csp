@@ -131,6 +131,20 @@ describe("content normalisation", () => {
     );
     expect(extractAgentQuestionText("Login failed")).toBe("Login failed");
   });
+
+  it("drops a run recap around the Net Book Value question", () => {
+    const recap = [
+      "I logged in, opened the case and completed Sections 1 to 3.",
+      "In Section 4 I entered the preparer details and stopped at the field.",
+      "",
+      '**REQUIRES_ATTENTION: NET_BOOK_VALUE_CHECK:** The saved Net Book Value "-100" is not a clear amount. What tangible-asset Net Book Value should be entered? Reply with the amount only, e.g. 0 or 12345.',
+      "",
+      "Summary of progress: Sections 1-3 complete, Section 4 partially complete.",
+    ].join("\n");
+    expect(extractAgentQuestionText(recap)).toBe(
+      'The saved Net Book Value "-100" is not a clear amount. What tangible-asset Net Book Value should be entered? Reply with the amount only, e.g. 0 or 12345.',
+    );
+  });
 });
 
 describe("resume prompt section", () => {

@@ -5,9 +5,11 @@ import {
 } from "@repo/database/prepared-draft";
 import { extractAgentQuestionText } from "@repo/database/operator-messages";
 import {
+  buildNetBookValueQuestion,
   decidePortalNetBookValue,
   initialNetBookValueStatus,
   isNetBookValueQuestion,
+  netBookValuePauseQuestion,
   netBookValueProvenanceFromMetadata,
   parseStrictAmount,
   portalNetBookValueFromReviewerReply,
@@ -173,6 +175,61 @@ describe("reviewer replies", () => {
   it("quotes saved values safely inside the prompt", () => {
     expect(quoteSavedValueForPrompt('-28"94`\n<x>')).toBe("-28 94 x");
     expect(quoteSavedValueForPrompt("9".repeat(100))).toHaveLength(64);
+  });
+});
+
+describe("Net Book Value pause question", () => {
+  const decision = decidePortalNetBookValue("-100", "extracted_net_assets");
+  const question = buildNetBookValueQuestion("-100", "source_net_assets");
+  const recap = [
+    "Progress so far: logged in, completed Sections 1, 2 and 3, entered the preparer details.",
+    "I left the Net Book Value field as the portal shows it.",
+    "**REQUIRES_ATTENTION: NET_BOOK_VALUE_CHECK:** The saved value looks like net assets, so I cannot enter it.",
+    "Next steps once answered: enter the value, complete Section 4 and continue to the review page.",
+  ].join("\n\n");
+
+  it("shows only the canonical question, however long the agent's output", () => {
+    const text = netBookValuePauseQuestion({
+      output: recap,
+      decision,
+      savedValue: "-100",
+    });
+    expect(text).toBe(question);
+    expect(text).not.toContain("Progress so far");
+    expect(text).not.toContain("Next steps");
+    expect(text!.length).toBeLessThan(250);
+    // Still matched as the Net Book Value question when the reviewer replies.
+    expect(isNetBookValueQuestion(text)).toBe(true);
+  });
+
+  it("is the same question the fill prompt tells the agent to ask", () => {
+    const prompt = promptFor(
+      { netBookValue: "-100" },
+      { decision },
+    );
+    expect(prompt).toContain(`REQUIRES_ATTENTION: NET_BOOK_VALUE_CHECK:`);
+    expect(prompt).toContain(question);
+    expect(prompt).toContain("no summary of the steps or sections you completed");
+  });
+
+  it("leaves other pauses to the agent's own words", () => {
+    expect(
+      netBookValuePauseQuestion({
+        output: "**REQUIRES_ATTENTION:** Which relevant activity applies?",
+        decision,
+        savedValue: "-100",
+      }),
+    ).toBeNull();
+    expect(
+      netBookValuePauseQuestion({
+        output: recap,
+        decision: decidePortalNetBookValue("100", "person_entered"),
+        savedValue: "100",
+      }),
+    ).toBeNull();
+    expect(
+      netBookValuePauseQuestion({ output: recap, decision: null, savedValue: "-100" }),
+    ).toBeNull();
   });
 });
 

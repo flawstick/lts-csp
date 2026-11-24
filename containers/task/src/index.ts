@@ -78,6 +78,7 @@ import {
   initialNetBookValueStatus,
   isNetBookValueQuestion,
   MAX_UNCLEAR_NET_BOOK_VALUE_REPLIES,
+  netBookValuePauseQuestion,
   netBookValueProvenanceFromMetadata,
   portalNetBookValueFromReviewerReply,
   type PortalNetBookValue,
@@ -2695,9 +2696,20 @@ ${prompt}
           });
 
           const askedAt = Date.now();
+          // The Net Book Value question is shown as LTS wrote it: providers
+          // sometimes wrap it in a long run recap. The full output stays on
+          // the job (output / pauseReason) as evidence.
+          const questionText =
+            (stoppedForFilingContact
+              ? null
+              : netBookValuePauseQuestion({
+                  output,
+                  decision: netBookValueDecision,
+                  savedValue: taxReturn.substanceForm.netBookValue,
+                })) ?? extractAgentQuestionText(output);
           const agentQuestion: AgentQuestion = {
             id: `q-${askedAt}-${Math.random().toString(36).slice(2, 8)}`,
-            text: extractAgentQuestionText(output),
+            text: questionText,
             askedAt,
             reason: stoppedForFilingContact ? "filing_contact" : "agent_question",
             expiresAt: askedAt + MAX_PAUSE_DURATION_MS,

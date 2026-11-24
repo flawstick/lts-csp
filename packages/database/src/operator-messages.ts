@@ -345,8 +345,21 @@ export function appendOperatorMessage(
     : next;
 }
 
+const NET_BOOK_VALUE_MARKER = "NET_BOOK_VALUE_CHECK";
+
 /** The agent's REQUIRES_ATTENTION output as a readable question. */
 export function extractAgentQuestionText(output: string): string {
+  // The Net Book Value question can follow (or precede) a run recap: keep
+  // only the paragraph after the marker.
+  const marker = output.lastIndexOf(NET_BOOK_VALUE_MARKER);
+  if (marker >= 0) {
+    const question = output
+      .slice(marker + NET_BOOK_VALUE_MARKER.length)
+      .replace(/^[\s:*]+/, "")
+      .split(/\n\s*\n/)[0]!
+      .trim();
+    if (question) return question;
+  }
   const text = output
     .trim()
     .replace(/^\**\s*REQUIRES_ATTENTION\s*:?\s*\**\s*/i, "")

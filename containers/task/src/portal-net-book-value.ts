@@ -172,6 +172,42 @@ export function isNetBookValueQuestion(text: string | null | undefined) {
   return text.includes(NET_BOOK_VALUE_QUESTION_MARKER) || /net book value/i.test(text);
 }
 
+const NET_BOOK_VALUE_QUESTION_REASON: Record<NetBookValueReviewReason, string> = {
+  unparseable: "is not a clear amount",
+  source_net_assets:
+    "was extracted and may be net assets / net liabilities rather than the tangible-asset figure",
+  source_unverified: "has not been confirmed as the tangible-asset figure",
+};
+
+/**
+ * The one Net Book Value question a reviewer is asked. The prompt tells the
+ * agent to ask exactly this, and the worker shows exactly this when the agent
+ * pauses with the marker, so a run recap in the agent's output never reaches
+ * the reviewer's chat (the full output is still kept on the job).
+ */
+export function buildNetBookValueQuestion(
+  savedValue: string | null | undefined,
+  reason: NetBookValueReviewReason,
+): string {
+  const quoted = quoteSavedValueForPrompt(savedValue ?? "");
+  return `The saved Net Book Value "${quoted}" ${NET_BOOK_VALUE_QUESTION_REASON[reason]}. What tangible-asset Net Book Value should be entered? Reply with the amount only, e.g. 0 or 12345.`;
+}
+
+/**
+ * The question to show for an agent pause: the canonical Net Book Value
+ * question when the agent stopped with the marker on a figure that needs a
+ * reviewer, otherwise null (the caller falls back to the agent's own words).
+ */
+export function netBookValuePauseQuestion(input: {
+  output: string;
+  decision: PortalNetBookValue | null;
+  savedValue: string | null | undefined;
+}): string | null {
+  if (input.decision?.kind !== "needs_review") return null;
+  if (!input.output.includes(NET_BOOK_VALUE_QUESTION_MARKER)) return null;
+  return buildNetBookValueQuestion(input.savedValue, input.decision.reason);
+}
+
 /** Safe to quote the saved value inside the prompt's question text. */
 export function quoteSavedValueForPrompt(saved: string): string {
   return saved
