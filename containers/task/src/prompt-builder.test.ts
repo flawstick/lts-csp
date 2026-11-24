@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildResumePrompt, buildSubstanceFormPrompt } from "./prompt-builder";
+import { parsePreparedDraftOutput } from "@repo/database/prepared-draft";
+import {
+  buildResumePrompt,
+  buildSubmitPreparedReturnPrompt,
+  buildSubstanceFormPrompt,
+} from "./prompt-builder";
 
 const baseTaxReturn = {
   entityName: "Porte Des Granges Limited",
@@ -276,5 +281,121 @@ describe("buildResumePrompt", () => {
     expect(resume).toContain("The user has completed the login/authentication");
     expect(resume).not.toContain("contact");
     expect(resume).toContain("ORIGINAL TASK");
+  });
+});
+
+describe("prepared draft identity", () => {
+  it("asks a prepare run to report the review URL and reference in the parsed format", () => {
+    const prompt = buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: { certificateType: "Certificate 3", relevantActivity: "Banking" } as any,
+      portalUrl: "https://my.gov.gg",
+      submissionMode: "prepare_only",
+      contactName: "NSM Filings Team",
+      contactEmail: "filings@nsm.example",
+    });
+    expect(prompt).toContain("REVIEW_PAGE_URL: <the full URL");
+    expect(prompt).toContain("PORTAL_REFERENCE: <the return or case reference");
+    // An agent following those lines produces output the worker can parse.
+    expect(
+      parsePreparedDraftOutput(
+        "READY_FOR_MANUAL_SUBMISSION: click Submit\nREVIEW_PAGE_URL: https://revenueservice.gov.gg/company-tax-ui/a/reviewAndSubmit/summary\nPORTAL_REFERENCE: NONE",
+      ).reviewUrl,
+    ).toBe("https://revenueservice.gov.gg/company-tax-ui/a/reviewAndSubmit/summary");
+  });
+
+  it("keeps the prompt grounded: no web research and no guessing material fields", () => {
+    const prompt = buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: { certificateType: "Certificate 3", relevantActivity: "Banking" } as any,
+      portalUrl: "https://my.gov.gg",
+    });
+    expect(prompt).toContain("Never search the web");
+    expect(prompt).toContain("Never guess a value that could change the filing");
+    expect(prompt.match(/upload_file/g)?.length ?? 0).toBe(0); // no PDF provided
+  });
+});
+
+describe("buildSubmitPreparedReturnPrompt", () => {
+  const base = {
+    taxReturn: { entityName: "Example Limited", taxYear: 2025 } as any,
+    substanceForm: {
+      companyNumber: "12345",
+      accountingPeriodStart: "2025-01-01",
+      accountingPeriodEnd: "2025-12-31",
+    } as any,
+    portalUrl: "https://my.gov.gg",
+    returnLink: "https://my.gov.gg/revenue/case/abc/process",
+    reviewUrl: "https://revenueservice.gov.gg/company-tax-ui/a/reviewAndSubmit/summary",
+    portalReference: "ESR-42",
+    contactName: "NSM Filings Team",
+    contactEmail: "filings@nsm.example",
+  };
+
+  it("opens the exact prepared draft and verifies identity and review state before submitting", () => {
+    const prompt = buildSubmitPreparedReturnPrompt(base);
+    expect(prompt).toContain(`Go to the prepared review/submit page: ${base.reviewUrl}`);
+    expect(prompt).toContain("Entity name is **Example Limited**");
+    expect(prompt).toContain("Tax year is **2025** (accounting period 2025-01-01 to 2025-12-31)");
+    expect(prompt).toContain("it is **12345**");
+    expect(prompt).toContain("reference **ESR-42** exactly");
+    expect(prompt).toContain("its name is **NSM Filings Team** and its email is **filings@nsm.example**");
+    expect(prompt).toContain("No section is shown as incomplete");
+    expect(prompt).toContain("**REQUIRES_ATTENTION: PREPARED_DRAFT_NOT_VERIFIED:**");
+    expect(prompt).toContain("Never click Submit a second time");
+    expect(prompt).toContain("Download the portal-generated completion/receipt/return PDF");
+  });
+
+  it("does not fill, edit, upload, reassign or re-review", () => {
+    const prompt = buildSubmitPreparedReturnPrompt(base);
+    expect(prompt).toContain("Do **NOT** open sections, click **Change**/**Edit**/section links, type into or change any field, upload files, re-assign the case");
+    for (const forbidden of [
+      "SECTION 1: BACKGROUND",
+      "upload_file",
+      "Assign to user",
+      "re-check/re-fill",
+      "Do not skip fields merely because they are already populated",
+      "READY_FOR_MANUAL_SUBMISSION",
+    ]) {
+      expect(prompt).not.toContain(forbidden);
+    }
+  });
+
+  it("binds the run to the recorded draft id and reference, with no case-page fallback", () => {
+    const prompt = buildSubmitPreparedReturnPrompt(base);
+    expect(prompt).toContain("its path must be **/company-tax-ui/a/reviewAndSubmit/summary**");
+    expect(prompt).toContain("Do not reach a review page any other way");
+    expect(prompt).not.toContain(`Go to the case: ${base.returnLink}`);
+    expect(prompt).toContain("If no reference is shown, or it differs, this check fails.");
+  });
+
+  it("opens the case only when the draft is identified by its reference", () => {
+    const prompt = buildSubmitPreparedReturnPrompt({ ...base, reviewUrl: "https://my.gov.gg/revenue" });
+    expect(prompt).toContain(`Go to the case: ${base.returnLink}`);
+    expect(prompt).not.toContain("prepared review/submit page:");
+    expect(prompt).toContain("reference **ESR-42** exactly. If no reference is shown");
+  });
+
+  it("refuses to build without a specific draft identity", () => {
+    for (const identity of [
+      { reviewUrl: null, portalReference: null },
+      { reviewUrl: "https://my.gov.gg/revenue", portalReference: "NONE" },
+    ]) {
+      expect(() => buildSubmitPreparedReturnPrompt({ ...base, ...identity })).toThrow(
+        "review page URL or portal reference",
+      );
+    }
+  });
+
+  it("is much shorter than the filling prompt", () => {
+    const fill = buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: { certificateType: "Certificate 3", relevantActivity: "Banking" } as any,
+      portalUrl: "https://my.gov.gg",
+      submissionMode: "submit_and_capture_pdf",
+      contactName: "NSM Filings Team",
+      contactEmail: "filings@nsm.example",
+    });
+    expect(buildSubmitPreparedReturnPrompt(base).length).toBeLessThan(fill.length / 2);
   });
 });

@@ -70,3 +70,36 @@ describe("final submission confirmation", () => {
     expect(onStart).not.toHaveBeenCalled();
   });
 });
+
+describe("submit prepared return confirmation", () => {
+  async function openPreparedDialog() {
+    const onStart = renderToolbar();
+    const trigger = screen.getByRole("button", { name: /More/ });
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Submit prepared/ }));
+    await screen.findByRole("alertdialog");
+    return onStart;
+  }
+
+  it("requires acknowledgement, then starts the submit_prepared operation", async () => {
+    const onStart = await openPreparedDialog();
+    expect(screen.getByText("Submit the prepared return?")).toBeInTheDocument();
+    const submit = screen.getByRole("button", { name: "Submit prepared return" });
+    expect(submit).toBeDisabled();
+    fireEvent.click(submit);
+    expect(onStart).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(submit);
+    expect(onStart).toHaveBeenCalledWith({
+      submissionMode: "submit_and_capture_pdf",
+      filingOperation: "submit_prepared",
+    });
+  });
+
+  it("cancels without starting a run", async () => {
+    const onStart = await openPreparedDialog();
+    fireEvent.click(screen.getByRole("button", { name: "Keep reviewing" }));
+    expect(onStart).not.toHaveBeenCalled();
+  });
+});

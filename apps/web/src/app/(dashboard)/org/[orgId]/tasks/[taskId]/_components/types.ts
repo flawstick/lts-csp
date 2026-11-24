@@ -6,7 +6,8 @@ export interface JobEvent {
     | "job:step"
     | "job:completed"
     | "job:failed"
-    | "job:requires_attention";
+    | "job:requires_attention"
+    | "job:resumed";
   jobId: string;
   timestamp: number;
   data: Record<string, unknown>;

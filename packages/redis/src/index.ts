@@ -51,7 +51,8 @@ export type JobEventType =
   | "job:screenshot"
   | "job:completed"
   | "job:failed"
-  | "job:requires_attention";
+  | "job:requires_attention"
+  | "job:resumed";
 
 export interface JobEvent {
   type: JobEventType;
