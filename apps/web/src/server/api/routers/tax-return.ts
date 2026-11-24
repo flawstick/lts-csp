@@ -48,6 +48,7 @@ import {
 } from "@/lib/browser-use-control";
 import { getBrowserJobStaleReason } from "@/lib/browser-job-status";
 import { getFilingStartBlocker } from "@/lib/filing-start-guard";
+import { getFilingMaintenanceBlocker } from "@/lib/filing-maintenance";
 import {
   ACTIVE_JOB_STATUSES,
   MANUAL_COMPLETION_FROM_STATUSES,
@@ -1839,6 +1840,12 @@ export const taxReturnRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // Timed maintenance blocks new filing runs only; existing jobs are untouched.
+      const maintenanceBlocker = getFilingMaintenanceBlocker();
+      if (maintenanceBlocker) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: maintenanceBlocker });
+      }
+
       // Get the task with tax return
       const task = await ctx.db.query.tasks.findFirst({
         where: eq(tasks.id, input.taskId),
