@@ -26,11 +26,11 @@ export function TaskLoading() {
       </PageHeader>
 
       {/* Content skeleton */}
-      <div className="flex-1 overflow-hidden">
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <ResizablePanelGroup direction="horizontal" className="h-full">
           {/* Browser panel skeleton */}
           <ResizablePanel defaultSize={70} minSize={30}>
-            <div className="flex h-full flex-col">
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
               {/* Toolbar skeleton */}
               <div className="flex shrink-0 items-center justify-between border-b bg-muted/20 px-3 py-1.5">
                 <div className="flex items-center gap-2">
@@ -50,26 +50,6 @@ export function TaskLoading() {
                   <Skeleton className="size-14 rounded-2xl" />
                   <Skeleton className="h-3.5 w-28 rounded" />
                   <Skeleton className="h-3 w-44 rounded" />
-                </div>
-              </div>
-
-              {/* Steps timeline skeleton */}
-              <div className="shrink-0 border-t">
-                <div className="flex items-center justify-between border-b bg-muted/20 px-3 py-1.5">
-                  <Skeleton className="h-3 w-10 rounded" />
-                  <Skeleton className="h-3 w-12 rounded" />
-                </div>
-                <div className="flex gap-2 overflow-hidden p-2.5">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={i} className="w-56 shrink-0 rounded-lg border border-border/60 p-2.5">
-                      <div className="mb-1.5 flex items-center gap-1.5">
-                        <Skeleton className="size-3 rounded-full" />
-                        <Skeleton className="h-2.5 w-12 rounded" />
-                      </div>
-                      <Skeleton className="h-3 w-full rounded" />
-                      <Skeleton className="mt-1 h-3 w-3/4 rounded" />
-                    </div>
-                  ))}
                 </div>
               </div>
             </div>

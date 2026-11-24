@@ -36,6 +36,7 @@ const SaveDataSchema = z.object({
         memory: persistedOptionalString.optional(),
         url: persistedOptionalString.optional(),
         message: persistedOptionalString.optional(),
+        timestamp: persistedOptionalNumber.optional(),
       }),
     )
     .optional(),

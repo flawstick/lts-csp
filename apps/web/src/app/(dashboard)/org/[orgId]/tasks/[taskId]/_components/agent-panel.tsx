@@ -32,12 +32,14 @@ import {
   Shield,
   X,
 } from "@/lib/icons";
-import { getStatusConfig, type StepEvent } from "./types";
+import { getStatusConfig } from "./types";
 import {
   formatTimeLeft,
+  isAskedQuestion,
   type ChatTimelineItem,
   type ComposerState,
   type DeliveryState,
+  type RunActivity,
 } from "./chat/chat-logic";
 
 type AgentPanelProps = {
@@ -48,8 +50,9 @@ type AgentPanelProps = {
   jobStatus: string | null;
   isPrepareOnly: boolean;
   question: AgentQuestion | null;
-  currentStep: StepEvent | null;
   timeline: ChatTimelineItem[];
+  /** Run lifecycle, shown outside the conversation. */
+  activity?: RunActivity | null;
   composer: ComposerState;
   messageInput: string;
   setMessageInput: (v: string) => void;
@@ -174,65 +177,6 @@ function PanelHeader({
   );
 }
 
-/** Current browser step. Click or Enter shows the full goal and notes. */
-function LiveStepStrip({ step }: { step: StepEvent }) {
-  const [open, setOpen] = useState(false);
-  const detailsId = useId();
-  const goal = step.goal ?? step.message;
-  if (!goal) return null;
-  const memory =
-    typeof step.memory === "string" &&
-    step.memory.trim() &&
-    !step.memory.startsWith("{") &&
-    !step.memory.startsWith("[")
-      ? step.memory.trim()
-      : null;
-
-  return (
-    <div className="shrink-0 border-b bg-blue-500/[0.04]">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        aria-controls={detailsId}
-        className="focus-visible:ring-ring/50 flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-[11px] outline-none focus-visible:ring-[3px] focus-visible:ring-inset"
-      >
-        <Loader2 className="size-3 shrink-0 animate-spin text-blue-500" />
-        {step.stepNumber ? (
-          <span className="shrink-0 font-semibold text-blue-600 tabular-nums dark:text-blue-400">
-            {step.stepNumber}
-          </span>
-        ) : null}
-        <span className={cn("text-muted-foreground min-w-0 flex-1", !open && "truncate")}>
-          {open ? "Current step" : goal}
-        </span>
-        <ChevronDown
-          className={cn(
-            "text-muted-foreground size-3 shrink-0 transition-transform duration-200",
-            open && "rotate-180",
-          )}
-        />
-      </button>
-      {open ? (
-        <div
-          id={detailsId}
-          className={cn(
-            "max-h-[min(12rem,30svh)] overflow-y-auto px-3 pb-2 text-[11px] leading-relaxed",
-            WRAP_ANYWHERE,
-          )}
-        >
-          <p className="text-foreground whitespace-pre-wrap">{goal}</p>
-          {memory ? (
-            <p className="text-muted-foreground mt-1.5 whitespace-pre-wrap">{memory}</p>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// ── Messages ────────────────────────────────────────────────────────
-
 const DELIVERY_COPY: Record<
   DeliveryState,
   { label: string; icon: React.ReactNode; className: string }
@@ -260,12 +204,7 @@ const DELIVERY_COPY: Record<
 };
 
 function AgentMessage({ item }: { item: Extract<ChatTimelineItem, { kind: "agent" }> }) {
-  // Questions and attention pauses are stored with these id prefixes.
-  const eyebrow = item.id.startsWith("question-")
-    ? "Question for you"
-    : item.id.startsWith("attention-")
-      ? "Needs attention"
-      : null;
+  const eyebrow = item.isQuestion ? "Question for you" : null;
 
   return (
     <div className="group flex min-w-0 gap-2.5">
@@ -287,6 +226,100 @@ function AgentMessage({ item }: { item: Extract<ChatTimelineItem, { kind: "agent
       </div>
     </div>
   );
+}
+
+type UpdateItem = Extract<ChatTimelineItem, { kind: "update" }>;
+
+/** Earlier updates in a long run of steps fold away behind a toggle. */
+const VISIBLE_UPDATES = 4;
+
+/** Consecutive agent step updates, shown compactly like tool activity. */
+function AgentUpdates({ items }: { items: UpdateItem[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const hidden = expanded ? 0 : Math.max(0, items.length - VISIBLE_UPDATES);
+  const visible = items.slice(hidden);
+  return (
+    <div className="flex min-w-0 gap-2.5" aria-label="Agent steps">
+      <div className="flex w-6 shrink-0 justify-center pt-1.5" aria-hidden>
+        <span className="bg-border h-full w-px" />
+      </div>
+      <div className="min-w-0 flex-1 space-y-1">
+        {hidden > 0 ? (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring rounded-sm text-[11px] outline-none focus-visible:ring-2"
+          >
+            {hidden === 1 ? "Show 1 earlier step" : `Show ${hidden} earlier steps`}
+          </button>
+        ) : null}
+        <ul className="space-y-1">
+          {visible.map((item) => (
+            <li
+              key={item.id}
+              className={cn(
+                "text-muted-foreground flex min-w-0 items-baseline gap-1.5 text-[12px] leading-snug",
+                WRAP_ANYWHERE,
+              )}
+            >
+              <span className="bg-muted-foreground/40 mt-[0.45em] size-1 shrink-0 rounded-full" aria-hidden />
+              <span className="line-clamp-3 min-w-0">{item.content}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+const ACTIVITY_DOT: Record<RunActivity["tone"], string> = {
+  live: "bg-blue-500",
+  waiting: "bg-amber-500",
+  done: "bg-emerald-500",
+  error: "bg-red-500",
+  idle: "bg-muted-foreground/40",
+};
+
+/** The run's lifecycle, kept out of the conversation. */
+function RunActivityRow({ activity }: { activity: RunActivity }) {
+  const live = activity.tone === "live";
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="text-muted-foreground flex min-w-0 items-center gap-2 px-3 pb-1.5 text-[11px] leading-snug sm:px-4"
+    >
+      {live ? (
+        <Loader2 className="size-3 shrink-0 animate-spin text-blue-500" aria-hidden />
+      ) : (
+        <span className={cn("size-1.5 shrink-0 rounded-full", ACTIVITY_DOT[activity.tone])} aria-hidden />
+      )}
+      <span className="text-foreground/80 shrink-0 font-medium">{activity.label}</span>
+      {activity.detail ? (
+        <span className={cn("min-w-0 truncate", activity.tone === "error" && "text-destructive")} title={activity.detail}>
+          · {activity.detail}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+type TimelineBlock =
+  | { kind: "updates"; id: string; items: UpdateItem[] }
+  | Exclude<ChatTimelineItem, UpdateItem>;
+
+function groupTimeline(timeline: ChatTimelineItem[]): TimelineBlock[] {
+  const blocks: TimelineBlock[] = [];
+  for (const item of timeline) {
+    if (item.kind !== "update") {
+      blocks.push(item);
+      continue;
+    }
+    const last = blocks[blocks.length - 1];
+    if (last?.kind === "updates") last.items.push(item);
+    else blocks.push({ kind: "updates", id: `updates-${item.id}`, items: [item] });
+  }
+  return blocks;
 }
 
 function OperatorMessage({
@@ -349,8 +382,7 @@ function PendingQuestion({ question }: { question: AgentQuestion | null }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
-  const asked =
-    question?.reason === "agent_question" || question?.reason === "filing_contact";
+  const asked = isAskedQuestion(question);
   const timeLeft = formatTimeLeft(question?.expiresAt, now);
 
   useLayoutEffect(() => {
@@ -369,7 +401,11 @@ function PendingQuestion({ question }: { question: AgentQuestion | null }) {
       <div className="mb-1.5 flex items-center gap-2">
         <span className="size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
         <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
-          {asked ? "The agent needs you" : "Paused"}
+          {asked
+            ? "The agent needs you"
+            : question?.reason === "operator_interrupt"
+              ? "Paused for your message"
+              : "Paused"}
         </span>
         {timeLeft ? (
           <span className="text-muted-foreground ml-auto text-[10px] whitespace-nowrap tabular-nums">
@@ -395,6 +431,11 @@ function PendingQuestion({ question }: { question: AgentQuestion | null }) {
           <div className={cn(MARKDOWN_CLASS, "text-sm text-foreground/85")}>
             <ReactMarkdown>{question.text}</ReactMarkdown>
           </div>
+        ) : question?.reason === "operator_interrupt" ? (
+          <p className="text-foreground/85 text-sm leading-relaxed">
+            The agent stopped to take your message. Resume to continue in the
+            same browser, or add another instruction.
+          </p>
         ) : (
           <p className="text-foreground/85 text-sm leading-relaxed">
             Finish anything you need in the browser, then resume, or tell the
@@ -451,8 +492,7 @@ function Composer({
   const tooLong = length > OPERATOR_MESSAGE_MAX_LENGTH;
   const canSubmit = !disabled && length > 0 && !tooLong;
   const waiting = composer.mode === "waiting";
-  const asked =
-    question?.reason === "agent_question" || question?.reason === "filing_contact";
+  const asked = isAskedQuestion(question);
   const sendLabel = waiting ? "Sending" : composer.submitLabel;
 
   useEffect(() => {
@@ -628,8 +668,8 @@ export function AgentPanel({
   jobStatus,
   isPrepareOnly,
   question,
-  currentStep,
   timeline,
+  activity,
   composer,
   messageInput,
   setMessageInput,
@@ -641,6 +681,11 @@ export function AgentPanel({
   className,
 }: AgentPanelProps) {
   const showQuestion = jobStatus === "paused" && composer.mode !== "waiting";
+  const runIsActive =
+    jobStatus === "queued" ||
+    jobStatus === "starting" ||
+    jobStatus === "running" ||
+    jobStatus === "paused";
   const contentRef = useRef<HTMLDivElement>(null);
   const { following, onScroll, scrollToEnd, followingRef } = useStickToBottom(
     scrollRef,
@@ -674,9 +719,6 @@ export function AgentPanel({
         isPrepareOnly={isPrepareOnly}
         onClose={onClose}
       />
-      {jobStatus === "running" && currentStep ? (
-        <LiveStepStrip step={currentStep} />
-      ) : null}
 
       <div className="relative min-h-0 flex-1">
         <div
@@ -694,10 +736,13 @@ export function AgentPanel({
                 <div className="bg-muted mx-auto mb-3 flex size-10 items-center justify-center rounded-xl">
                   <Bot className="text-muted-foreground/40 size-5" />
                 </div>
-                <p className="text-foreground text-xs font-medium">No activity yet</p>
+                <p className="text-foreground text-xs font-medium">
+                  {runIsActive ? "No updates yet" : "No activity yet"}
+                </p>
                 <p className="text-muted-foreground mx-auto mt-1 max-w-[220px] text-[11px] leading-snug">
-                  Start a run. If the agent gets stuck it asks you here, and your
-                  reply goes straight back to the same browser.
+                  {runIsActive
+                    ? "The agent's steps appear here as it works. If it gets stuck it asks you here."
+                    : "Start a run. If the agent gets stuck it asks you here, and your reply goes straight back to the same browser."}
                 </p>
                 {isSubstanceFormIncomplete && taxReturnId ? (
                   <div className="mt-4 inline-flex flex-wrap items-center justify-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
@@ -717,11 +762,13 @@ export function AgentPanel({
                 ) : null}
               </div>
             ) : (
-              timeline.map((item) =>
-                item.kind === "agent" ? (
-                  <AgentMessage key={item.id} item={item} />
+              groupTimeline(timeline).map((block) =>
+                block.kind === "updates" ? (
+                  <AgentUpdates key={block.id} items={block.items} />
+                ) : block.kind === "agent" ? (
+                  <AgentMessage key={block.id} item={block} />
                 ) : (
-                  <OperatorMessage key={item.id} item={item} />
+                  <OperatorMessage key={block.id} item={block} />
                 ),
               )
             )}
@@ -742,6 +789,7 @@ export function AgentPanel({
 
       {/* The dock never takes the whole panel; past 75% it scrolls itself. */}
       <div className="max-h-[75%] shrink-0 overflow-y-auto overscroll-contain px-2.5 pt-1 pb-2.5 sm:px-3 sm:pb-3">
+        {activity && !showQuestion ? <RunActivityRow activity={activity} /> : null}
         <Composer
           composer={composer}
           question={question}

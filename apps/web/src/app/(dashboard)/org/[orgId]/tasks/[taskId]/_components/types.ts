@@ -23,6 +23,8 @@ export interface StepEvent {
   screenshotUrl?: string;
   message?: string;
   output?: string;
+  /** When the update arrived (ms); missing on steps saved by older builds. */
+  timestamp?: number;
 }
 
 export interface ChatMessage {

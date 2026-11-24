@@ -8,7 +8,6 @@ function renderToolbar(onStart = vi.fn()) {
     orgId="org" jurisdictionName="Guernsey" entityName="Example Entity"
     taskStatus="pending" isConnected={false} liveUrl={null}
     iframeRef={{ current: null }} allJobs={[]} selectedJobId={null} selectedJob={null}
-    isBrowserFullscreen={false} setIsBrowserFullscreen={vi.fn()}
     activeJob={null} runningJob={null} pausedJob={null}
     onSelectJob={vi.fn()} onPause={vi.fn()} onCancel={vi.fn()} onResume={vi.fn()}
     onStart={onStart} onDeleteJob={vi.fn()}
@@ -25,7 +24,6 @@ describe("filing preparation action", () => {
       orgId="org" jurisdictionName="Guernsey" entityName="Example Entity"
       taskStatus="pending" isConnected={false} liveUrl={null}
       iframeRef={{ current: null }} allJobs={[]} selectedJobId={null} selectedJob={null}
-      isBrowserFullscreen={false} setIsBrowserFullscreen={vi.fn()}
       activeJob={null} runningJob={null} pausedJob={null}
       onSelectJob={vi.fn()} onPause={vi.fn()} onCancel={vi.fn()} onResume={vi.fn()}
       onStart={onStart} onDeleteJob={vi.fn()}
