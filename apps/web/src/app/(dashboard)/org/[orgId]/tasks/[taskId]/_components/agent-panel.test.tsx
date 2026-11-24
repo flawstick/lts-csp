@@ -76,7 +76,7 @@ describe("AgentPanel", () => {
 
   it("renders delivery state for reviewer replies", () => {
     const timeline: ChatTimelineItem[] = [
-      { kind: "agent", id: "a", content: "Which address?", timestamp: 1 },
+      { kind: "agent", id: "a", content: "Which address?", timestamp: 1, isQuestion: true },
       {
         kind: "operator",
         id: "op",
@@ -114,11 +114,85 @@ describe("AgentPanel", () => {
 
   it("keeps the transcript reachable by keyboard", () => {
     const timeline: ChatTimelineItem[] = [
-      { kind: "agent", id: "question-q1", content: "Placeholder question.", timestamp: 1 },
+      {
+        kind: "agent",
+        id: "question-q1",
+        content: "Placeholder question.",
+        timestamp: 1,
+        isQuestion: true,
+      },
     ];
     renderPanel({ timeline });
     const log = screen.getByRole("log", { name: "Agent conversation" });
     expect(log.tabIndex).toBe(0);
     expect(screen.getByText("Question for you")).toBeTruthy();
+  });
+
+  it("keeps run lifecycle out of the conversation", () => {
+    const timeline: ChatTimelineItem[] = [
+      { kind: "update", id: "s1", content: "Opened the ESR portal", timestamp: 1 },
+      {
+        kind: "operator",
+        id: "op",
+        content: "Use the 2024 figures.",
+        timestamp: 2,
+        delivery: "queued",
+        replyTo: null,
+        interrupt: true,
+      },
+    ];
+    renderPanel({
+      jobStatus: "running",
+      question: null,
+      timeline,
+      activity: {
+        tone: "waiting",
+        label: "Pausing to pass on your message",
+        detail: null,
+      },
+      composer: deriveComposerState({
+        jobStatus: "running",
+        question: null,
+        hasPendingDelivery: true,
+        isSending: false,
+        isPrepareOnly: true,
+      }),
+    });
+    const log = screen.getByRole("log", { name: "Agent conversation" });
+    expect(log.textContent).toContain("Opened the ESR portal");
+    expect(log.textContent).not.toContain("Pausing to pass on your message");
+    expect(screen.queryByText("Question for you")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain(
+      "Pausing to pass on your message",
+    );
+  });
+
+  it("does not present a message-delivery pause as a question", () => {
+    renderPanel({
+      question: {
+        id: "q2",
+        text: "Pausing the agent to pass on your message...",
+        askedAt: 1,
+        reason: "operator_interrupt",
+      },
+    });
+    expect(screen.queryByText("The agent needs you")).toBeNull();
+    expect(screen.queryByText("Question for you")).toBeNull();
+    expect(screen.getByText("Paused for your message")).toBeTruthy();
+    expect(screen.queryByText(/Pausing the agent to pass on/)).toBeNull();
+  });
+
+  it("folds long runs of agent steps", () => {
+    const timeline: ChatTimelineItem[] = Array.from({ length: 7 }, (_, i) => ({
+      kind: "update" as const,
+      id: `s${i}`,
+      content: `Step ${i}`,
+      timestamp: i,
+    }));
+    renderPanel({ jobStatus: "running", question: null, timeline });
+    expect(screen.queryByText("Step 0")).toBeNull();
+    expect(screen.getByText("Step 6")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show 3 earlier steps" }));
+    expect(screen.getByText("Step 0")).toBeTruthy();
   });
 });

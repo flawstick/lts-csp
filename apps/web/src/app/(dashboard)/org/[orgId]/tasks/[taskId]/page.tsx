@@ -17,6 +17,7 @@ import { MessageSquare } from "@/lib/icons";
 import {
   parseOperatorMessages,
   parsePendingAgentQuestion,
+  hasPendingOperatorInterrupt,
 } from "@repo/database/operator-messages";
 
 import type { JobEvent, StepEvent, ChatMessage } from "./_components/types";
@@ -28,6 +29,9 @@ import {
   buildChatTimeline,
   createClientMessageId,
   deriveComposerState,
+  deriveRunActivity,
+  isAskedQuestion,
+  questionMessageId,
 } from "./_components/chat/chat-logic";
 import { TaskLoading } from "./_components/task-loading";
 import { TaskNotFound } from "./_components/task-not-found";
@@ -113,14 +117,6 @@ export default function TaskDetailPage() {
     onSuccess: (data) => {
       setSelectedJobId(data.jobId);
       connectToSSE(data.jobId);
-      setChatMessages([
-        {
-          id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-          role: "assistant",
-          content: "Task queued. Allocating browser worker...",
-          timestamp: Date.now(),
-        },
-      ]);
       refetch();
     },
     onError: (error) => {
@@ -135,17 +131,7 @@ export default function TaskDetailPage() {
   });
 
   const resumeJobMutation = api.taxReturn.resumeJob.useMutation({
-    onSuccess: (data, variables) => {
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-          role: "assistant",
-          content:
-            "Resuming task... The agent will continue from where it left off.",
-          timestamp: Date.now(),
-        },
-      ]);
+    onSuccess: (_data, variables) => {
       refetch();
 
       // Track job resume
@@ -248,6 +234,7 @@ export default function TaskDetailPage() {
       memory: normalizeOptionalString(step.memory),
       url: normalizeOptionalString(step.url),
       message: normalizeOptionalString(step.message),
+      timestamp: normalizeOptionalNumber(step.timestamp),
     }));
   }, []);
 
@@ -318,45 +305,16 @@ export default function TaskDetailPage() {
         });
         setChatMessages(deduped);
       } else {
+        // Only what the agent reported; run status is shown outside the chat.
         const messages: ChatMessage[] = [];
-
-        const fallbackMessage =
-          job.status === "queued"
-            ? "Task queued. Allocating browser worker..."
-            : job.status === "starting"
-              ? "A browser worker claimed this task and is connecting Browser Use..."
-              : `Task started at ${new Date(job.startedAt || job.createdAt).toLocaleString()}`;
-
-        messages.push({
-          id: `start-${job.id}`,
-          role: "assistant",
-          content: fallbackMessage,
-          timestamp: new Date(job.startedAt || job.createdAt).getTime(),
-        });
-
-        if (resultData?.output) {
-          const isError =
-            job.status === "failed" || resultData.isSuccess === false;
+        if (typeof resultData?.output === "string" && resultData.output.trim()) {
           messages.push({
             id: `output-${job.id}`,
             role: "assistant",
-            content: isError
-              ? `⚠️ ${resultData.output as string}`
-              : (resultData.output as string),
+            content: resultData.output,
             timestamp: job.completedAt
               ? new Date(job.completedAt).getTime()
-              : Date.now(),
-          });
-        }
-
-        if (job.errorMessage) {
-          messages.push({
-            id: `error-${job.id}`,
-            role: "assistant",
-            content: `❌ Error: ${job.errorMessage}`,
-            timestamp: job.completedAt
-              ? new Date(job.completedAt).getTime()
-              : Date.now(),
+              : new Date(job.startedAt || job.createdAt).getTime(),
           });
         }
 
@@ -373,6 +331,7 @@ export default function TaskDetailPage() {
             liveUrl: normalizeOptionalString(step.liveUrl),
             url: normalizeOptionalString(step.url),
             message: normalizeOptionalString(step.message),
+            timestamp: normalizeOptionalNumber(step.timestamp),
           })),
         );
       } else {
@@ -452,99 +411,56 @@ export default function TaskDetailPage() {
           }
 
           if (data.type === "job:step" || data.type === "job:progress") {
-            const stepData = data.data as StepEvent;
+            const stepData = {
+              ...(data.data as StepEvent),
+              timestamp: data.timestamp ?? Date.now(),
+            };
             setCurrentStep(stepData);
 
-            if (stepData.stepNumber || stepData.goal || stepData.message) {
-              setSteps((prev) => {
-                if (
-                  stepData.stepNumber &&
-                  prev.some((s) => s.stepNumber === stepData.stepNumber)
-                ) {
-                  return prev.map((s) =>
-                    s.stepNumber === stepData.stepNumber ? stepData : s,
-                  );
-                }
-                return [...prev, stepData];
-              });
+            // Only the agent's own updates (they carry a goal) are kept; worker
+            // log lines and status pings are not part of the conversation.
+            if (stepData.goal) {
+              setSteps((prev) =>
+                prev.some(
+                  (s) =>
+                    s.stepNumber === stepData.stepNumber &&
+                    s.goal === stepData.goal,
+                )
+                  ? prev
+                  : [...prev, stepData],
+              );
             }
-
-            // Steps are shown in the timeline, not duplicated in chat
           }
 
           if (data.type === "job:started") {
-            setChatMessages((prev) => {
-              if (
-                prev.some((message) =>
-                  message.content.includes(
-                    "I'm now automating the form submission...",
-                  ),
-                )
-              ) {
-                return prev;
-              }
-
-              return [
-                ...prev,
-                {
-                  id: `started-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-                  role: "assistant",
-                  content:
-                    "Task started. I'm now automating the form submission...",
-                  timestamp: Date.now(),
-                },
-              ];
-            });
             refetch();
           }
 
           if (data.type === "job:requires_attention") {
+            // Only a question the agent asked belongs in the conversation. A
+            // manual pause or a pause to deliver a message is run status.
             const question = parsePendingAgentQuestion(data.data);
-            const asked =
-              question?.reason === "agent_question" ||
-              question?.reason === "filing_contact";
-            const message =
-              (asked ? question?.text : undefined) ||
-              (data.data?.message as string) ||
-              (data.data?.output as string);
-            const id = question
-              ? `question-${question.id}`
-              : `attention-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-            setChatMessages((prev) =>
-              prev.some((m) => m.id === id)
-                ? prev
-                : [
-                    ...prev,
-                    {
-                      id,
-                      role: "assistant",
-                      content:
-                        message ||
-                        "I need your help to continue. Complete the step in the browser, then resume or send me an instruction.",
-                      timestamp: Date.now(),
-                    },
-                  ],
-            );
-            if (asked) setIsChatSheetOpen(true);
+            if (question && isAskedQuestion(question)) {
+              const id = questionMessageId(question);
+              setChatMessages((prev) =>
+                prev.some((m) => m.id === id)
+                  ? prev
+                  : [
+                      ...prev,
+                      {
+                        id,
+                        role: "assistant",
+                        content: question.text,
+                        timestamp: question.askedAt,
+                      },
+                    ],
+              );
+              setIsChatSheetOpen(true);
+            }
             refetch();
           }
 
           if (data.type === "job:resumed") {
-            const delivered = Array.isArray(data.data?.deliveredMessageIds)
-              ? (data.data.deliveredMessageIds as unknown[]).length
-              : 0;
-            setChatMessages((prev) => [
-              ...prev,
-              {
-                id: `resumed-${data.timestamp ?? Date.now()}`,
-                role: "assistant",
-                content:
-                  delivered > 0
-                    ? "Got your message. Continuing in the same browser session."
-                    : "Resumed. Continuing in the same browser session.",
-                timestamp: Date.now(),
-              },
-            ]);
             refetch();
           }
 
@@ -705,7 +621,7 @@ export default function TaskDetailPage() {
   // Save chat and steps when they change (only for active jobs)
   useEffect(() => {
     const activeJobForSave = activeJob || pausedJob;
-    if (activeJobForSave && (chatMessages.length > 1 || steps.length > 0)) {
+    if (activeJobForSave && (chatMessages.length > 0 || steps.length > 0)) {
       saveJobData(activeJobForSave.id, chatMessages, steps);
     }
   }, [chatMessages, steps, runningJob, pausedJob, saveJobData]);
@@ -721,7 +637,7 @@ export default function TaskDetailPage() {
       const activeJobId = activeJobIdRef.current;
       if (
         activeJobId &&
-        (chatMessagesRef.current.length > 1 || stepsRef.current.length > 0)
+        (chatMessagesRef.current.length > 0 || stepsRef.current.length > 0)
       ) {
         const data = {
           jobId: activeJobId,
@@ -919,16 +835,26 @@ export default function TaskDetailPage() {
     chatMessages,
     operatorMessages,
     jobStatus: chatJobStatus,
+    steps,
+    question: pendingQuestion,
     sendingIds: sendingMessageIds,
   });
   // Mirrors the worker: anything but an explicit submit run is prepare-only.
   const isPrepareOnlyRun =
     (chatResultData as Record<string, unknown> | null | undefined)
       ?.submissionMode !== "submit_and_capture_pdf";
+  const hasPendingDelivery = operatorMessages.some((m) => m.status === "pending");
+  const runActivity = deriveRunActivity({
+    jobStatus: chatJobStatus,
+    question: pendingQuestion,
+    hasPendingInterrupt: hasPendingOperatorInterrupt(chatResultData),
+    hasPendingDelivery,
+    errorMessage: selectedJob?.errorMessage ?? null,
+  });
   const composerState = deriveComposerState({
     jobStatus: chatJobStatus,
     question: pendingQuestion,
-    hasPendingDelivery: operatorMessages.some((m) => m.status === "pending"),
+    hasPendingDelivery,
     isSending: sendAgentMessageMutation.isPending || sendingMessageIds.size > 0,
     isPrepareOnly: isPrepareOnlyRun,
   });
@@ -949,6 +875,7 @@ export default function TaskDetailPage() {
       isPrepareOnly={isPrepareOnlyRun}
       question={pendingQuestion}
       timeline={chatTimeline}
+      activity={runActivity}
       composer={composerState}
       messageInput={messageInput}
       setMessageInput={setMessageInput}
