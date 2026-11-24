@@ -30,6 +30,15 @@ export type ChatTimelineItem =
       delivery: DeliveryState;
       replyTo: string | null;
       interrupt: boolean;
+    }
+  | {
+      /** Reply under a reviewer message: LTS's status answer or the agent's own. */
+      kind: "reply";
+      id: string;
+      content: string;
+      timestamp: number;
+      toMessageId: string;
+      source: "worker" | "agent";
     };
 
 const ACTIVE_STATUSES = new Set(["queued", "starting", "running", "paused"]);
@@ -112,6 +121,22 @@ export function buildChatTimeline(input: {
   );
   const seen = new Set<string>();
   const items: ChatTimelineItem[] = [];
+  const pushReply = (message: OperatorMessage | undefined) => {
+    const reply = message?.reply;
+    if (!message || !reply) return;
+    const id = `reply-${message.id}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    items.push({
+      kind: "reply",
+      id,
+      content: reply.content,
+      // Never above the message it answers.
+      timestamp: Math.max(reply.createdAt, message.createdAt),
+      toMessageId: message.id,
+      source: reply.source,
+    });
+  };
 
   for (const message of input.chatMessages) {
     if (seen.has(message.id)) continue;
@@ -141,6 +166,7 @@ export function buildChatTimeline(input: {
       replyTo: stored?.inReplyTo?.text ?? null,
       interrupt: stored?.interrupt === true,
     });
+    pushReply(stored);
   }
 
   // The question the paused agent is waiting on, even if this tab never saw
@@ -190,6 +216,7 @@ export function buildChatTimeline(input: {
       replyTo: stored.inReplyTo?.text ?? null,
       interrupt: stored.interrupt === true,
     });
+    pushReply(stored);
   }
 
   // Stable: equal timestamps keep insertion order.
@@ -310,9 +337,9 @@ export function deriveComposerState(input: {
         ...base,
         mode: "interrupt",
         canSend: true,
-        submitLabel: "Pause & send",
-        placeholder: "Give the agent an instruction…",
-        hint: `Sending pauses the agent, then it continues in the same browser with your instruction.${guard}`,
+        submitLabel: "Send",
+        placeholder: "Ask how it's going, or give the agent an instruction…",
+        hint: `Status questions are answered without stopping the agent. Instructions pause it briefly, then it continues in the same browser.${guard}`,
       };
     case "paused": {
       const asked = isAskedQuestion(input.question);

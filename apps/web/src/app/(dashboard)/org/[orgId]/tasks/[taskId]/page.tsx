@@ -460,7 +460,7 @@ export default function TaskDetailPage() {
             refetch();
           }
 
-          if (data.type === "job:resumed") {
+          if (data.type === "job:resumed" || data.type === "job:operator_reply") {
             refetch();
           }
 
@@ -770,11 +770,11 @@ export default function TaskDetailPage() {
     sendAgentMessageMutation.mutate(
       { jobId: targetJob.id, clientMessageId: id, content },
       {
-        onSuccess: async () => {
+        onSuccess: async (result) => {
           // Keep "sending" until the stored copy (with delivery state) is loaded.
           await refetch();
           clearSending();
-          if (targetJob.status === "paused") {
+          if (result.delivery === "resuming") {
             trackClient({
               name: "job_resumed",
               data: {
@@ -843,7 +843,10 @@ export default function TaskDetailPage() {
   const isPrepareOnlyRun =
     (chatResultData as Record<string, unknown> | null | undefined)
       ?.submissionMode !== "submit_and_capture_pdf";
-  const hasPendingDelivery = operatorMessages.some((m) => m.status === "pending");
+  // Status questions are answered by the worker without pausing the agent.
+  const hasPendingDelivery = operatorMessages.some(
+    (m) => m.status === "pending" && m.kind !== "status",
+  );
   const runActivity = deriveRunActivity({
     jobStatus: chatJobStatus,
     question: pendingQuestion,

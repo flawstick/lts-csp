@@ -2,12 +2,19 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 
 import {
+  AGENT_REPLY_PREFIX,
   MAX_OPERATOR_MESSAGES_PER_JOB,
   OPERATOR_MESSAGE_MAX_LENGTH,
   appendOperatorMessage,
   buildOperatorMessagesPromptSection,
+  buildStatusReply,
+  classifyOperatorMessage,
+  deliveryAcknowledgement,
   extractAgentQuestionText,
+  extractAgentReplyToReviewer,
   getPendingOperatorMessages,
+  getPendingStatusQuestions,
+  isQuestionLike,
   hasPendingOperatorInterrupt,
   normalizeOperatorMessageContent,
   parseOperatorMessages,
@@ -21,6 +28,7 @@ import {
   mergeResultDataPatchSql,
   omitWebOwnedResultData,
   preserveWebOwnedResultDataSql,
+  setAgentReplySql,
 } from "./operator-messages-sql";
 
 const dialect = new PgDialect();
@@ -295,5 +303,184 @@ describe("planOperatorMessage", () => {
         reason: "ended",
       });
     }
+  });
+});
+
+describe("chat/status questions never stop the browser", () => {
+  const base = { id: "op_status0001", authorId: "acct", now: 50 };
+
+  it.each([
+    "what are you doing?",
+    "How's it going",
+    "any update?",
+    "Status?",
+    "where are you up to",
+    "which section are you on?",
+    "are you stuck?",
+    "how long left?",
+    "is it almost done?",
+    "still working?",
+  ])("classifies %j as a status question", (content) => {
+    expect(classifyOperatorMessage(content)).toBe("status");
+  });
+
+  it.each(["thanks", "Thank you!", "ok", "great"])("classifies %j as chat", (content) => {
+    expect(classifyOperatorMessage(content)).toBe("chat");
+  });
+
+  it.each([
+    "Stop and wait for me",
+    "Use 31 December 2024 as the period end.",
+    "what are you doing? change the FTE to 2",
+    "why did you enter 3 employees?",
+    "Don't submit yet",
+    "what's the status? also fix section 4",
+    "Status: the director is John, please use that",
+    "how is it going\nalso update the address",
+    "Is the net book value right?",
+    "Submit it",
+    "Yes.",
+  ])("delivers %j to the agent", (content) => {
+    expect(classifyOperatorMessage(content)).toBe("agent");
+  });
+
+  it("running: a status question stays running and is answered by the worker", () => {
+    const plan = planOperatorMessage({
+      ...base,
+      content: "what are you doing?",
+      jobStatus: "running",
+      resultData: {},
+    });
+    expect(plan).toMatchObject({
+      kind: "store",
+      nextStatus: "running",
+      delivery: "answering",
+      message: { kind: "status", status: "pending", inReplyTo: null },
+    });
+    if (plan.kind !== "store") throw new Error("expected store");
+    expect(plan.message.interrupt).toBeUndefined();
+    const resultData = { operatorMessages: plan.messages };
+    expect(hasPendingOperatorInterrupt(resultData)).toBe(false);
+    // Not something the agent run waits for or resumes with.
+    expect(getPendingOperatorMessages(resultData)).toEqual([]);
+    expect(getPendingStatusQuestions(resultData).map((m) => m.id)).toEqual([
+      "op_status0001",
+    ]);
+  });
+
+  it("running: chat is answered too; an instruction still interrupts", () => {
+    expect(
+      planOperatorMessage({ ...base, content: "thanks!", jobStatus: "running", resultData: {} }),
+    ).toMatchObject({ nextStatus: "running", delivery: "answering" });
+    expect(
+      planOperatorMessage({
+        ...base,
+        content: "why did you put 3 in FTE?",
+        jobStatus: "running",
+        resultData: {},
+      }),
+    ).toMatchObject({ nextStatus: "paused", delivery: "interrupting", message: { interrupt: true } });
+  });
+
+  it("paused manually: a status question stays paused; 'ok' still resumes", () => {
+    const resultData = {
+      pendingQuestion: { id: "q1", text: "Paused", askedAt: 1, reason: "user_pause" },
+    };
+    expect(
+      planOperatorMessage({ ...base, content: "where are you?", jobStatus: "paused", resultData }),
+    ).toMatchObject({ nextStatus: "paused", delivery: "answering", message: { kind: "status" } });
+    expect(
+      planOperatorMessage({ ...base, content: "ok", jobStatus: "paused", resultData }),
+    ).toMatchObject({ nextStatus: "running", delivery: "resuming", message: { kind: "instruction" } });
+  });
+
+  it("paused on the agent's question: anything is an answer", () => {
+    const plan = planOperatorMessage({
+      ...base,
+      content: "status?",
+      jobStatus: "paused",
+      resultData: {
+        pendingQuestion: { id: "q1", text: "Which year?", askedAt: 1, reason: "agent_question" },
+      },
+    });
+    expect(plan).toMatchObject({ nextStatus: "running", message: { kind: "answer" } });
+  });
+
+  it("builds a status reply from progress, without client data beyond step text", () => {
+    const running = buildStatusReply({
+      phase: "running",
+      recentUpdates: ["Opened Section 2", "Filling Section 3 – Employees"],
+      stepCount: 42,
+      runStartedAt: 0,
+      now: 6 * 60_000 + 5,
+      question: null,
+    });
+    expect(running).toContain("Still working in the browser (42 steps, 6 minutes in)");
+    expect(running).toContain("Latest: Opened Section 2 → Filling Section 3 – Employees");
+    expect(running).toContain("kept going rather than pausing");
+
+    const paused = buildStatusReply({
+      phase: "paused",
+      recentUpdates: [],
+      stepCount: 3,
+      runStartedAt: null,
+      now: 1,
+      question: { id: "q", text: "Which period end?", askedAt: 1, reason: "agent_question" },
+    });
+    expect(paused).toContain("I'm paused waiting on: Which period end?");
+  });
+
+  it("parses stored replies and extracts the agent's own answer", () => {
+    const [parsed] = parseOperatorMessages({
+      operatorMessages: [
+        message({ kind: "status", reply: { content: "Working.", createdAt: 3, source: "agent" } }),
+      ],
+    });
+    expect(parsed).toMatchObject({ kind: "status", reply: { content: "Working.", source: "agent" } });
+    expect(extractAgentReplyToReviewer("Reply to reviewer: I used the 2024 accounts.")).toBe(
+      "I used the 2024 accounts.",
+    );
+    expect(extractAgentReplyToReviewer("Clicking next")).toBeNull();
+    expect(isQuestionLike("why 3 employees")).toBe(true);
+    expect(isQuestionLike("Use 2024.")).toBe(false);
+    expect(deliveryAcknowledgement({ questionLike: true, interrupted: true })).toContain(
+      "Its answer will appear here",
+    );
+  });
+
+  it("the resume prompt asks the agent to answer questions with the reply prefix", () => {
+    const section = buildOperatorMessagesPromptSection({
+      messages: [message({ content: "Why 3 employees?", kind: "instruction" })],
+      question: null,
+      submissionMode: "prepare_only",
+    });
+    expect(section).toContain(`starting exactly with "${AGENT_REPLY_PREFIX}"`);
+    // The prepare-only stop still applies.
+    expect(section).toContain("Never click Submit");
+  });
+
+  it("reply SQL: status answers ride on delivery; agent answers never overwrite an agent answer", () => {
+    const delivered = render(
+      markOperatorMessagesDeliveredSql({
+        ids: ["m1"],
+        runId: "run",
+        deliveredAt: 9,
+        reply: { content: "Working.", createdAt: 9, source: "worker" },
+      }),
+    );
+    expect(delivered.params).toContain(
+      JSON.stringify({
+        status: "delivered",
+        deliveredAt: 9,
+        deliveredRunId: "run",
+        interrupt: false,
+        reply: { content: "Working.", createdAt: 9, source: "worker" },
+      }),
+    );
+    const agent = render(
+      setAgentReplySql({ ids: ["m1"], reply: { content: "Because.", createdAt: 10, source: "agent" } }),
+    );
+    expect(agent.sql).toContain("item.message->>'status' = 'delivered'");
+    expect(agent.sql).toContain("<> 'agent'");
   });
 });

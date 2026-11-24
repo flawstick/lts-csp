@@ -102,7 +102,7 @@ describe("AgentPanel", () => {
     expect(screen.getByText("Registered office.")).toBeTruthy();
     expect(screen.getByText("Agent has it")).toBeTruthy();
     expect(screen.queryByText("The agent needs you")).toBeNull();
-    expect(screen.getByRole("button", { name: /Pause & send/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
   });
 
   it("uses an icon-only send control that names its action", () => {

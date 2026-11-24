@@ -4,6 +4,7 @@ import {
   DEFAULT_PREPARE_PROFILE,
   isBudgetExhausted,
   modelParamsForProfile,
+  modelTakesNoParams,
   profileForSubmissionMode,
   resolveBrowserUseRunConfig,
 } from "./browser-use-config";
@@ -67,6 +68,40 @@ describe("resolveBrowserUseRunConfig", () => {
     expect(
       resolveBrowserUseRunConfig({ BROWSER_USE_PREPARE_MODEL: "  " }),
     ).toMatchObject({ ok: true });
+  });
+
+  it("allows bu-ultrafast for prepare-only runs only, with no model params", () => {
+    const result = resolveBrowserUseRunConfig({
+      BROWSER_USE_PREPARE_MODEL: "bu-ultrafast",
+      BROWSER_USE_PREPARE_MAX_COST_USD: "1",
+    });
+    expect(result.ok && result.config.prepare).toMatchObject({
+      kind: "prepare",
+      model: "bu-ultrafast",
+      maxCostUsd: 1,
+    });
+    // Final filing keeps its profile untouched.
+    expect(result.ok && result.config.final).toEqual(DEFAULT_FINAL_PROFILE);
+    if (!result.ok) return;
+    expect(modelTakesNoParams(result.config.prepare.model)).toBe(true);
+    expect(modelParamsForProfile(result.config.prepare)).toBeUndefined();
+    expect(
+      profileForSubmissionMode(result.config, "submit_and_capture_pdf").model,
+    ).toBe("claude-opus-5-5");
+  });
+
+  it.each([
+    [{ BROWSER_USE_FINAL_MODEL: "bu-ultrafast" }, "BROWSER_USE_FINAL_MODEL"],
+    [{ BROWSER_USE_PREPARE_MODEL: "bu-fast" }, "BROWSER_USE_PREPARE_MODEL"],
+    // An effort cannot apply to a preset that takes no params: refuse it.
+    [
+      { BROWSER_USE_PREPARE_MODEL: "bu-ultrafast", BROWSER_USE_PREPARE_EFFORT: "low" },
+      "BROWSER_USE_PREPARE_EFFORT",
+    ],
+  ])("refuses unsafe bu-ultrafast configuration %j", (env, name) => {
+    const result = resolveBrowserUseRunConfig(env);
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toContain(name);
   });
 
   it("builds documented Anthropic model params", () => {

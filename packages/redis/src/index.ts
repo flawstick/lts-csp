@@ -52,7 +52,9 @@ export type JobEventType =
   | "job:completed"
   | "job:failed"
   | "job:requires_attention"
-  | "job:resumed";
+  | "job:resumed"
+  /** A reviewer message got a reply (worker status answer or the agent's own). */
+  | "job:operator_reply";
 
 export interface JobEvent {
   type: JobEventType;

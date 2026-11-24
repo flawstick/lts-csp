@@ -7,7 +7,8 @@ export interface JobEvent {
     | "job:completed"
     | "job:failed"
     | "job:requires_attention"
-    | "job:resumed";
+    | "job:resumed"
+    | "job:operator_reply";
   jobId: string;
   timestamp: number;
   data: Record<string, unknown>;
