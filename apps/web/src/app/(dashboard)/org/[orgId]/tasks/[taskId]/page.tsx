@@ -23,7 +23,6 @@ import type { JobEvent, StepEvent, ChatMessage } from "./_components/types";
 import { TaskHeader } from "./_components/task-header";
 import { BrowserToolbar } from "./_components/browser-toolbar";
 import { BrowserFrame } from "./_components/browser-frame";
-import { StepsTimeline } from "./_components/steps-timeline";
 import { AgentPanel } from "./_components/agent-panel";
 import {
   buildChatTimeline,
@@ -78,7 +77,6 @@ export default function TaskDetailPage() {
   const [steps, setSteps] = useState<StepEvent[]>([]);
   const [currentStep, setCurrentStep] = useState<StepEvent | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [isBrowserFullscreen, setIsBrowserFullscreen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [messageInput, setMessageInput] = useState("");
   const [finalOutput, setFinalOutput] = useState<string | null>(null);
@@ -91,7 +89,6 @@ export default function TaskDetailPage() {
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const connectedJobIdRef = useRef<string | null>(null);
-  const stepsScrollRef = useRef<HTMLDivElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const [panelGroupEl, setPanelGroupEl] = useState<HTMLDivElement | null>(null);
   const agentMinSize = useMinPanelPercent(panelGroupEl, AGENT_PANEL_MIN_PX, {
@@ -912,7 +909,6 @@ export default function TaskDetailPage() {
   const jurisdictionName = task.taxReturn?.jurisdiction?.name ?? null;
   const entityName = task.taxReturn?.entityName ?? null;
   const browserStatus = selectedJob?.status ?? activeJob?.status ?? null;
-  const isRunning = !!runningJob;
 
   const chatJobStatus = selectedJob?.status ?? null;
   const chatResultData = selectedJob?.resultData;
@@ -952,7 +948,6 @@ export default function TaskDetailPage() {
       jobStatus={chatJobStatus}
       isPrepareOnly={isPrepareOnlyRun}
       question={pendingQuestion}
-      currentStep={currentStep}
       timeline={chatTimeline}
       composer={composerState}
       messageInput={messageInput}
@@ -984,11 +979,11 @@ export default function TaskDetailPage() {
         taxReturnId={task.taxReturn?.id}
       />
 
-      <div ref={setPanelGroupEl} className="min-h-0 flex-1 overflow-hidden">
+      <div ref={setPanelGroupEl} className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <ResizablePanelGroup direction="horizontal" className="h-full">
           {/* Browser panel */}
           <ResizablePanel id="browser" order={1} defaultSize={68} minSize={30}>
-            <div className="flex h-full flex-col">
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
               <BrowserToolbar
                 orgId={orgId}
                 jurisdictionName={jurisdictionName}
@@ -1001,8 +996,6 @@ export default function TaskDetailPage() {
                 allJobs={allJobs}
                 selectedJobId={selectedJobId}
                 selectedJob={selectedJob}
-                isBrowserFullscreen={isBrowserFullscreen}
-                setIsBrowserFullscreen={setIsBrowserFullscreen}
                 activeJob={activeJob ?? null}
                 runningJob={runningJob ?? null}
                 pausedJob={pausedJob ?? null}
@@ -1027,15 +1020,6 @@ export default function TaskDetailPage() {
                 isStartPending={startJobMutation.isPending}
                 onStart={() => handleStart()}
               />
-
-              {!isBrowserFullscreen ? (
-                <StepsTimeline
-                  steps={steps}
-                  currentStep={currentStep}
-                  isRunning={isRunning}
-                  scrollRef={stepsScrollRef}
-                />
-              ) : null}
             </div>
           </ResizablePanel>
 

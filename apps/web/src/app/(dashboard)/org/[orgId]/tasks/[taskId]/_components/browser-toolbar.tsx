@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
   TooltipContent,
@@ -36,8 +35,6 @@ import {
   Monitor,
   ExternalLink,
   CheckCircle2,
-  Maximize2,
-  Minimize2,
   History,
   ChevronDown,
   XCircle,
@@ -74,8 +71,6 @@ type BrowserToolbarProps = {
   allJobs: Job[];
   selectedJobId: string | null;
   selectedJob: Job | null | undefined;
-  isBrowserFullscreen: boolean;
-  setIsBrowserFullscreen: (v: boolean) => void;
   activeJob: Job | null | undefined;
   runningJob: Job | null | undefined;
   pausedJob: Job | null | undefined;
@@ -146,8 +141,6 @@ export function BrowserToolbar({
   allJobs,
   selectedJobId,
   selectedJob,
-  isBrowserFullscreen,
-  setIsBrowserFullscreen,
   activeJob,
   runningJob,
   pausedJob,
@@ -415,27 +408,6 @@ export function BrowserToolbar({
               Live
             </Badge>
           ) : null}
-
-          <Separator orientation="vertical" className="mx-0.5 h-4" />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-6"
-                onClick={() => setIsBrowserFullscreen(!isBrowserFullscreen)}
-              >
-                {isBrowserFullscreen ? (
-                  <Minimize2 className="size-3.5" />
-                ) : (
-                  <Maximize2 className="size-3.5" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {isBrowserFullscreen ? "Exit fullscreen" : "Fullscreen"}
-            </TooltipContent>
-          </Tooltip>
 
           {runningJob ? (
             <>

@@ -22,7 +22,6 @@ function renderPanel(
     jobStatus: "paused",
     isPrepareOnly: true,
     question,
-    currentStep: null,
     timeline: [],
     composer: deriveComposerState({
       jobStatus: "paused",
@@ -121,25 +120,5 @@ describe("AgentPanel", () => {
     const log = screen.getByRole("log", { name: "Agent conversation" });
     expect(log.tabIndex).toBe(0);
     expect(screen.getByText("Question for you")).toBeTruthy();
-  });
-
-  it("expands the live step for its full goal", () => {
-    renderPanel({
-      jobStatus: "running",
-      question: null,
-      currentStep: { stepNumber: 4, goal: "Placeholder goal text", memory: "Placeholder note" },
-      composer: deriveComposerState({
-        jobStatus: "running",
-        question: null,
-        hasPendingDelivery: false,
-        isSending: false,
-        isPrepareOnly: true,
-      }),
-    });
-    const toggle = screen.getByRole("button", { name: /Placeholder goal text/ });
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("Placeholder note")).toBeTruthy();
   });
 });

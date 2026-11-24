@@ -39,11 +39,12 @@ export function BrowserFrame({
 
   if (themedUrl) {
     return (
-      <div className="relative min-h-0 flex-1 bg-neutral-900 dark:bg-neutral-950">
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-neutral-900 dark:bg-neutral-950">
         <iframe
           ref={iframeRef}
           src={themedUrl}
-          className="absolute inset-0 h-full w-full border-0"
+          title="Live filing browser"
+          className="absolute inset-0 block size-full border-0"
           allow="clipboard-write; autoplay"
         />
       </div>

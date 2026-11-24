@@ -32,7 +32,7 @@ import {
   Shield,
   X,
 } from "@/lib/icons";
-import { getStatusConfig, type StepEvent } from "./types";
+import { getStatusConfig } from "./types";
 import {
   formatTimeLeft,
   type ChatTimelineItem,
@@ -48,7 +48,6 @@ type AgentPanelProps = {
   jobStatus: string | null;
   isPrepareOnly: boolean;
   question: AgentQuestion | null;
-  currentStep: StepEvent | null;
   timeline: ChatTimelineItem[];
   composer: ComposerState;
   messageInput: string;
@@ -173,65 +172,6 @@ function PanelHeader({
     </div>
   );
 }
-
-/** Current browser step. Click or Enter shows the full goal and notes. */
-function LiveStepStrip({ step }: { step: StepEvent }) {
-  const [open, setOpen] = useState(false);
-  const detailsId = useId();
-  const goal = step.goal ?? step.message;
-  if (!goal) return null;
-  const memory =
-    typeof step.memory === "string" &&
-    step.memory.trim() &&
-    !step.memory.startsWith("{") &&
-    !step.memory.startsWith("[")
-      ? step.memory.trim()
-      : null;
-
-  return (
-    <div className="shrink-0 border-b bg-blue-500/[0.04]">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        aria-controls={detailsId}
-        className="focus-visible:ring-ring/50 flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-[11px] outline-none focus-visible:ring-[3px] focus-visible:ring-inset"
-      >
-        <Loader2 className="size-3 shrink-0 animate-spin text-blue-500" />
-        {step.stepNumber ? (
-          <span className="shrink-0 font-semibold text-blue-600 tabular-nums dark:text-blue-400">
-            {step.stepNumber}
-          </span>
-        ) : null}
-        <span className={cn("text-muted-foreground min-w-0 flex-1", !open && "truncate")}>
-          {open ? "Current step" : goal}
-        </span>
-        <ChevronDown
-          className={cn(
-            "text-muted-foreground size-3 shrink-0 transition-transform duration-200",
-            open && "rotate-180",
-          )}
-        />
-      </button>
-      {open ? (
-        <div
-          id={detailsId}
-          className={cn(
-            "max-h-[min(12rem,30svh)] overflow-y-auto px-3 pb-2 text-[11px] leading-relaxed",
-            WRAP_ANYWHERE,
-          )}
-        >
-          <p className="text-foreground whitespace-pre-wrap">{goal}</p>
-          {memory ? (
-            <p className="text-muted-foreground mt-1.5 whitespace-pre-wrap">{memory}</p>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// ── Messages ────────────────────────────────────────────────────────
 
 const DELIVERY_COPY: Record<
   DeliveryState,
@@ -628,7 +568,6 @@ export function AgentPanel({
   jobStatus,
   isPrepareOnly,
   question,
-  currentStep,
   timeline,
   composer,
   messageInput,
@@ -674,9 +613,6 @@ export function AgentPanel({
         isPrepareOnly={isPrepareOnly}
         onClose={onClose}
       />
-      {jobStatus === "running" && currentStep ? (
-        <LiveStepStrip step={currentStep} />
-      ) : null}
 
       <div className="relative min-h-0 flex-1">
         <div
