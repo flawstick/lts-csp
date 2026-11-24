@@ -13,6 +13,7 @@ import {
   isApprovalOfStaleForm,
   isPendingGbpConversion,
   normalizeCurrencyCode,
+  parseFinancialFiguresMetadata,
   requiresManagerSignoff,
   resolveExtractedFinancialFigures,
   stripManagerSignoffFields,
@@ -298,6 +299,47 @@ describe("financial statement currency", () => {
       now,
     );
     expect(isPendingGbpConversion(confirmed)).toBe(false);
+  });
+
+  it("records a person's Net Book Value entry, and only for that field", () => {
+    const extracted = withFinancialFiguresMetadata(
+      {},
+      {
+        currency: "GBP",
+        gbpStated: false,
+        sourceTotalProfit: "1",
+        sourceNetBookValue: "-2894",
+        extractedAt: "2026-11-01T00:00:00.000Z",
+        gbpConfirmedAt: null,
+      },
+    );
+    const profitOnly = confirmFinancialFiguresMetadata(extracted, ["totalProfit"], now);
+    expect(parseFinancialFiguresMetadata(profitOnly)?.netBookValueEnteredAt).toBeNull();
+    const entered = confirmFinancialFiguresMetadata(extracted, ["netBookValue"], now);
+    expect(parseFinancialFiguresMetadata(entered)).toMatchObject({
+      sourceNetBookValue: "-2894",
+      netBookValueEnteredAt: now.toISOString(),
+    });
+
+    // Without any extraction record, only a Net Book Value entry is recorded.
+    expect(confirmFinancialFiguresMetadata({}, ["totalProfit"], now)).toBeNull();
+    const manual = confirmFinancialFiguresMetadata({ other: 1 }, ["netBookValue"], now);
+    expect(manual?.other).toBe(1);
+    expect(isPendingGbpConversion(manual)).toBe(false);
+    expect(parseFinancialFiguresMetadata(manual)?.netBookValueEnteredAt).toBe(now.toISOString());
+  });
+
+  it("a fresh extraction clears the person-entered Net Book Value mark", () => {
+    const resolved = resolveExtractedFinancialFigures({
+      currency: "GBP",
+      netBookValue: "-2894",
+      existing: { netBookValue: "125000" },
+      previousMetadata: {
+        financialFigures: { netBookValueEnteredAt: "2026-11-02T00:00:00.000Z" },
+      },
+      now,
+    });
+    expect(resolved.metadata.netBookValueEnteredAt).toBeUndefined();
   });
 });
 

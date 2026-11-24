@@ -173,6 +173,7 @@ export function extractAgentQuestionText(output: string): string {
     .trim()
     .replace(/^\**\s*REQUIRES_ATTENTION\s*:?\s*\**\s*/i, "")
     .replace(/^\**\s*NEEDS_FILING_CONTACT\s*:?\s*\**\s*/i, "")
+    .replace(/^\**\s*NET_BOOK_VALUE_CHECK\s*:?\s*\**\s*/i, "")
     .trim();
   return text || output.trim();
 }
