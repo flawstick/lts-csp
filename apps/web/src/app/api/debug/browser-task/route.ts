@@ -104,7 +104,8 @@ export async function POST(request: Request) {
         taskId: task.id,
         jobNumber: 1,
         status: "queued",
-        aiModel: "claude-opus-5-5",
+        // Recorded by the worker from the run Browser Use starts.
+        aiModel: null,
         cloudwatchLogGroup: env.ECS_LOG_GROUP,
         resultData: {
           submissionMode: "prepare_only",

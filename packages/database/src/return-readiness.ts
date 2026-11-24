@@ -361,6 +361,12 @@ export type FinancialFiguresMetadata = {
   extractedAt: string | null;
   /** Set when a person saved the profit / net book value figures. */
   gbpConfirmedAt: string | null;
+  /**
+   * Set when a person saved the Net Book Value itself after the latest
+   * extraction (extraction writes fresh metadata without it). Extraction reads
+   * net assets / total equity, so only this marks a figure entered by a person.
+   */
+  netBookValueEnteredAt?: string | null;
 };
 
 export function parseFinancialFiguresMetadata(
@@ -380,6 +386,7 @@ export function parseFinancialFiguresMetadata(
     sourceNetBookValue: str("sourceNetBookValue"),
     extractedAt: str("extractedAt"),
     gbpConfirmedAt: str("gbpConfirmedAt"),
+    netBookValueEnteredAt: str("netBookValueEnteredAt"),
   };
 }
 
@@ -402,19 +409,32 @@ export function confirmFinancialFiguresMetadata(
   changedFields: string[],
   now = new Date(),
 ): Record<string, unknown> | null {
-  if (
-    !changedFields.includes("totalProfit") &&
-    !changedFields.includes("netBookValue")
-  ) {
+  const netBookValueChanged = changedFields.includes("netBookValue");
+  if (!changedFields.includes("totalProfit") && !netBookValueChanged) {
     return null;
   }
 
   const existing = parseFinancialFiguresMetadata(metadata);
-  if (!existing) return null;
+  if (!existing) {
+    if (!netBookValueChanged) return null;
+    // No extraction record: note only that a person entered Net Book Value.
+    return withFinancialFiguresMetadata(metadata, {
+      currency: null,
+      gbpStated: false,
+      sourceTotalProfit: null,
+      sourceNetBookValue: null,
+      extractedAt: null,
+      gbpConfirmedAt: null,
+      netBookValueEnteredAt: now.toISOString(),
+    });
+  }
 
   return withFinancialFiguresMetadata(metadata, {
     ...existing,
     gbpConfirmedAt: now.toISOString(),
+    ...(netBookValueChanged
+      ? { netBookValueEnteredAt: now.toISOString() }
+      : {}),
   });
 }
 

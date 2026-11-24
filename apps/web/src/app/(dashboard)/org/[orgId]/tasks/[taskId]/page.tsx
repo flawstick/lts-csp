@@ -34,6 +34,29 @@ import { TaskLoading } from "./_components/task-loading";
 import { TaskNotFound } from "./_components/task-not-found";
 import { DirectionalTransition } from "@/components/view-transition";
 
+/** Below this width the chat's messages and composer get cramped. */
+const AGENT_PANEL_MIN_PX = 320;
+
+/** Panel sizes are percentages; convert a pixel minimum for the group's width. */
+function useMinPanelPercent(
+  groupEl: HTMLElement | null,
+  minPx: number,
+  { floor, ceiling }: { floor: number; ceiling: number },
+) {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!groupEl || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setWidth(entry.contentRect.width);
+    });
+    observer.observe(groupEl);
+    return () => observer.disconnect();
+  }, [groupEl]);
+  if (width <= 0) return floor;
+  const percent = Math.ceil((minPx / width) * 100);
+  return Math.min(ceiling, Math.max(floor, percent));
+}
+
 function normalizeOptionalString(value: unknown) {
   return typeof value === "string" ? value : undefined;
 }
@@ -70,6 +93,11 @@ export default function TaskDetailPage() {
   const connectedJobIdRef = useRef<string | null>(null);
   const stepsScrollRef = useRef<HTMLDivElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const [panelGroupEl, setPanelGroupEl] = useState<HTMLDivElement | null>(null);
+  const agentMinSize = useMinPanelPercent(panelGroupEl, AGENT_PANEL_MIN_PX, {
+    floor: 24,
+    ceiling: 50,
+  });
 
   // Refs to track latest state for saving (avoids stale closure issues)
   const chatMessagesRef = useRef<ChatMessage[]>([]);
@@ -674,18 +702,8 @@ export default function TaskDetailPage() {
     return () => clearInterval(interval);
   }, [runningJob, pausedJob, latestJob, refetch]);
 
-  // Auto-scroll chat
-  useEffect(() => {
-    const scrollAreaRoot = chatScrollRef.current;
-    if (scrollAreaRoot) {
-      const viewport = scrollAreaRoot.querySelector(
-        '[data-slot="scroll-area-viewport"]',
-      ) as HTMLElement;
-      if (viewport) {
-        viewport.scrollTop = viewport.scrollHeight;
-      }
-    }
-  }, [chatMessages, steps, currentStep]);
+  // The agent panel follows new chat messages itself, and only while the
+  // reader is at the end of the transcript.
 
   // Save chat and steps when they change (only for active jobs)
   useEffect(() => {
@@ -966,7 +984,7 @@ export default function TaskDetailPage() {
         taxReturnId={task.taxReturn?.id}
       />
 
-      <div className="flex-1 overflow-hidden">
+      <div ref={setPanelGroupEl} className="min-h-0 flex-1 overflow-hidden">
         <ResizablePanelGroup direction="horizontal" className="h-full">
           {/* Browser panel */}
           <ResizablePanel id="browser" order={1} defaultSize={68} minSize={30}>
@@ -1029,7 +1047,7 @@ export default function TaskDetailPage() {
                 id="agent"
                 order={2}
                 defaultSize={32}
-                minSize={24}
+                minSize={agentMinSize}
                 maxSize={50}
               >
                 {agentPanel()}

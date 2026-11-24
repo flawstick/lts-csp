@@ -114,6 +114,13 @@ describe("content normalisation", () => {
     expect(
       extractAgentQuestionText("**REQUIRES_ATTENTION: NEEDS_FILING_CONTACT:** Contact step reached."),
     ).toBe("Contact step reached.");
+    expect(
+      extractAgentQuestionText(
+        '**REQUIRES_ATTENTION: NET_BOOK_VALUE_CHECK:** The saved Net Book Value "-2894" is not a clear amount. What tangible-asset Net Book Value should be entered?',
+      ),
+    ).toBe(
+      'The saved Net Book Value "-2894" is not a clear amount. What tangible-asset Net Book Value should be entered?',
+    );
     expect(extractAgentQuestionText("Login failed")).toBe("Login failed");
   });
 });

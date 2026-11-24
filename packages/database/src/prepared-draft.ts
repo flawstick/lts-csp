@@ -283,6 +283,8 @@ export function resolvePreparedDraft(input: {
   excludeJobId?: string;
   /** The prepared job the submit run was enqueued against (worker side). */
   expectedPreparedJobId?: string | null;
+  /** Certificate 3 drafts must have passed the current Net Book Value policy. */
+  requireNetBookValueReview?: boolean;
 }): PreparedDraftResolution {
   const unconfirmed = getUnconfirmedSubmitBlocker(input);
   if (unconfirmed) return { ok: false, blocker: unconfirmed };
@@ -339,6 +341,8 @@ export function resolvePreparedDraft(input: {
         "The latest preparation reported or attempted a submission. Check the Guernsey Tax Portal instead of submitting again.",
     };
   }
+  const netBookValueBlocker = getNetBookValueSubmitBlocker(data, input.requireNetBookValueReview);
+  if (netBookValueBlocker) return { ok: false, blocker: netBookValueBlocker };
   const draft = parsePreparedDraftRecord(data.preparedDraft);
   if (!draft) {
     return {
@@ -368,4 +372,35 @@ export function resolvePreparedDraft(input: {
     };
   }
   return { ok: true, preparedJob, draft };
+}
+
+/** Worker-written: what the prepared draft holds for Net Book Value. */
+export const PORTAL_NET_BOOK_VALUE_KEY = "portalNetBookValue";
+
+/**
+ * A draft whose Net Book Value still needs a reviewer, or holds 0 in place of
+ * a negative figure no person has confirmed on the form, is not filed.
+ */
+export function getNetBookValueSubmitBlocker(
+  resultData: unknown,
+  requireReviewRecord = false,
+): string | null {
+  const record =
+    resultData && typeof resultData === "object" && !Array.isArray(resultData)
+      ? (resultData as Record<string, unknown>)[PORTAL_NET_BOOK_VALUE_KEY]
+      : null;
+  const status =
+    record && typeof record === "object" && !Array.isArray(record)
+      ? (record as Record<string, unknown>).status
+      : null;
+  if (status === "unresolved") {
+    return `The latest preparation left Net Book Value for a reviewer to confirm. Enter the tangible-asset Net Book Value on the form. ${PREPARE_AGAIN}`;
+  }
+  if (status === "zero_unconfirmed") {
+    return `The latest preparation entered Net Book Value as 0 in place of a negative figure. Confirm the Net Book Value on the form (0, or the correct tangible-asset amount). ${PREPARE_AGAIN}`;
+  }
+  if (requireReviewRecord && status !== "as_saved" && status !== "reviewer_confirmed" && status !== "missing") {
+    return `The latest draft was prepared before the tangible-asset Net Book Value check. ${PREPARE_AGAIN}`;
+  }
+  return null;
 }

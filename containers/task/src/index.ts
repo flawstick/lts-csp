@@ -12,6 +12,7 @@ import {
   eq,
   sql,
   orgSettings,
+  parseFinancialFiguresMetadata,
   type TaxReturnFileCategory,
   type TaxReturnFileRole,
 } from "@repo/database";
@@ -21,6 +22,7 @@ import {
   getFilingOperation,
   getUnconfirmedSubmitBlocker,
   parsePreparedDraftOutput,
+  PORTAL_NET_BOOK_VALUE_KEY,
   resolvePreparedDraft,
   SUBMIT_PREPARED_DISPATCHED_KEY,
   SUBMIT_PREPARED_OPERATION,
@@ -42,7 +44,6 @@ import {
 } from "@repo/database/operator-messages-sql";
 import {
   BrowserUseClient,
-  BROWSER_USE_MODEL,
   type BrowserUseSessionStatus,
   type BrowserUseFileInfo,
   type BrowserUseSession,
@@ -60,6 +61,22 @@ import {
   type PrepareOnlyGuardStatus,
 } from "./prepare-only-guard";
 import { decideFilingContactStartup } from "./filing-contact-policy";
+import {
+  isBudgetExhausted,
+  profileForSubmissionMode,
+  resolveBrowserUseRunConfig,
+} from "./browser-use-config";
+import {
+  decidePortalNetBookValue,
+  initialNetBookValueStatus,
+  isNetBookValueQuestion,
+  MAX_UNCLEAR_NET_BOOK_VALUE_REPLIES,
+  netBookValueProvenanceFromMetadata,
+  portalNetBookValueFromReviewerReply,
+  type PortalNetBookValue,
+  type PortalNetBookValueStatus,
+  type ReviewerNetBookValue,
+} from "./portal-net-book-value";
 import {
   buildResumePrompt,
   buildSubmitPreparedReturnPrompt,
@@ -95,6 +112,9 @@ const PREPARE_ONLY_GUARD_EXTENSION_ID =
 const PREPARE_ONLY_GUARD_REQUIRED = isPrepareOnlyGuardRequired(
   process.env.BROWSER_USE_PREPARE_ONLY_GUARD_REQUIRED,
 );
+// Model, effort and per-session USD budget by mode (see browser-use-config).
+// Invalid values refuse each job before any browser run; never a fallback.
+const BROWSER_USE_RUN_CONFIG = resolveBrowserUseRunConfig(process.env);
 const WORKER_MODE =
   process.env.WORKER_MODE === "single"
     ? "single"
@@ -1021,6 +1041,7 @@ async function refuseAfterUnconfirmedSubmit(runtime: ActiveJobRuntime) {
 async function verifyPreparedDraftForSubmission(params: {
   runtime: ActiveJobRuntime;
   inputFingerprint: string;
+  requireNetBookValueReview: boolean;
 }): Promise<PreparedDraftRecord> {
   const { runtime, inputFingerprint } = params;
   if (runtime.submissionMode !== "submit_and_capture_pdf") {
@@ -1035,6 +1056,7 @@ async function verifyPreparedDraftForSubmission(params: {
     currentFingerprint: inputFingerprint,
     excludeJobId: runtime.jobId,
     expectedPreparedJobId: runtime.preparedJobId,
+    requireNetBookValueReview: params.requireNetBookValueReview,
   });
   if (!resolution.ok) {
     throw new Error(`Submit prepared return refused: ${resolution.blocker}`);
@@ -1394,9 +1416,79 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     if (filingContactDecision.kind === "refuse") {
       throw new Error(filingContactDecision.error);
     }
+    if (!BROWSER_USE_RUN_CONFIG.ok) {
+      throw new Error(BROWSER_USE_RUN_CONFIG.error);
+    }
+    const runProfile = profileForSubmissionMode(
+      BROWSER_USE_RUN_CONFIG.config,
+      submissionMode,
+    );
+    // Only fill runs type Net Book Value (Certificate 3 financial statements);
+    // Submit prepared return never edits sections.
+    const netBookValueProvenance = netBookValueProvenanceFromMetadata(
+      parseFinancialFiguresMetadata(taxReturn.metadata),
+    );
+    const netBookValueDecision: PortalNetBookValue | null =
+      !isSubmitPrepared &&
+      taxReturn.substanceForm.certificateType !== "Certificate 2"
+        ? decidePortalNetBookValue(
+            taxReturn.substanceForm.netBookValue,
+            netBookValueProvenance,
+          )
+        : null;
+    // Worker-parsed reviewer answer (kept for the whole session) and how many
+    // replies to the Net Book Value question could not be read as an amount.
+    let reviewerNetBookValue: ReviewerNetBookValue | null = null;
+    let unclearNetBookValueReplies = 0;
+    const netBookValueStatus = (): PortalNetBookValueStatus | null =>
+      !netBookValueDecision
+        ? null
+        : reviewerNetBookValue
+          ? reviewerNetBookValue.negativeZeroed
+            ? "zero_unconfirmed"
+            : "reviewer_confirmed"
+          : initialNetBookValueStatus(netBookValueDecision);
+    // Kinds and counts only: the saved figure stays in the form, unchanged.
+    const netBookValueRecord = () =>
+      netBookValueDecision
+        ? {
+            policy: "verified_negative_entered_as_zero",
+            decision: netBookValueDecision.kind,
+            reason:
+              netBookValueDecision.kind === "needs_review"
+                ? netBookValueDecision.reason
+                : undefined,
+            provenance: netBookValueProvenance,
+            status: netBookValueStatus(),
+            unclearReplies: unclearNetBookValueReplies || undefined,
+          }
+        : undefined;
+    await updateActiveJobRecord({
+      resultDataPatch: {
+        browserUseModel: runProfile.model,
+        browserUseEffort: runProfile.effort,
+        browserUseMaxCostUsd: runProfile.maxCostUsd,
+        [PORTAL_NET_BOOK_VALUE_KEY]: netBookValueRecord(),
+      },
+    });
+    if (
+      submissionMode === "submit_and_capture_pdf" &&
+      (netBookValueDecision?.kind === "needs_review" ||
+        netBookValueDecision?.kind === "negative_zero_candidate")
+    ) {
+      // A final filing never starts from an unverified Net Book Value or an
+      // unconfirmed 0 in place of a negative one; a prepare run asks instead.
+      throw new Error(
+        "Submission refused: the Net Book Value has not been confirmed as a non-negative tangible-asset figure. Enter it on the form, or prepare the return first so a reviewer can confirm it.",
+      );
+    }
     await refuseAfterUnconfirmedSubmit(runtime);
     const preparedDraft = isSubmitPrepared
-      ? await verifyPreparedDraftForSubmission({ runtime, inputFingerprint })
+      ? await verifyPreparedDraftForSubmission({
+          runtime,
+          inputFingerprint,
+          requireNetBookValueReview: taxReturn.substanceForm.certificateType !== "Certificate 2",
+        })
       : null;
     if (preparedDraft) {
       await log("Verified prepared draft for submission", {
@@ -1514,7 +1606,29 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       filingOperation: runtime.filingOperation,
     });
 
-    const prompt = preparedDraft
+    const buildFillPrompt = () =>
+      buildSubstanceFormPrompt({
+        taxReturn: taxReturn as any,
+        substanceForm: taxReturn.substanceForm as any,
+        portalUrl: taxReturn.jurisdiction?.portalUrl || "https://my.gov.gg",
+        returnLink: taxReturn.link || undefined,
+        overrideSaved,
+        submissionMode,
+        financialStatementsFile,
+        financialStatementsUrl: financialStatementsFile?.url ?? null,
+        contactName: filingContactInfo?.name ?? null,
+        contactEmail: filingContactInfo?.email ?? null,
+        contactPhone: filingContactInfo?.phone ?? null,
+        netBookValue: netBookValueDecision
+          ? {
+              decision: netBookValueDecision,
+              reviewer: reviewerNetBookValue,
+              stopAsking:
+                unclearNetBookValueReplies >= MAX_UNCLEAR_NET_BOOK_VALUE_REPLIES,
+            }
+          : undefined,
+      });
+    let prompt = preparedDraft
       ? buildSubmitPreparedReturnPrompt({
           taxReturn,
           substanceForm: taxReturn.substanceForm,
@@ -1526,19 +1640,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
           contactName: filingContactInfo?.name ?? "",
           contactEmail: filingContactInfo?.email ?? "",
         })
-      : buildSubstanceFormPrompt({
-      taxReturn: taxReturn as any,
-      substanceForm: taxReturn.substanceForm as any,
-      portalUrl: taxReturn.jurisdiction?.portalUrl || "https://my.gov.gg",
-      returnLink: taxReturn.link || undefined,
-      overrideSaved,
-      submissionMode,
-      financialStatementsFile,
-      financialStatementsUrl: financialStatementsFile?.url ?? null,
-      contactName: filingContactInfo?.name ?? null,
-      contactEmail: filingContactInfo?.email ?? null,
-      contactPhone: filingContactInfo?.phone ?? null,
-    });
+      : buildFillPrompt();
     const recoveryReturnUrl =
       taxReturn.link ||
       taxReturn.jurisdiction?.portalUrl ||
@@ -1608,7 +1710,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       }
       const started = await client.runTask(task, {
         sessionId,
-        model: BROWSER_USE_MODEL,
+        profile: runProfile,
         workspaceId: workspaceId ?? undefined,
         proxyCountryCode: useProxy ? "uk" : null,
         extensionIds:
@@ -1630,6 +1732,8 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
             workspaceId: started.workspaceId,
             liveUrl: started.liveUrl,
             prepareOnlyGuard: prepareOnlyGuardStatus,
+            // As reported by Browser Use for this run (checked against the profile).
+            browserUseModel: started.model ?? runProfile.model,
           },
         });
       } catch (error) {
@@ -1691,9 +1795,69 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       return "wait";
     }
 
+    /**
+     * A reply to the Net Book Value question is used only when the worker can
+     * parse it as one clear amount; the worker applies the policy and rebuilds
+     * the fill prompt, which keeps that answer for the rest of the session.
+     * The agent never takes the value from free text. Returns rules to place
+     * ahead of the continuation prompt.
+     */
+    async function resolveNetBookValueReply(
+      pending: ReturnType<typeof getPendingOperatorMessages>,
+      question: AgentQuestion | null,
+    ): Promise<string> {
+      if (netBookValueDecision?.kind !== "needs_review") return "";
+      const replies = pending.filter((message) =>
+        isNetBookValueQuestion(
+          message.inReplyTo?.text ??
+            (question?.reason === "agent_question" ? question.text : null),
+        ),
+      );
+      if (replies.length === 0) return "";
+      const parsed = replies
+        .map((message) => portalNetBookValueFromReviewerReply(message.content))
+        .filter((value) => value !== null);
+      const values = new Set(parsed.map((value) => value.portalValue));
+      if (values.size !== 1) {
+        unclearNetBookValueReplies += 1;
+        prompt = buildFillPrompt();
+        await updateActiveJobRecord({
+          resultDataPatch: { [PORTAL_NET_BOOK_VALUE_KEY]: netBookValueRecord() },
+        });
+        await log("Reviewer Net Book Value reply was not one clear amount", {
+          replies: replies.length,
+          unclearReplies: unclearNetBookValueReplies,
+          keptEarlierAnswer: Boolean(reviewerNetBookValue),
+        });
+        // A confirmed answer is never reset by an unclear follow-up.
+        const keep = reviewerNetBookValue
+          ? `Keep the Net Book Value already confirmed ("${reviewerNetBookValue.portalValue}"); do not change it because of this reply.`
+          : unclearNetBookValueReplies >= MAX_UNCLEAR_NET_BOOK_VALUE_REPLIES
+            ? "Do NOT type a Net Book Value from it and do NOT ask about it again: leave the field as the portal shows it and continue as SECTION 4 below says."
+            : "Do NOT type a Net Book Value from it. Leave the field as the portal shows it and ask the Net Book Value question in SECTION 4 below once more, asking for the amount only.";
+        return `
+## NET BOOK VALUE (set by LTS, overrides the reviewer's wording)
+The reviewer's reply did not give one clear Net Book Value amount. ${keep}
+`;
+      }
+      const resolved = parsed[0]!;
+      reviewerNetBookValue = resolved;
+      prompt = buildFillPrompt();
+      await updateActiveJobRecord({
+        resultDataPatch: { [PORTAL_NET_BOOK_VALUE_KEY]: netBookValueRecord() },
+      });
+      await log("Reviewer confirmed the Net Book Value", {
+        negativeZeroed: resolved.negativeZeroed,
+      });
+      return `
+## NET BOOK VALUE (set by LTS, overrides the reviewer's wording)
+LTS read the reviewer's reply as the tangible-asset Net Book Value${resolved.negativeZeroed ? ". It is negative, so under LTS policy it is entered as 0" : ""}. Enter exactly "${resolved.portalValue}" in the Net Book Value field, then continue the task below. Change no other field because of this reply.
+`;
+    }
+
     /** Continue in the same browser session, delivering pending reviewer replies. */
     async function resumeSameSession(
-      continuationPrompt: string,
+      buildContinuation: (basePrompt: string) => string,
       sessionId: string,
     ): Promise<BrowserUseSession> {
       const row = await db.query.jobs.findFirst({
@@ -1702,12 +1866,19 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       });
       const pending = getPendingOperatorMessages(row?.resultData);
       const question = parsePendingAgentQuestion(row?.resultData);
+      const netBookValueRules = await resolveNetBookValueReply(
+        pending,
+        question,
+      );
       const resumed = await dispatchBrowserTask(
-        withOperatorMessages(continuationPrompt, {
-          messages: pending,
-          question,
-          submissionMode,
-        }),
+        withOperatorMessages(
+          `${netBookValueRules}${buildContinuation(prompt)}`,
+          {
+            messages: pending,
+            question,
+            submissionMode,
+          },
+        ),
         sessionId,
       );
       const resumedAt = Date.now();
@@ -1754,7 +1925,9 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     }
 
     await log("Starting Browser Use V4 run", {
-      model: BROWSER_USE_MODEL,
+      model: runProfile.model,
+      effort: runProfile.effort,
+      maxCostUsd: runProfile.maxCostUsd,
       submissionMode,
     });
     session = await dispatchBrowserTask(prompt);
@@ -1782,7 +1955,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       .set({
         status: "running",
         startedAt: new Date(),
-        aiModel: BROWSER_USE_MODEL,
+        aiModel: session.model ?? runProfile.model,
         resultData: preserveWebOwnedResultDataSql(runtime.resultData),
       })
       .where(
@@ -1903,13 +2076,15 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
 
           if (pauseCheck === "resume") {
             await log("User resumed - continuing task");
-            const continuePrompt = `
+            session = await resumeSameSession(
+              (basePrompt) => `
 Continue from where you left off. The user has completed any manual intervention or authentication.
 Now proceed with the original task:
 
-${prompt}
-`;
-            session = await resumeSameSession(continuePrompt, session.id);
+${basePrompt}
+`,
+              session.id,
+            );
             resumed = true;
             break;
           }
@@ -2282,12 +2457,52 @@ ${prompt}
           output,
           isTaskSuccessful: browserSession.isTaskSuccessful,
         });
-        const {
-          success,
-          prepareOnlyReady,
-          prepareOnlyLikelySubmitted,
-          needsAttention,
-        } = outcome;
+        const { success, prepareOnlyReady, prepareOnlyLikelySubmitted } =
+          outcome;
+
+        // Recorded spend, for budget tuning and to recognise a run stopped by
+        // its session budget. Best effort: never blocks the outcome.
+        let sessionSpend: Awaited<
+          ReturnType<typeof client.getSessionSpend>
+        > | null = null;
+        try {
+          sessionSpend = await client.getSessionSpend(session.id);
+        } catch (error) {
+          await log("Could not read Browser Use session cost", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        // A run out of budget is never re-driven or switched to another
+        // model: no follow-up, no pause for a reply that could not run. It
+        // ends through the normal path (receipt capture included).
+        const budgetExhausted =
+          !success &&
+          isBudgetExhausted({
+            runError: browserSession.runError,
+            budgetSpentUsd: sessionSpend?.budgetSpentUsd ?? null,
+            maxCostUsd: runProfile.maxCostUsd,
+          });
+        const needsAttention = outcome.needsAttention && !budgetExhausted;
+        await updateActiveJobRecord({
+          resultDataPatch: {
+            browserUseSessionBudgetSpentUsd:
+              sessionSpend?.budgetSpentUsd ?? undefined,
+            browserUseSessionTotalCostUsd:
+              sessionSpend?.totalCostUsd ?? undefined,
+            browserUseBudgetExhausted: budgetExhausted || undefined,
+          },
+        });
+        if (budgetExhausted) {
+          await log(
+            "Browser Use session budget reached - ending without retry",
+            {
+              phase: "budget",
+              maxCostUsd: runProfile.maxCostUsd,
+              budgetSpentUsd: sessionSpend?.budgetSpentUsd ?? null,
+              model: runProfile.model,
+            },
+          );
+        }
         // Only a prepare-only run started without a configured contact may
         // stop at the contact step and be resumed past it.
         const stoppedForFilingContact =
@@ -2313,6 +2528,7 @@ ${prompt}
           undeliveredReplies.length > 0 &&
           submissionMode === "prepare_only" &&
           !needsAttention &&
+          !budgetExhausted &&
           !outcome.likelySubmitted &&
           jobStatusCheck?.status === "running"
         ) {
@@ -2320,7 +2536,8 @@ ${prompt}
             reviewerMessages: undeliveredReplies.length,
           });
           session = await resumeSameSession(
-            buildResumePrompt(prompt, { afterFilingContactStop: false }),
+            (basePrompt) =>
+              buildResumePrompt(basePrompt, { afterFilingContactStop: false }),
             session.id,
           );
           continue;
@@ -2396,10 +2613,13 @@ ${prompt}
                 "User resumed - creating new Browser Use run to continue",
               );
 
-              const continuePrompt = buildResumePrompt(prompt, {
-                afterFilingContactStop: stoppedForFilingContact,
-              });
-              session = await resumeSameSession(continuePrompt, session.id);
+              session = await resumeSameSession(
+                (basePrompt) =>
+                  buildResumePrompt(basePrompt, {
+                    afterFilingContactStop: stoppedForFilingContact,
+                  }),
+                session.id,
+              );
 
               break;
             }
@@ -2522,6 +2742,11 @@ ${prompt}
             set: {
               status: finalStatuses.jobStatus,
               completedAt: new Date(),
+              ...(budgetExhausted
+                ? {
+                    errorMessage: `Browser Use session budget (USD ${runProfile.maxCostUsd}) reached; the run was stopped and not retried. Review the return before starting a new run.`,
+                  }
+                : {}),
             },
             resultDataPatch: {
               output,
@@ -2545,6 +2770,8 @@ ${prompt}
                   : undefined,
               prepareOnlyLikelySubmitted:
                 prepareOnlyLikelySubmitted || undefined,
+              // Checked before "Submit prepared return" (prepared-draft).
+              [PORTAL_NET_BOOK_VALUE_KEY]: netBookValueRecord(),
             },
           });
         }

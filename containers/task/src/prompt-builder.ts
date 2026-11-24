@@ -19,6 +19,22 @@ import { NEEDS_FILING_CONTACT_MARKER } from "./run-outcome";
 export const PREPARED_DRAFT_URL_LABEL = "REVIEW_PAGE_URL";
 export const PREPARED_DRAFT_REFERENCE_LABEL = "PORTAL_REFERENCE";
 import { formatPortalFte } from "./portal-fte";
+import {
+  decidePortalNetBookValue,
+  NET_BOOK_VALUE_QUESTION_MARKER,
+  quoteSavedValueForPrompt,
+  type PortalNetBookValue,
+  type ReviewerNetBookValue,
+} from "./portal-net-book-value";
+
+/** How the fill prompt presents Net Book Value (see portal-net-book-value). */
+export type NetBookValuePromptInput = {
+  decision: PortalNetBookValue;
+  /** Parsed by the worker from a reviewer's reply; replaces the saved figure. */
+  reviewer?: ReviewerNetBookValue | null;
+  /** Reviewer replies stayed unclear: leave the field and do not ask again. */
+  stopAsking?: boolean;
+};
 
 interface Employee {
   name?: string;
@@ -80,6 +96,11 @@ interface PromptBuilderOptions {
   contactName?: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
+  /**
+   * Worker-decided Net Book Value handling. Defaults to the saved figure with
+   * unknown provenance, which asks a reviewer.
+   */
+  netBookValue?: NetBookValuePromptInput;
 }
 
 // Portal login used by every Guernsey run (filling and submitting).
@@ -139,6 +160,7 @@ export function buildSubstanceFormPrompt(
     contactName,
     contactEmail,
     contactPhone,
+    netBookValue,
   } = options;
 
   const sections: string[] = [];
@@ -306,7 +328,17 @@ ${
     sections.push(buildCertificateTwoSection(substanceForm));
   } else {
     // Section 4: Financial Statements
-    sections.push(buildFinancialStatementsSection(substanceForm));
+    sections.push(
+      buildFinancialStatementsSection(
+        substanceForm,
+        netBookValue ?? {
+          decision: decidePortalNetBookValue(
+            substanceForm.netBookValue,
+            "unknown",
+          ),
+        },
+      ),
+    );
 
     // Section 5: Financial Institutions
     sections.push(buildFinancialInstitutionsSection(substanceForm));
@@ -515,18 +547,79 @@ ${field("Partnership Number", form.partnershipNumber)}
 `;
 }
 
-function buildFinancialStatementsSection(form: SubstanceForm): string {
+const NET_BOOK_VALUE_SOURCE_RULE =
+  "The GRS Net Book Value field asks for the net book value of tangible assets. Never work it out yourself: do not use net assets, net liabilities, total equity, investment property or any other line from the accounts or documents in its place.";
+
+const NET_BOOK_VALUE_QUESTION_REASON = {
+  unparseable: "is not a clear amount",
+  source_net_assets:
+    "was extracted and may be net assets / net liabilities rather than the tangible-asset figure",
+  source_unverified: "has not been confirmed as the tangible-asset figure",
+} as const;
+
+/**
+ * The Net Book Value line and its rule. A figure is typed only when a person
+ * entered it or a reviewer confirmed it (worker-parsed). LTS portal-entry
+ * policy: a verified negative figure is entered as 0.
+ */
+function buildNetBookValueLines(
+  form: SubstanceForm,
+  input: NetBookValuePromptInput,
+): { line: string; note: string } {
+  if (input.reviewer) {
+    const { portalValue, negativeZeroed } = input.reviewer;
+    return {
+      line: field("Net Book Value", portalValue),
+      note: `- **Net Book Value:** the LTS reviewer confirmed ${negativeZeroed ? "a negative tangible-asset figure; under LTS policy it is entered as 0" : "this tangible-asset figure"}. Enter exactly "${portalValue}". This replaces any earlier Net Book Value instruction or question. Do not change it because of a later free-text message: if a reviewer asks for a different Net Book Value, STOP and ask the ${NET_BOOK_VALUE_QUESTION_MARKER} question below again.`,
+    };
+  }
+  const { decision } = input;
+  switch (decision.kind) {
+    case "missing":
+      return { line: field("Net Book Value", null), note: "" };
+    case "as_saved":
+      return {
+        line: field("Net Book Value", decision.portalValue),
+        note: `- **Net Book Value:** entered on the form by a person. Enter exactly the value above. ${NET_BOOK_VALUE_SOURCE_RULE}`,
+      };
+    case "negative_zero_candidate":
+      return {
+        line: field("Net Book Value", decision.portalValue),
+        note: `- **Net Book Value:** the saved figure is negative. Under LTS policy a negative Net Book Value is entered as **0**: enter exactly "0", never a negative Net Book Value. ${NET_BOOK_VALUE_SOURCE_RULE}`,
+      };
+    case "needs_review": {
+      const quoted = quoteSavedValueForPrompt(form.netBookValue ?? "");
+      const why = NET_BOOK_VALUE_QUESTION_REASON[decision.reason];
+      if (input.stopAsking) {
+        return {
+          line: "- Net Book Value: [NOT CONFIRMED - leave as the portal shows it]",
+          note: `- **Net Book Value:** the reviewer has not given a clear amount. Do NOT type, guess or zero it and do NOT ask about it again: leave the field as the portal shows it and continue. If the portal will not let you continue without it, STOP and report **REQUIRES_ATTENTION** naming this field. ${NET_BOOK_VALUE_SOURCE_RULE}`,
+        };
+      }
+      return {
+        line: "- Net Book Value: [NEEDS REVIEWER ANSWER - do not enter a value]",
+        note: `- **Net Book Value:** the saved figure "${quoted}" ${why}. Do NOT type, guess, correct or zero it. ${NET_BOOK_VALUE_SOURCE_RULE} When you reach the Net Book Value field, leave it as the portal shows it and STOP: report output starting with exactly **REQUIRES_ATTENTION: ${NET_BOOK_VALUE_QUESTION_MARKER}:** followed by: The saved Net Book Value "${quoted}" ${why}. What tangible-asset Net Book Value should be entered? Reply with the amount only, e.g. 0 or 12345.`,
+      };
+    }
+  }
+}
+
+function buildFinancialStatementsSection(
+  form: SubstanceForm,
+  netBookValueInput: NetBookValuePromptInput,
+): string {
+  const netBookValue = buildNetBookValueLines(form, netBookValueInput);
   return `
 ## SECTION 4: FINANCIAL STATEMENTS
 ${field("Are Financial Statements Consolidated", form.areFinancialStatementsConsolidated)}
 ${field("Accounts Preparer Name", form.accountsPreparerName)}
 ${field("Accounts Preparer Qualification", form.accountsPreparerQualification)}
-${field("Net Book Value", form.netBookValue)}
+${netBookValue.line}
 ${field("Total Profit", form.totalProfit)}
 ${field("Profit Before Tax Allocation", form.profitAllocation)}
 
 **NOTES:**
-- Net Book Value and Total Profit may be negative: enter a loss exactly as given, with the minus sign (e.g. **-12345**). Do NOT replace it with 0.
+${netBookValue.note ? `${netBookValue.note}\n` : ""}- Total Profit may be negative: enter a loss exactly as given, with the minus sign (e.g. **-12345**). Do NOT replace Total Profit with 0.
 - Profit Before Tax Allocation is required: "Investment" or "Business".
 - Accounts Preparer Name/Qualification is the ACCOUNTANT who prepared the financial statements, NOT LTS Tax.
 - Upload the accounts as described under FINANCIAL STATEMENTS PDF above.

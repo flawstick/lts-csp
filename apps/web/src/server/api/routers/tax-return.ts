@@ -2059,6 +2059,7 @@ export const taxReturnRouter = createTRPCRouter({
           if (isSubmitPrepared) {
             const resolution = resolvePreparedDraft({
               jobs: returnJobs,
+              requireNetBookValueReview: currentForm?.certificateType !== "Certificate 2",
               currentFingerprint: fingerprintPreparedInputs({
                 entityName: currentReturn.entityName,
                 taxYear: currentReturn.taxYear,
@@ -2087,7 +2088,9 @@ export const taxReturnRouter = createTRPCRouter({
           taskId: input.taskId,
           jobNumber: (lastJob?.jobNumber ?? 0) + 1,
           status: "queued",
-          aiModel: "claude-opus-5-5",
+          // Set by the worker from the model Browser Use reports for the
+          // run (per submission mode, see containers/task browser-use-config).
+          aiModel: null,
           cloudwatchLogGroup: env.ECS_LOG_GROUP,
           resultData: {
             submissionMode,

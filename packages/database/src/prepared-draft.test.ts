@@ -293,4 +293,31 @@ describe("resolvePreparedDraft", () => {
     }
     expect(resolvePreparedDraft({ jobs: [], currentFingerprint: fingerprint }).ok).toBe(false);
   });
+
+  it("refuses a draft whose Net Book Value is unconfirmed, allows a confirmed one", () => {
+    const withNbv = (status: string): PreparedDraftJob => ({
+      ...prepared,
+      resultData: {
+        ...(prepared.resultData as object),
+        portalNetBookValue: { status },
+      },
+    });
+    const unresolved = resolvePreparedDraft({ jobs: [withNbv("unresolved")], currentFingerprint: fingerprint });
+    expect(!unresolved.ok && unresolved.blocker).toContain("Net Book Value for a reviewer to confirm");
+    const zeroed = resolvePreparedDraft({ jobs: [withNbv("zero_unconfirmed")], currentFingerprint: fingerprint });
+    expect(!zeroed.ok && zeroed.blocker).toContain("as 0 in place of a negative figure");
+    const legacy = resolvePreparedDraft({
+      jobs: [prepared],
+      currentFingerprint: fingerprint,
+      requireNetBookValueReview: true,
+    });
+    expect(!legacy.ok && legacy.blocker).toContain("before the tangible-asset Net Book Value check");
+    for (const status of ["reviewer_confirmed", "as_saved", "missing"]) {
+      expect(resolvePreparedDraft({
+        jobs: [withNbv(status)],
+        currentFingerprint: fingerprint,
+        requireNetBookValueReview: true,
+      }).ok).toBe(true);
+    }
+  });
 });

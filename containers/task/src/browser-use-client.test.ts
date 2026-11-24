@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BROWSER_USE_MODEL, BrowserUseClient } from "./browser-use-client";
+import { BrowserUseClient } from "./browser-use-client";
+import {
+  DEFAULT_FINAL_PROFILE,
+  DEFAULT_PREPARE_PROFILE,
+} from "./browser-use-config";
+
+const profile = DEFAULT_PREPARE_PROFILE;
 
 const sdk = vi.hoisted(() => ({
   options: vi.fn(),
@@ -36,7 +42,7 @@ const createdRun = (runId = "run-1") => ({
   sessionId: "session",
   workspaceId: "workspace",
   status: "queued",
-  model: BROWSER_USE_MODEL,
+  model: DEFAULT_PREPARE_PROFILE.model,
 });
 const event = (
   id: number,
@@ -63,9 +69,10 @@ beforeEach(() => {
 });
 
 describe("Browser Use V4 lifecycle", () => {
-  it("starts the requested Opus model without retrying create requests", async () => {
+  it("starts the prepare profile (Sonnet 5, medium, $4 session budget) without retrying create requests", async () => {
     const client = new BrowserUseClient("key");
     const state = await client.runTask("Prepare only", {
+      profile,
       workspaceId: "workspace",
       proxyCountryCode: "uk",
     });
@@ -77,11 +84,12 @@ describe("Browser Use V4 lifecycle", () => {
     expect(sdk.options).toHaveBeenCalledWith({ apiKey: "key", maxRetries: 0 });
     expect(sdk.runs.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: "claude-opus-5-5",
+        model: "claude-sonnet-5",
         modelParams: {
           thinking: { type: "adaptive" },
-          output_config: { effort: "high" },
+          output_config: { effort: "medium" },
         },
+        maxCostUsd: 4,
         workspaceId: "workspace",
         keepAlive: 900,
         browserSettings: { proxyCountryCode: "uk" },
@@ -92,9 +100,9 @@ describe("Browser Use V4 lifecycle", () => {
 
   it("continues the same session with a new run and reuses its browser", async () => {
     const client = new BrowserUseClient("key");
-    await client.runTask("First");
+    await client.runTask("First", { profile });
     sdk.runs.create.mockResolvedValue(createdRun("run-2"));
-    const state = await client.runTask("Continue", { sessionId: "session" });
+    const state = await client.runTask("Continue", { sessionId: "session", profile });
     expect(state.runId).toBe("run-2");
     expect(sdk.runs.create).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -107,15 +115,75 @@ describe("Browser Use V4 lifecycle", () => {
     );
   });
 
+  it("keeps the session budget and model on follow-ups (budget sent only at creation)", async () => {
+    const client = new BrowserUseClient("key");
+    await client.runTask("First", { profile });
+    sdk.runs.create.mockResolvedValue(createdRun("run-2"));
+    await client.runTask("Reviewer reply", { sessionId: "session", profile });
+    const followUp = sdk.runs.create.mock.calls[1]![0];
+    expect(sdk.runs.create.mock.calls[0]![0].maxCostUsd).toBe(4);
+    // Omitted = Browser Use keeps the current session budget and spend.
+    expect(followUp).not.toHaveProperty("maxCostUsd");
+    expect(followUp).toMatchObject({
+      model: "claude-sonnet-5",
+      modelParams: { output_config: { effort: "medium" } },
+    });
+  });
+
+  it("starts final filing on Opus 5.5 at high effort with the final budget", async () => {
+    sdk.runs.create.mockResolvedValue({
+      ...createdRun(),
+      model: DEFAULT_FINAL_PROFILE.model,
+    });
+    const state = await new BrowserUseClient("key").runTask("Submit", {
+      profile: DEFAULT_FINAL_PROFILE,
+    });
+    expect(state.model).toBe("claude-opus-5-5");
+    expect(sdk.runs.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "claude-opus-5-5",
+        modelParams: {
+          thinking: { type: "adaptive" },
+          output_config: { effort: "high" },
+        },
+        maxCostUsd: 6,
+      }),
+    );
+  });
+
+  it("cancels a run started on a model other than the profile's", async () => {
+    sdk.runs.create.mockResolvedValue({
+      ...createdRun("other-model"),
+      model: "claude-opus-5-5",
+    });
+    await expect(
+      new BrowserUseClient("key").runTask("First", { profile }),
+    ).rejects.toThrow("unexpected model");
+    expect(sdk.runs.cancel).toHaveBeenCalledWith("other-model");
+  });
+
+  it("reads budgeted spend (LLM + search) separately from total cost", async () => {
+    (sdk.sessions as Record<string, unknown>).cost = vi.fn().mockResolvedValue({
+      llmCostUsd: "3.900000",
+      searchCostUsd: "0.100000",
+      browserCostUsd: "0.020000",
+      proxyCostUsd: "0.010000",
+      totalCostUsd: "4.030000",
+    });
+    const spend = await new BrowserUseClient("key").getSessionSpend("session");
+    expect(spend.budgetSpentUsd).toBeCloseTo(4);
+    expect(spend.totalCostUsd).toBeCloseTo(4.03);
+  });
+
   it("does not silently continue in an unexpected session", async () => {
     const client = new BrowserUseClient("key");
-    await client.runTask("First");
+    await client.runTask("First", { profile });
     sdk.runs.create.mockResolvedValue({
       ...createdRun("bad-run"),
       sessionId: "wrong-session",
     });
     await expect(
-      client.runTask("Continue", { sessionId: "session" }),
+      client.runTask("Continue", { sessionId: "session", profile }),
     ).rejects.toThrow("different session");
     expect(sdk.runs.cancel).toHaveBeenCalledWith("bad-run");
   });
@@ -124,7 +192,7 @@ describe("Browser Use V4 lifecycle", () => {
     "fetches terminal %s output once after cheap status polling",
     async (status) => {
       const client = new BrowserUseClient("key");
-      await client.runTask("First");
+      await client.runTask("First", { profile });
       await client.getSession("session");
       expect(sdk.runs.get).not.toHaveBeenCalled();
       sdk.runs.status.mockResolvedValue({ status });
@@ -154,7 +222,7 @@ describe("Browser Use V4 lifecycle", () => {
 
   it("drains all event pages and updates browser identity from ready/reattached events", async () => {
     const client = new BrowserUseClient("key");
-    const state = await client.runTask("First");
+    const state = await client.runTask("First", { profile });
     sdk.runs.events
       .mockResolvedValueOnce({
         events: [
@@ -197,7 +265,7 @@ describe("Browser Use V4 lifecycle", () => {
       limit: 100,
     });
     sdk.runs.create.mockResolvedValue(createdRun("run-2"));
-    await client.runTask("Continue", { sessionId: "session" });
+    await client.runTask("Continue", { sessionId: "session", profile });
     await client.getMessages("session", "run-1:2");
     expect(sdk.runs.events).toHaveBeenLastCalledWith("run-2", {
       after: 0,
@@ -207,7 +275,7 @@ describe("Browser Use V4 lifecycle", () => {
 
   it("fails an event stream whose pagination cannot advance", async () => {
     const client = new BrowserUseClient("key");
-    await client.runTask("First");
+    await client.runTask("First", { profile });
     sdk.runs.events.mockResolvedValue({
       events: [],
       nextAfter: 0,
@@ -302,7 +370,7 @@ describe("Browser Use V4 lifecycle", () => {
           buffer: Buffer.from("pdf"),
         }),
       ).toMatchObject({ id: "upload", path: "uploads/accounts.pdf" });
-      await client.runTask("Read accounts", { workspaceId: "workspace" });
+      await client.runTask("Read accounts", { workspaceId: "workspace", profile });
       expect(sdk.runs.create).toHaveBeenCalledWith(
         expect.objectContaining({ attachedFileIds: ["upload"] }),
       );
@@ -317,7 +385,7 @@ describe("Browser Use V4 lifecycle", () => {
       missingFileIds: ["missing"],
     });
     await expect(
-      new BrowserUseClient("key").runTask("Read accounts"),
+      new BrowserUseClient("key").runTask("Read accounts", { profile }),
     ).rejects.toThrow("required source files");
     expect(sdk.runs.cancel).toHaveBeenCalledWith("run-1");
   });
@@ -327,7 +395,7 @@ describe("Browser Use V4 lifecycle", () => {
       ...createdRun(),
       model: "different-model",
     });
-    await expect(new BrowserUseClient("key").runTask("First")).rejects.toThrow(
+    await expect(new BrowserUseClient("key").runTask("First", { profile })).rejects.toThrow(
       "unexpected model",
     );
     expect(sdk.runs.cancel).toHaveBeenCalledWith("run-1");

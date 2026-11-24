@@ -105,4 +105,41 @@ describe("AgentPanel", () => {
     expect(screen.queryByText("The agent needs you")).toBeNull();
     expect(screen.getByRole("button", { name: /Pause & send/ })).toBeTruthy();
   });
+
+  it("uses an icon-only send control that names its action", () => {
+    renderPanel({ messageInput: "" });
+    const send = screen.getByRole("button", { name: "Send & resume" }) as HTMLButtonElement;
+    expect(send.textContent).toBe("");
+    expect(send.disabled).toBe(true);
+  });
+
+  it("keeps the transcript reachable by keyboard", () => {
+    const timeline: ChatTimelineItem[] = [
+      { kind: "agent", id: "question-q1", content: "Placeholder question.", timestamp: 1 },
+    ];
+    renderPanel({ timeline });
+    const log = screen.getByRole("log", { name: "Agent conversation" });
+    expect(log.tabIndex).toBe(0);
+    expect(screen.getByText("Question for you")).toBeTruthy();
+  });
+
+  it("expands the live step for its full goal", () => {
+    renderPanel({
+      jobStatus: "running",
+      question: null,
+      currentStep: { stepNumber: 4, goal: "Placeholder goal text", memory: "Placeholder note" },
+      composer: deriveComposerState({
+        jobStatus: "running",
+        question: null,
+        hasPendingDelivery: false,
+        isSending: false,
+        isPrepareOnly: true,
+      }),
+    });
+    const toggle = screen.getByRole("button", { name: /Placeholder goal text/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Placeholder note")).toBeTruthy();
+  });
 });

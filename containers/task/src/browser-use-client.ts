@@ -9,9 +9,11 @@ import {
   type WorkspaceFileListResponse,
   type WorkspaceInfo,
 } from "browser-use-sdk/v4";
+import {
+  modelParamsForProfile,
+  type BrowserUseRunProfile,
+} from "./browser-use-config";
 
-export const BROWSER_USE_MODEL = "claude-opus-5-5" as const;
-export type BrowserUseModel = typeof BROWSER_USE_MODEL;
 export type BrowserUseSessionStatus = "running" | "idle" | "stopped" | "error";
 export type BrowserUseFileInfo = WorkspaceFileInfo;
 export type StopStrategy = "task" | "session";
@@ -29,7 +31,23 @@ export type BrowserUseSession = {
   lastStepSummary: string | null;
   output: unknown;
   isTaskSuccessful: boolean | null;
+  /** Model Browser Use reported for the latest run (null after a restart until known). */
+  model: string | null;
+  /** The finished run's error text, if any. */
+  runError: string | null;
 };
+
+export type BrowserUseSessionSpend = {
+  /** LLM + search: what `maxCostUsd` limits. */
+  budgetSpentUsd: number | null;
+  /** Everything recorded, including browser and proxy time. */
+  totalCostUsd: number | null;
+};
+
+function parseUsd(value: unknown): number | null {
+  const parsed = typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 type ProgressMessage = {
   id: string;
@@ -90,6 +108,8 @@ export class BrowserUseClient {
       lastStepSummary: null,
       output: null,
       isTaskSuccessful: null,
+      model: null,
+      runError: null,
     };
     this.sessions.set(sessionId, state);
     return state;
@@ -107,6 +127,8 @@ export class BrowserUseClient {
       }
       state.output = result.result ?? result.output ?? result.error;
       state.isTaskSuccessful = result.status === "completed";
+      state.model = result.model ?? state.model;
+      state.runError = result.error ?? null;
     }
     return state;
   }
@@ -115,12 +137,13 @@ export class BrowserUseClient {
     task: string,
     request: {
       sessionId?: string;
-      model?: BrowserUseModel;
+      /** Model, effort and session budget; keep it the same for a session's follow-ups. */
+      profile: BrowserUseRunProfile;
       proxyCountryCode?: ProxyCountryCode | null;
       workspaceId?: string;
       /** Session-wide extensions; only sent when a new session is created. */
       extensionIds?: string[];
-    } = {},
+    },
   ): Promise<BrowserUseSession> {
     const previous = request.sessionId
       ? await this.sessionState(request.sessionId)
@@ -129,12 +152,13 @@ export class BrowserUseClient {
       request.workspaceId ?? previous?.workspaceId ?? undefined;
     const body: RunCreateBody = {
       task,
-      model: request.model ?? BROWSER_USE_MODEL,
-      modelParams: {
-        thinking: { type: "adaptive" },
-        output_config: { effort: "high" },
-      },
+      model: request.profile.model,
+      modelParams: modelParamsForProfile(request.profile),
       sessionId: request.sessionId,
+      // The budget covers the whole session. Follow-ups omit it so Browser
+      // Use keeps the current budget (and the spend so far) instead of
+      // replacing it with a fresh allowance.
+      ...(!request.sessionId ? { maxCostUsd: request.profile.maxCostUsd } : {}),
       workspaceId,
       // Match the worker's ten-minute manual-intervention window, with margin.
       keepAlive: 900,
@@ -154,7 +178,7 @@ export class BrowserUseClient {
         : {}),
     };
     const run = await this.client.runs.create(body);
-    if (run.model !== BROWSER_USE_MODEL) {
+    if (run.model !== request.profile.model) {
       await this.client.runs.cancel(run.id);
       throw new Error(`Browser Use selected an unexpected model: ${run.model}`);
     }
@@ -181,9 +205,22 @@ export class BrowserUseClient {
       lastStepSummary: null,
       output: null,
       isTaskSuccessful: null,
+      model: run.model,
+      runError: null,
     };
     this.sessions.set(state.id, state);
     return state;
+  }
+
+  /** Recorded session spend; read-only, never changes the budget. */
+  async getSessionSpend(sessionId: string): Promise<BrowserUseSessionSpend> {
+    const cost = await this.client.sessions.cost(sessionId);
+    const llm = parseUsd(cost.llmCostUsd);
+    const search = parseUsd(cost.searchCostUsd);
+    return {
+      budgetSpentUsd: llm === null && search === null ? null : (llm ?? 0) + (search ?? 0),
+      totalCostUsd: parseUsd(cost.totalCostUsd),
+    };
   }
 
   async getMessages(

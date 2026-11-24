@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
+import { requireStaffAccount } from "@/server/api/staff-auth";
 import type { Database } from "@repo/database";
 import {
   getChangedFormFields,
@@ -52,8 +53,8 @@ const EXTRACTION_MODEL_ID = "openai/gpt-6.1-sol";
 
 /**
  * Normalise a financial figure extracted from accounts while preserving its sign.
- * The GRS portal accepts negative figures, so losses and negative net book values
- * must be kept. Accounting-style bracket notation "(12,345)" is converted to "-12345".
+ * Preserve the source figures. Accounting-style bracket notation "(12,345)"
+ * is converted to "-12345". Portal entry applies its own field-specific rules.
  */
 function normalizeSignedFinancialValue(
   value: string | null | undefined,
@@ -783,7 +784,7 @@ const aiExtractionSchema = z.object({
     .string()
     .nullable()
     .describe(
-      "Net book value (net assets / total equity) from the Balance Sheet, exactly as presented in the financial statements' own currency — negative values are allowed, keep the sign (e.g. '-12345')",
+      "Explicitly reported net book value of tangible assets held in the course of carrying out the business, in the financial statements' currency. Never use net assets, net liabilities, total equity, or a single asset line as a substitute. Preserve the sign and return null if the amount is not explicitly identified.",
     ),
   totalProfit: z
     .string()
@@ -795,7 +796,7 @@ const aiExtractionSchema = z.object({
     .string()
     .nullable()
     .describe(
-      "Only when the financial statements are NOT in GBP: the net book value in GBP if, and only if, a GBP amount is explicitly stated in the documents. Never convert it yourself. Null otherwise.",
+      "Only when the financial statements are NOT in GBP: the same tangible-asset net book value in GBP, if explicitly stated. Never convert it yourself. Null otherwise.",
     ),
   totalProfitGbp: z
     .string()
@@ -1208,6 +1209,7 @@ export const substanceFormRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      await requireStaffAccount();
       const existing = await ctx.db.query.substanceForms.findFirst({
         where: eq(substanceForms.taxReturnId, input.taxReturnId),
       });
@@ -1256,6 +1258,7 @@ export const substanceFormRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      await requireStaffAccount();
       const apiKey = process.env.AI_GATEWAY_API_KEY;
       if (!apiKey) {
         throw new Error("AI_GATEWAY_API_KEY not configured");
@@ -1527,7 +1530,7 @@ SECTION 4: FINANCIAL STATEMENTS
 - Are statements consolidated?
 - Accounts preparer name and qualification — this is the ACCOUNTANT/AUDITOR who prepared the financial accounts, NOT "LTS Tax Limited" (LTS prepares the ESR form, not the accounts)
 - Currency the financial statements are presented in
-- Net book value (from Balance Sheet) — negative values are allowed, keep the sign
+- Net book value of tangible assets used in the business, only when explicitly identified. Do not substitute company net assets, net liabilities, total equity, or a single asset line. Preserve the original sign.
 - Profit or loss before tax (from Profit & Loss Account) — if the accounts show a loss, return the negative figure (e.g. "-12345")
 - Profit allocation — REQUIRED, always pick "Investment" or "Business"
 
@@ -1593,7 +1596,7 @@ Some attached PDFs may also include a Firecrawl OCR/text parse. Use that parsed 
 
 IMPORTANT RULES:
 - accountingPeriodStart and accountingPeriodEnd are the entity's actual accounting period dates, not the Guernsey tax year. Extract them only if the documents clearly state them. If they are not stated, leave them empty.
-- The portal accepts negative values. If total profit is a loss, return the negative figure with a leading minus sign (e.g. "-12345"). Never convert a loss to "0".
+- If total profit is a loss, return the negative figure with a leading minus sign (e.g. "-12345"). Never convert a loss to "0".
 - If net book value is negative, return the negative figure with a leading minus sign. Never convert it to "0".
 - Treat figures shown in brackets in the accounts, e.g. "(12,345)", as negative.
 - totalProfit is the profit OR LOSS before tax. Losses are common for holding and property companies — when the accounts show "Loss before taxation" (or similar), return it as a negative figure.
