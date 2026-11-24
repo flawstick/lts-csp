@@ -21,8 +21,8 @@ export const PREPARED_DRAFT_REFERENCE_LABEL = "PORTAL_REFERENCE";
 import { formatPortalFte } from "./portal-fte";
 import {
   decidePortalNetBookValue,
+  buildNetBookValueQuestion,
   NET_BOOK_VALUE_QUESTION_MARKER,
-  quoteSavedValueForPrompt,
   type PortalNetBookValue,
   type ReviewerNetBookValue,
 } from "./portal-net-book-value";
@@ -550,13 +550,6 @@ ${field("Partnership Number", form.partnershipNumber)}
 const NET_BOOK_VALUE_SOURCE_RULE =
   "The GRS Net Book Value field asks for the net book value of tangible assets. Never work it out yourself: do not use net assets, net liabilities, total equity, investment property or any other line from the accounts or documents in its place.";
 
-const NET_BOOK_VALUE_QUESTION_REASON = {
-  unparseable: "is not a clear amount",
-  source_net_assets:
-    "was extracted and may be net assets / net liabilities rather than the tangible-asset figure",
-  source_unverified: "has not been confirmed as the tangible-asset figure",
-} as const;
-
 /**
  * The Net Book Value line and its rule. A figure is typed only when a person
  * entered it or a reviewer confirmed it (worker-parsed). LTS portal-entry
@@ -588,17 +581,19 @@ function buildNetBookValueLines(
         note: `- **Net Book Value:** the saved figure is negative. Under LTS policy a negative Net Book Value is entered as **0**: enter exactly "0", never a negative Net Book Value. ${NET_BOOK_VALUE_SOURCE_RULE}`,
       };
     case "needs_review": {
-      const quoted = quoteSavedValueForPrompt(form.netBookValue ?? "");
-      const why = NET_BOOK_VALUE_QUESTION_REASON[decision.reason];
       if (input.stopAsking) {
         return {
           line: "- Net Book Value: [NOT CONFIRMED - leave as the portal shows it]",
           note: `- **Net Book Value:** the reviewer has not given a clear amount. Do NOT type, guess or zero it and do NOT ask about it again: leave the field as the portal shows it and continue. If the portal will not let you continue without it, STOP and report **REQUIRES_ATTENTION** naming this field. ${NET_BOOK_VALUE_SOURCE_RULE}`,
         };
       }
+      const question = buildNetBookValueQuestion(
+        form.netBookValue,
+        decision.reason,
+      );
       return {
         line: "- Net Book Value: [NEEDS REVIEWER ANSWER - do not enter a value]",
-        note: `- **Net Book Value:** the saved figure "${quoted}" ${why}. Do NOT type, guess, correct or zero it. ${NET_BOOK_VALUE_SOURCE_RULE} When you reach the Net Book Value field, leave it as the portal shows it and STOP: report output starting with exactly **REQUIRES_ATTENTION: ${NET_BOOK_VALUE_QUESTION_MARKER}:** followed by: The saved Net Book Value "${quoted}" ${why}. What tangible-asset Net Book Value should be entered? Reply with the amount only, e.g. 0 or 12345.`,
+        note: `- **Net Book Value:** the saved figure needs a reviewer answer. Do NOT type, guess, correct or zero it. ${NET_BOOK_VALUE_SOURCE_RULE} When you reach the Net Book Value field, leave it as the portal shows it and STOP: report output starting with exactly **REQUIRES_ATTENTION: ${NET_BOOK_VALUE_QUESTION_MARKER}:** followed by only this question, word for word, and nothing else (no summary of the steps or sections you completed; LTS already shows your progress): ${question}`,
       };
     }
   }
