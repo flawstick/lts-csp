@@ -17,6 +17,30 @@ import {
 } from "@repo/database";
 import { publishJobEvent } from "@repo/redis";
 import {
+  fingerprintPreparedInputs,
+  getFilingOperation,
+  getUnconfirmedSubmitBlocker,
+  parsePreparedDraftOutput,
+  resolvePreparedDraft,
+  SUBMIT_PREPARED_DISPATCHED_KEY,
+  SUBMIT_PREPARED_OPERATION,
+  type FilingOperation,
+  type PreparedDraftRecord,
+} from "@repo/database/prepared-draft";
+import {
+  extractAgentQuestionText,
+  getPendingOperatorMessages,
+  hasPendingOperatorInterrupt,
+  parsePendingAgentQuestion,
+  withOperatorMessages,
+  type AgentQuestion,
+  type AgentQuestionReason,
+} from "@repo/database/operator-messages";
+import {
+  markOperatorMessagesDeliveredSql,
+  preserveWebOwnedResultDataSql,
+} from "@repo/database/operator-messages-sql";
+import {
   BrowserUseClient,
   BROWSER_USE_MODEL,
   type BrowserUseSessionStatus,
@@ -36,7 +60,11 @@ import {
   type PrepareOnlyGuardStatus,
 } from "./prepare-only-guard";
 import { decideFilingContactStartup } from "./filing-contact-policy";
-import { buildResumePrompt, buildSubstanceFormPrompt } from "./prompt-builder";
+import {
+  buildResumePrompt,
+  buildSubmitPreparedReturnPrompt,
+  buildSubstanceFormPrompt,
+} from "./prompt-builder";
 import {
   classifyRunOutcome,
   resolveFinalRunStatuses,
@@ -141,6 +169,9 @@ type ActiveJobRuntime = {
   taxReturnId: string;
   overrideSaved: boolean;
   submissionMode: SubmissionMode;
+  /** "submit_prepared": submit the exact draft a prepare run left ready. */
+  filingOperation: FilingOperation;
+  preparedJobId: string | null;
   resultData: Record<string, unknown>;
   workerId: string;
   workerTaskArn: string | null;
@@ -307,7 +338,7 @@ async function updateActiveJobRecord(params: {
 
   const nextValues: Record<string, unknown> = {
     ...(params.set ?? {}),
-    resultData: runtime.resultData,
+    resultData: preserveWebOwnedResultDataSql(runtime.resultData),
   };
 
   await db.update(jobs).set(nextValues).where(eq(jobs.id, runtime.jobId));
@@ -326,7 +357,7 @@ async function heartbeatActiveJob() {
   await db
     .update(jobs)
     .set({
-      resultData: runtime.resultData,
+      resultData: preserveWebOwnedResultDataSql(runtime.resultData),
     })
     .where(eq(jobs.id, runtime.jobId));
 }
@@ -950,6 +981,67 @@ function parseOverrideSaved(value: unknown) {
   return value === true;
 }
 
+function parsePreparedJobId(value: unknown): string | null {
+  return typeof value === "string" && value ? value : null;
+}
+
+/**
+ * Submit-prepared runs re-check, before any browser starts, that the draft
+ * they were enqueued against is still the latest prepared draft for the
+ * return and that the return data it was filled from is unchanged.
+ */
+async function listReturnJobs(taxReturnId: string) {
+  return db
+    .select({
+      id: jobs.id,
+      status: jobs.status,
+      createdAt: jobs.createdAt,
+      resultData: jobs.resultData,
+    })
+    .from(jobs)
+    .innerJoin(tasks, eq(jobs.taskId, tasks.id))
+    .where(eq(tasks.taxReturnId, taxReturnId));
+}
+
+/**
+ * Every submit-mode run (full submit or Submit prepared return) refuses to
+ * start, before any browser run, once an earlier Submit prepared return run
+ * reached the browser: that run may have filed without a saved receipt.
+ */
+async function refuseAfterUnconfirmedSubmit(runtime: ActiveJobRuntime) {
+  if (runtime.submissionMode !== "submit_and_capture_pdf") return;
+  const blocker = getUnconfirmedSubmitBlocker({
+    jobs: await listReturnJobs(runtime.taxReturnId),
+  });
+  if (blocker) {
+    throw new Error(`Submission refused: ${blocker}`);
+  }
+}
+
+async function verifyPreparedDraftForSubmission(params: {
+  runtime: ActiveJobRuntime;
+  inputFingerprint: string;
+}): Promise<PreparedDraftRecord> {
+  const { runtime, inputFingerprint } = params;
+  if (runtime.submissionMode !== "submit_and_capture_pdf") {
+    throw new Error("Submit prepared return must run in submit mode");
+  }
+  if (!runtime.preparedJobId) {
+    throw new Error("Submit prepared return has no prepared draft reference");
+  }
+  const returnJobs = await listReturnJobs(runtime.taxReturnId);
+  const resolution = resolvePreparedDraft({
+    jobs: returnJobs,
+    currentFingerprint: inputFingerprint,
+    excludeJobId: runtime.jobId,
+    expectedPreparedJobId: runtime.preparedJobId,
+  });
+  if (!resolution.ok) {
+    throw new Error(`Submit prepared return refused: ${resolution.blocker}`);
+  }
+  return resolution.draft;
+}
+
 async function persistClaimMetadata(runtime: ActiveJobRuntime) {
   const now = Date.now();
   runtime.resultData = mergeResultData(runtime.resultData, {
@@ -974,7 +1066,7 @@ async function persistClaimMetadata(runtime: ActiveJobRuntime) {
       ecsTaskArn: runtime.workerTaskArn,
       cloudwatchLogGroup: CLOUDWATCH_LOG_GROUP,
       cloudwatchLogStream: runtime.workerLogStream,
-      resultData: runtime.resultData,
+      resultData: preserveWebOwnedResultDataSql(runtime.resultData),
     })
     .where(eq(jobs.id, runtime.jobId));
 }
@@ -1023,6 +1115,8 @@ async function claimNextQueuedJob(): Promise<ActiveJobRuntime | null> {
     taxReturnId: claimed.taxReturnId,
     overrideSaved: parseOverrideSaved(resultData.overrideSaved),
     submissionMode: parseSubmissionMode(resultData.submissionMode),
+    filingOperation: getFilingOperation(resultData),
+    preparedJobId: parsePreparedJobId(resultData.preparedJobId),
     resultData,
     workerId: workerMetadata.workerId,
     workerTaskArn: workerMetadata.workerTaskArn,
@@ -1065,6 +1159,8 @@ async function prepareSingleJobRuntime(): Promise<ActiveJobRuntime> {
       parseOverrideSaved(resultData.overrideSaved) || ENV_OVERRIDE_SAVED,
     submissionMode:
       parseSubmissionMode(resultData.submissionMode) ?? ENV_SUBMISSION_MODE,
+    filingOperation: getFilingOperation(resultData),
+    preparedJobId: parsePreparedJobId(resultData.preparedJobId),
     resultData,
     workerId: workerMetadata.workerId,
     workerTaskArn: workerMetadata.workerTaskArn,
@@ -1175,7 +1271,7 @@ async function markActiveRuntimeFailed(errorMessage: string) {
       status: "failed",
       completedAt: new Date(),
       errorMessage,
-      resultData: runtime.resultData,
+      resultData: preserveWebOwnedResultDataSql(runtime.resultData),
     })
     .where(eq(jobs.id, runtime.jobId));
 }
@@ -1218,7 +1314,7 @@ async function markActiveRuntimeAwaitingReview(reason: string) {
       status: "failed",
       completedAt: new Date(),
       errorMessage: `${reason}. The return has been left for review; start a new run to continue.`,
-      resultData: runtime.resultData,
+      resultData: preserveWebOwnedResultDataSql(runtime.resultData),
     })
     .where(eq(jobs.id, runtime.jobId));
 }
@@ -1265,6 +1361,17 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     if (!taxReturn.substanceForm) {
       throw new Error("Substance form not found");
     }
+    // What this run fills the portal from; a prepare run records it with the
+    // draft so a later submit_prepared run can prove nothing changed since.
+    const inputFingerprint = fingerprintPreparedInputs({
+      entityName: taxReturn.entityName,
+      taxYear: taxReturn.taxYear,
+      link: taxReturn.link,
+      files: taxReturn.files,
+      substanceForm: taxReturn.substanceForm as Record<string, unknown>,
+    });
+    const isSubmitPrepared =
+      runtime.filingOperation === SUBMIT_PREPARED_OPERATION;
 
     // The GRS final contact is the organisation's explicitly configured
     // contact (e.g. NSM's). No LTS default or launching-user fallback. Submit
@@ -1286,6 +1393,18 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     });
     if (filingContactDecision.kind === "refuse") {
       throw new Error(filingContactDecision.error);
+    }
+    await refuseAfterUnconfirmedSubmit(runtime);
+    const preparedDraft = isSubmitPrepared
+      ? await verifyPreparedDraftForSubmission({ runtime, inputFingerprint })
+      : null;
+    if (preparedDraft) {
+      await log("Verified prepared draft for submission", {
+        phase: "startup",
+        preparedJobId: runtime.preparedJobId,
+        hasReviewUrl: Boolean(preparedDraft.reviewUrl),
+        hasPortalReference: Boolean(preparedDraft.portalReference),
+      });
     }
     const filingContactInfo =
       filingContactDecision.kind === "configured"
@@ -1332,7 +1451,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       await db
         .update(jobs)
         .set({
-          resultData: runtime.resultData,
+          resultData: preserveWebOwnedResultDataSql(runtime.resultData),
         })
         .where(eq(jobs.id, runtime.jobId));
 
@@ -1340,12 +1459,16 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
         workspaceId,
       });
 
-      financialStatementsFile = await uploadFinancialStatementsFile(
-        client,
-        workspaceId,
-        taxReturnFiles,
-        log,
-      );
+      // Submitting a prepared draft uploads nothing: the accounts are
+      // already attached to the draft.
+      financialStatementsFile = isSubmitPrepared
+        ? null
+        : await uploadFinancialStatementsFile(
+            client,
+            workspaceId,
+            taxReturnFiles,
+            log,
+          );
     } catch (error) {
       await log(
         "Failed to prepare financial statements PDF for Browser Use workspace",
@@ -1388,9 +1511,22 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       year: taxReturn.taxYear,
       hasFinancialStatementsFile: Boolean(financialStatementsFile),
       submissionMode,
+      filingOperation: runtime.filingOperation,
     });
 
-    const prompt = buildSubstanceFormPrompt({
+    const prompt = preparedDraft
+      ? buildSubmitPreparedReturnPrompt({
+          taxReturn,
+          substanceForm: taxReturn.substanceForm,
+          portalUrl: taxReturn.jurisdiction?.portalUrl || "https://my.gov.gg",
+          returnLink: taxReturn.link || undefined,
+          reviewUrl: preparedDraft.reviewUrl,
+          portalReference: preparedDraft.portalReference,
+          // Submit mode only starts with a configured contact (refused above).
+          contactName: filingContactInfo?.name ?? "",
+          contactEmail: filingContactInfo?.email ?? "",
+        })
+      : buildSubstanceFormPrompt({
       taxReturn: taxReturn as any,
       substanceForm: taxReturn.substanceForm as any,
       portalUrl: taxReturn.jurisdiction?.portalUrl || "https://my.gov.gg",
@@ -1460,6 +1596,16 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
           },
         });
       }
+      if (
+        isSubmitPrepared &&
+        typeof runtime.resultData[SUBMIT_PREPARED_DISPATCHED_KEY] !== "number"
+      ) {
+        // Durable before dispatch (a failed write aborts it): from here the
+        // run may reach Submit, so no later run may submit this return.
+        await updateActiveJobRecord({
+          resultDataPatch: { [SUBMIT_PREPARED_DISPATCHED_KEY]: Date.now() },
+        });
+      }
       const started = await client.runTask(task, {
         sessionId,
         model: BROWSER_USE_MODEL,
@@ -1493,6 +1639,120 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       return started;
     }
 
+    // ── Human in the loop ─────────────────────────────────────────────
+    // While paused the worker records what it is waiting on; a reviewer's
+    // reply (stored by the web app under the web-owned `operatorMessages`
+    // key) is handed to the next run in the SAME Browser Use session.
+    async function recordPendingQuestion(
+      reason: AgentQuestionReason,
+      text: string,
+    ): Promise<AgentQuestion> {
+      const askedAt = Date.now();
+      const question: AgentQuestion = {
+        id: `q-${askedAt}-${Math.random().toString(36).slice(2, 8)}`,
+        text,
+        askedAt,
+        reason,
+        expiresAt: askedAt + MAX_PAUSE_DURATION_MS,
+      };
+      await updateActiveJobRecord({
+        resultDataPatch: { pendingQuestion: question },
+      });
+      return question;
+    }
+
+    /** One pause-loop check: resume, stop waiting, or keep waiting. */
+    async function checkPausedJob(): Promise<
+      "resume" | "cancelled" | "ended" | "wait"
+    > {
+      const row = await db.query.jobs.findFirst({
+        where: eq(jobs.id, runtime.jobId),
+        columns: { status: true, resultData: true },
+      });
+      if (!row || row.status === "failed") return "ended";
+      if (row.status === "cancelled") return "cancelled";
+      if (row.status === "running") return "resume";
+      if (
+        row.status === "paused" &&
+        getPendingOperatorMessages(row.resultData).length > 0
+      ) {
+        // A reply sent while the agent was running (or that raced the agent
+        // pausing): the worker owns paused -> running, so the run has
+        // already been stopped when it resumes.
+        const claimed = await db
+          .update(jobs)
+          .set({ status: "running" })
+          .where(
+            sql`${jobs.id} = ${runtime.jobId} AND ${jobs.status} = 'paused'`,
+          )
+          .returning({ id: jobs.id });
+        if (claimed.length > 0) return "resume";
+      }
+      return "wait";
+    }
+
+    /** Continue in the same browser session, delivering pending reviewer replies. */
+    async function resumeSameSession(
+      continuationPrompt: string,
+      sessionId: string,
+    ): Promise<BrowserUseSession> {
+      const row = await db.query.jobs.findFirst({
+        where: eq(jobs.id, runtime.jobId),
+        columns: { resultData: true },
+      });
+      const pending = getPendingOperatorMessages(row?.resultData);
+      const question = parsePendingAgentQuestion(row?.resultData);
+      const resumed = await dispatchBrowserTask(
+        withOperatorMessages(continuationPrompt, {
+          messages: pending,
+          question,
+          submissionMode,
+        }),
+        sessionId,
+      );
+      const resumedAt = Date.now();
+      const deliveredIds = pending.map((message) => message.id);
+      if (deliveredIds.length > 0) {
+        try {
+          await db
+            .update(jobs)
+            .set({
+              resultData: markOperatorMessagesDeliveredSql({
+                ids: deliveredIds,
+                runId: resumed.runId ?? null,
+                deliveredAt: resumedAt,
+              }),
+            })
+            .where(eq(jobs.id, runtime.jobId));
+        } catch (error) {
+          await log("Failed to mark reviewer messages delivered", {
+            count: deliveredIds.length,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      await updateActiveJobRecord({
+        resultDataPatch: { pendingQuestion: null, lastResumedAt: resumedAt },
+      });
+      // Counts and ids only: reviewer message content is client data.
+      await log("Resumed agent in the same browser session", {
+        sessionId: resumed.id,
+        runId: resumed.runId,
+        reviewerMessages: deliveredIds.length,
+      });
+      await publishJobEvent({
+        type: "job:resumed",
+        jobId: runtime.jobId,
+        timestamp: resumedAt,
+        data: {
+          sessionId: resumed.id,
+          liveUrl: resumed.liveUrl,
+          deliveredMessageIds: deliveredIds,
+        },
+      });
+      return resumed;
+    }
+
     await log("Starting Browser Use V4 run", {
       model: BROWSER_USE_MODEL,
       submissionMode,
@@ -1523,7 +1783,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
         status: "running",
         startedAt: new Date(),
         aiModel: BROWSER_USE_MODEL,
-        resultData: runtime.resultData,
+        resultData: preserveWebOwnedResultDataSql(runtime.resultData),
       })
       .where(
         sql`${jobs.id} = ${runtime.jobId} AND ${jobs.status} <> 'cancelled'`,
@@ -1565,7 +1825,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
 
       const currentJobStatus = await db.query.jobs.findFirst({
         where: eq(jobs.id, runtime.jobId),
-        columns: { status: true },
+        columns: { status: true, resultData: true },
       });
 
       if (currentJobStatus?.status === "cancelled") {
@@ -1578,7 +1838,21 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       }
 
       if (currentJobStatus?.status === "paused") {
-        await log("Job paused by user - waiting for resume");
+        const interrupted = hasPendingOperatorInterrupt(
+          currentJobStatus.resultData,
+        );
+        await log(
+          interrupted
+            ? "Paused to deliver a reviewer message"
+            : "Job paused by user - waiting for resume",
+        );
+        const pauseMessage = interrupted
+          ? "Pausing the agent to pass on your message..."
+          : "Task paused. Complete any manual actions in the browser, then resume or send the agent an instruction.";
+        const pauseQuestion = await recordPendingQuestion(
+          interrupted ? "operator_interrupt" : "user_pause",
+          pauseMessage,
+        );
         await publishJobEvent({
           type: "job:requires_attention",
           jobId: runtime.jobId,
@@ -1586,8 +1860,8 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
           data: {
             liveUrl: session.liveUrl,
             sessionId: session.id,
-            message:
-              "Task paused. Complete any manual actions in the browser and click Resume.",
+            message: pauseMessage,
+            pendingQuestion: pauseQuestion,
           },
         });
 
@@ -1618,14 +1892,16 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
 
         const pauseStartTime = Date.now();
         let resumed = false;
+        let pauseChecks = 0;
         while (Date.now() - pauseStartTime < MAX_PAUSE_DURATION_MS) {
-          await sleep(PAUSE_CHECK_INTERVAL_MS);
-          const checkJob = await db.query.jobs.findFirst({
-            where: eq(jobs.id, runtime.jobId),
-            columns: { status: true },
-          });
+          // A reviewer message is already waiting: check once without delay.
+          if (!(interrupted && pauseChecks === 0)) {
+            await sleep(PAUSE_CHECK_INTERVAL_MS);
+          }
+          pauseChecks += 1;
+          const pauseCheck = await checkPausedJob();
 
-          if (checkJob?.status === "running") {
+          if (pauseCheck === "resume") {
             await log("User resumed - continuing task");
             const continuePrompt = `
 Continue from where you left off. The user has completed any manual intervention or authentication.
@@ -1633,17 +1909,21 @@ Now proceed with the original task:
 
 ${prompt}
 `;
-            session = await dispatchBrowserTask(continuePrompt, session.id);
+            session = await resumeSameSession(continuePrompt, session.id);
             resumed = true;
             break;
           }
 
-          if (checkJob?.status === "cancelled") {
+          if (pauseCheck === "cancelled") {
             await log("Job cancelled during pause");
             try {
               await client.stopSession(session.id, "session");
             } catch {}
             terminalStateHandled = true;
+            break;
+          }
+
+          if (pauseCheck === "ended") {
             break;
           }
         }
@@ -1912,7 +2192,21 @@ ${prompt}
             await waitForSessionToLeaveRunning(client, session.id);
           } catch {}
 
-          const recoveryPrompt = `
+          const recoveryPrompt = isSubmitPrepared
+            ? `
+The browser entered an unstable state after a bad click or detached tab.
+
+RECOVERY RULES:
+- Use the browser controls exposed by this session's current tool schema; do not invoke unavailable helpers such as get_tabs.
+- Switch back to the main Guernsey portal tab or close the stray tab. If you cannot recover it quickly, follow step 1 of the task below to reopen the prepared draft.
+- First check whether the return was already submitted (a confirmation page, or the case/return shown as submitted). If it was, do NOT submit again: download the completion PDF if offered and report the submission.
+- Otherwise follow the task below from step 1. Do not edit any section.
+
+Continue the original task now:
+
+${prompt}
+`
+            : `
 The browser entered an unstable state after a bad click or detached tab.
 
 RECOVERY RULES:
@@ -1973,7 +2267,7 @@ ${prompt}
         // Check if the job was cancelled in the DB before treating as success
         const jobStatusCheck = await db.query.jobs.findFirst({
           where: eq(jobs.id, runtime.jobId),
-          columns: { status: true },
+          columns: { status: true, resultData: true },
         });
         if (jobStatusCheck?.status === "cancelled") {
           await log("Job cancelled by user (detected at terminal state)");
@@ -2008,18 +2302,52 @@ ${prompt}
           });
         }
 
+        // A reviewer reply can land as the run stops (e.g. pause then reply
+        // before this worker saw the pause). Deliver it in the same session
+        // rather than finishing. Prepare-only runs only: a submit-mode run
+        // may have filed without saying so, and must never be re-driven.
+        const undeliveredReplies = getPendingOperatorMessages(
+          jobStatusCheck?.resultData,
+        );
+        if (
+          undeliveredReplies.length > 0 &&
+          submissionMode === "prepare_only" &&
+          !needsAttention &&
+          !outcome.likelySubmitted &&
+          jobStatusCheck?.status === "running"
+        ) {
+          await log("Reviewer message waiting at run end - continuing", {
+            reviewerMessages: undeliveredReplies.length,
+          });
+          session = await resumeSameSession(
+            buildResumePrompt(prompt, { afterFilingContactStop: false }),
+            session.id,
+          );
+          continue;
+        }
+
         if (needsAttention) {
           await log("Task requires user attention - pausing", {
             output,
             stoppedForFilingContact,
           });
 
+          const askedAt = Date.now();
+          const agentQuestion: AgentQuestion = {
+            id: `q-${askedAt}-${Math.random().toString(36).slice(2, 8)}`,
+            text: extractAgentQuestionText(output),
+            askedAt,
+            reason: stoppedForFilingContact ? "filing_contact" : "agent_question",
+            expiresAt: askedAt + MAX_PAUSE_DURATION_MS,
+          };
+
           await publishJobEvent({
             type: "job:requires_attention",
             jobId: runtime.jobId,
-            timestamp: Date.now(),
+            timestamp: askedAt,
             data: {
               output,
+              pendingQuestion: agentQuestion,
               browserUseSessionId: session.id,
               liveUrl: session.liveUrl,
               sessionId: session.id,
@@ -2039,8 +2367,9 @@ ${prompt}
               browserUseSessionId: session.id,
               liveUrl: session.liveUrl,
               sessionId: session.id,
-              pausedAt: Date.now(),
+              pausedAt: askedAt,
               pauseReason: output,
+              pendingQuestion: agentQuestion,
               needsFilingContact: stoppedForFilingContact || undefined,
             },
           });
@@ -2060,15 +2389,9 @@ ${prompt}
           while (Date.now() - pauseStartTime < MAX_PAUSE_DURATION_MS) {
             await sleep(PAUSE_CHECK_INTERVAL_MS);
 
-            const currentJob = await db.query.jobs.findFirst({
-              where: eq(jobs.id, runtime.jobId),
-            });
+            const pauseCheck = await checkPausedJob();
 
-            if (!currentJob) {
-              break;
-            }
-
-            if (currentJob.status === "running") {
+            if (pauseCheck === "resume") {
               await log(
                 "User resumed - creating new Browser Use run to continue",
               );
@@ -2076,15 +2399,12 @@ ${prompt}
               const continuePrompt = buildResumePrompt(prompt, {
                 afterFilingContactStop: stoppedForFilingContact,
               });
-              session = await dispatchBrowserTask(continuePrompt, session.id);
+              session = await resumeSameSession(continuePrompt, session.id);
 
               break;
             }
 
-            if (
-              currentJob.status === "cancelled" ||
-              currentJob.status === "failed"
-            ) {
+            if (pauseCheck === "cancelled" || pauseCheck === "ended") {
               await log("Job was cancelled or failed during pause");
               break;
             }
@@ -2212,6 +2532,17 @@ ${prompt}
               receiptGate: finalStatuses.receiptGate,
               prepareOnlyReadyAt:
                 success && prepareOnlyReady ? Date.now() : undefined,
+              // Identity of the draft left on the review page, for a later
+              // "Submit prepared return" run.
+              preparedDraft:
+                success && prepareOnlyReady
+                  ? ({
+                      version: 1,
+                      preparedAt: Date.now(),
+                      inputFingerprint,
+                      ...parsePreparedDraftOutput(output),
+                    } satisfies PreparedDraftRecord)
+                  : undefined,
               prepareOnlyLikelySubmitted:
                 prepareOnlyLikelySubmitted || undefined,
             },

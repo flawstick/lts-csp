@@ -9,7 +9,15 @@ import {
   type TaxReturn,
 } from "@repo/database";
 
+import {
+  getGuernseyReviewDraftId,
+  normalizePortalReference,
+} from "@repo/database/prepared-draft";
 import { NEEDS_FILING_CONTACT_MARKER } from "./run-outcome";
+
+/** Labels a prepare run reports, parsed by @repo/database/prepared-draft. */
+export const PREPARED_DRAFT_URL_LABEL = "REVIEW_PAGE_URL";
+export const PREPARED_DRAFT_REFERENCE_LABEL = "PORTAL_REFERENCE";
 import { formatPortalFte } from "./portal-fte";
 
 interface Employee {
@@ -73,6 +81,18 @@ interface PromptBuilderOptions {
   contactEmail?: string | null;
   contactPhone?: string | null;
 }
+
+// Portal login used by every Guernsey run (filling and submitting).
+const PORTAL_LOGIN_SECTION = `## LOGIN CREDENTIALS
+If you need to log in to the portal, use:
+- Email: dev@flawstick.com
+- Password: V424d3ef@1
+
+## CSP / GUERNSEY REVENUE SERVICE CREDENTIALS
+If prompted for CSP or secret credentials:
+- Customer Number: C066
+- Security Code: X312E49624
+`;
 
 const INFERABLE_FIELDS = new Set([
   "entityActivity",
@@ -154,16 +174,21 @@ export function buildSubstanceFormPrompt(
       : "Complete Guernsey Economic Substance Register Form"
   }
 
-## LOGIN CREDENTIALS
-If you need to log in to the portal, use:
-- Email: dev@flawstick.com
-- Password: V424d3ef@1
+${
+  isPrepareOnly
+    ? `Fill the Guernsey Economic Substance Register return for **${taxReturn.entityName}** (tax year ${taxReturn.taxYear}) from the data in this task and stop on the final review/submit page. This run must not file the return.`
+    : `Fill and file the Guernsey Economic Substance Register return for **${taxReturn.entityName}** (tax year ${taxReturn.taxYear}) from the data in this task, then save the portal's completion PDF.`
+}
 
-## CSP / GUERNSEY REVENUE SERVICE CREDENTIALS
-If prompted for CSP or secret credentials:
-- Customer Number: C066
-- Security Code: X312E49624
+## GROUND RULES
+- **Sources:** use only (1) the saved values in this task, (2) the attached financial statements, and (3) text visible in this return on the portal. Never search the web, open other cases or returns, or leave this case/return flow to discover facts.
+- **Missing values:** a line marked [MISSING - STOP if required] has no saved value. If the portal does not require that field, leave it as the portal shows it. If the portal requires it, STOP and report **REQUIRES_ATTENTION** naming the field. Never guess a value that could change the filing.
+- **Portal defaults:** a default or preselected portal value with no contradicting saved value may stay as is. Do not replace defaults with guesses.
+- **Exact entry:** enter saved values exactly as given (numbers including any minus sign, dates, names). Check each section matches this task before Save/Continue.
+- **Inference:** only the low-risk inferences listed under PORTAL FIELD NOTES. Never infer ownership, parent companies, beneficial owners, tax residence, registration or incorporation facts, or Relevant Activity.
+- **If stuck:** on an error you cannot resolve, STOP and report **REQUIRES_ATTENTION** quoting the portal's message.
 
+${PORTAL_LOGIN_SECTION}
 ## NAVIGATION
 1. Go to: ${returnLink || portalUrl}
 2. ${
@@ -174,40 +199,14 @@ If prompted for CSP or secret credentials:
 3. Tax Year: ${taxReturn.taxYear}
 
 ## CASE ASSIGNMENT — DO THIS BEFORE PROCESSING THE RETURN
-- Before filling or reviewing any return fields, make sure the case is assigned to **Amir Isaac**.
-- The **"Assign to user"** button is on the case **view** page, not the processing form itself.
-- If you are not already on the case view page, navigate to the case URL ending in **/view** before trying to assign.${ 
-  caseViewUrl
-    ? ` Use this case view URL: ${caseViewUrl}`
-    : ""
+- Assignment is on the case **view** page (URL ending in **/view**), not the processing form.${
+  caseViewUrl ? ` Case view URL: ${caseViewUrl}` : ""
 }
-- Once you are on the case **view** page, click **"Assign to user"**.
-- A list of users will appear.
-- Click **"Assign"** on the **second "Amir Isaac"** that appears in the list (not the first one).
-- If that assignment does not work, does not stick, or the case still does not appear assigned correctly, repeat the action and click **"Assign"** on the **other "Amir Isaac"** entry (the first one).
-- If the case is already assigned to someone already, including **Amir Isaac**, still reassign it: click **"Assign to another user"** and then pick the **second "Amir Isaac"** again.
-- Only after the case has been freshly assigned to **Amir Isaac** in this run should you continue with the filing workflow.
-- After assignment, return to the filing/processing page and continue the return.
+- Click **"Assign to user"** (or **"Assign to another user"** if it is already assigned to anyone, including Amir Isaac — always reassign).
+- Click **"Assign"** on the **second "Amir Isaac"** in the list. If that does not stick, repeat and use the first "Amir Isaac".
+- Continue only once the case is freshly assigned to **Amir Isaac** in this run, then return to the filing page.
 
-## IMPORTANT INSTRUCTIONS
-
-**CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "${certificateType}".
-
-**TURNOVER FIELD:** The "Turnover / Gross Income" field in Section 6 may be labeled simply as "Turnover" on the portal. Look for a field asking for gross income or turnover amount in the Adequacy Assessment area.
-
-**COMPLETION:** Double-check all fields before moving to the next section. Do not leave any fields empty - fill them with the data provided below or mark as N/A if truly not applicable.
-
-**IF STUCK:** If you cannot complete a field or encounter an error you cannot resolve, pause the task and report the issue for user intervention.
-
-**MISSING-DATA POLICY:** Never do external research, never search the wider web, and never navigate away from the current Guernsey return/case flow to discover missing facts. You may use only:
-- the saved form values provided below
-- the attached financial statements / uploaded documents
-- text already visible inside the current portal return
-
-If the portal already shows a default/preselected value and you do not have explicit contradictory information, you may leave that portal default as-is. Do **NOT** replace portal defaults with guesses.
-
-If a material field is missing from the saved form and documents, STOP and report **REQUIRES_ATTENTION** rather than guessing.
-
+## RUN MODE
 **PREPARE-ONLY SAFETY:** ${
   submissionMode === "submit_and_capture_pdf"
     ? "This run is allowed to fully submit once every section has been validated in this run."
@@ -216,34 +215,30 @@ If a material field is missing from the saved form and documents, STOP and repor
 ${
   isPrepareOnly
     ? `
+**PREPARE-ONLY REDIRECT / REFILL RULE:** The case page's **Prepare**, **Go to tax return**, review-summary section buttons and section-name links are expected navigation. If they open **revenueservice.gov.gg/company-tax-ui** or another Guernsey Revenue Service host, that is the operative government form for this run; do not stop because the host, title or section layout differs from this task's layout. On **reviewAndSubmit/summary**, the section rows and their **Change/Edit/View** actions (**Entity Information**, **Corporate Substance**, **Employee Information**, **Country By Country Reporting**, **Financial Institutions**, **Review and Submit**) are the way back into the form. These are not bad links or unsafe external substitutions.
 
-**PREPARE-ONLY REDIRECT / REFILL RULE:** The user explicitly confirms that the case page's **Prepare**, **Go to tax return**, review-summary section buttons, and section-name links are expected navigation for this task. If one of those controls opens **revenueservice.gov.gg/company-tax-ui** or another Guernsey Revenue Service host, treat that destination as the operative government form for this Prepare-only run. Do **NOT** stop solely because the host, product title, or section schema differs from the saved form schema.
-
-If the redirected form opens on **reviewAndSubmit/summary**, the section rows/buttons are the way back into the form. Click the relevant in-page section controls such as **Entity Information**, **Corporate Substance**, **Employee Information**, **Country By Country Reporting**, **Financial Institutions**, **Review and Submit**, or adjacent **Change/Edit/View** actions. These are not bad links or unsafe external substitutions; they are the required portal navigation for rechecking the draft.
-
-If the redirected form already contains completed or pre-filled answers, still open the relevant sections and re-check/re-fill them using the task data below. Do not skip fields merely because they are already populated. Preserve correct existing values, but update any visible fields that should match the task data.
+If the form already has answers, still open each relevant section and check it against this task. Do not skip fields merely because they are already populated: keep correct values and correct the ones that differ.
 `
     : ""
 }
-
 **SUMMARY PAGE SAFETY:** ${
   submissionMode === "submit_and_capture_pdf"
-    ? "If the portal lands on a page ending in **reviewAndSubmit/summary** before every section has been checked in this run, treat it as an incomplete draft summary. Use the summary page's **Change** or **Edit** links to re-enter the filing sections and continue the return. Only once the filing is fully validated should you use the final submit path, wait for confirmation, and download the portal-generated completion PDF."
-    : 'If the portal lands on a page ending in **reviewAndSubmit/summary**, treat it as a saved draft summary. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action from that page. Use the summary page\'s **Change** or **Edit** links to re-enter the filing sections and continue the return.'
+    ? "If the portal lands on **reviewAndSubmit/summary** before every section has been checked in this run, treat it as an incomplete draft: use its **Change**/**Edit** links to check the sections first. Only once the filing is fully validated, use the final submit path, wait for confirmation, and download the portal-generated completion PDF."
+    : 'If the portal lands on **reviewAndSubmit/summary**, treat it as a saved draft summary. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action from that page. Use its **Change**/**Edit** links to check the sections, then return to it.'
 }
 
-**TAB / BLANK PAGE RECOVERY:** Use the browser controls exposed by this session's current tool schema and their documented signatures. Do not assume legacy V3 tool names or invoke unavailable helpers such as **get_tabs**. If a bad click opens a stray tab or leaves you on **about:blank**, switch back to the main Guernsey portal tab or close the stray tab using the available controls. If that fails quickly, return directly to the filing URL and continue.
+**TAB / BLANK PAGE RECOVERY:** Use only the browser controls in this session's tool schema (no legacy helpers such as **get_tabs**). If a stray tab or **about:blank** opens, switch back to the Guernsey portal tab or close the stray tab; if that fails, return directly to the filing URL and continue.
 
-## INFERENCE RULES FOR GUERNSEY FILING
-- You may make only LOW-RISK inferences from the saved form, attached documents, and text already visible inside the current return.
-- You may infer a short **Entity Activity** description from the available context if it is blank.
-- If the portal asks **Has Intellectual Property Holding?** and the saved answer is missing, you may infer it from the available context instead of pausing.
-- Answer **"Yes"** for intellectual property holding only if the context clearly suggests IP ownership or exploitation, such as licensing, royalties, trademarks, patents, brands, software IP, or an Intellectual Property Holding Company relevant activity.
-- Otherwise answer **"No"** for intellectual property holding.
-- Do **NOT** infer ownership structures, parent companies, beneficial owners, tax residence details, registration facts, or incorporation facts if they are not explicitly provided.
-- If parent company / UBO / ownership information is not provided, do **NOT** try to look it up elsewhere. Use a portal-native "No", "None", or empty-list path only if the portal explicitly supports that flow. Otherwise STOP and report **REQUIRES_ATTENTION**.
-- Do **NOT** infer **Relevant Activity** if it is missing. That is a material field and should pause if the saved form and documents do not provide it clearly.
-- Prefer pausing over guessing for any field that could materially change the filing.
+## PORTAL FIELD NOTES
+- **CERTIFICATE TYPE:** When you encounter the "Certificate Type" field, always select "${certificateType}".${
+  isCertificateTwo
+    ? ""
+    : `
+- **TURNOVER:** "Turnover / Gross Income" (Adequacy Assessment) may be labelled just "Turnover" on the portal.`
+}
+- **Entity Activity:** if blank, you may write a short description from the context in this task.
+- **Has Intellectual Property Holding?:** if the saved answer is missing, answer **"Yes"** only if the context clearly shows IP ownership or exploitation (licensing, royalties, trademarks, patents, brands, software IP, or an Intellectual Property Holding Company relevant activity); otherwise **"No"**.
+- **Ownership (parents / UBOs):** if not provided, use a portal-native "No", "None" or empty-list path only where the portal offers one; otherwise STOP and report **REQUIRES_ATTENTION**.
 ${buildFilingContactSection({
   hasFilingContact,
   isPrepareOnly,
@@ -261,20 +256,17 @@ ${
 - Uploaded Browser Use workspace path: "${financialStatementsFile.sessionFilePath}"
 - Download URL fallback: ${financialStatementsUrl}
 
-**PORTAL FLOW FOR FINANCIAL STATEMENTS (Upload Accounts section):**
-1. When the portal asks if financial statements are available online, select **"No"**.
-2. A file upload input will appear.
-3. Use Browser Use's **upload_file** tool on the visible file input as the PRIMARY method, with the uploaded workspace path "${financialStatementsFile.sessionFilePath}".
-4. After using **upload_file**, visually confirm that the control no longer says **"No file chosen"** and that a filename is shown.
-5. If the control still says **"No file chosen"** or no filename is visible, the upload did NOT work yet. Do NOT continue.
-6. If **upload_file** fails or the control still shows **"No file chosen"**, use Browser Use's **evaluate** tool with this EXACT script:
+**PORTAL FLOW (Upload Accounts section):**
+1. When asked if financial statements are available online, select **"No"**; a file input appears.
+2. Use **upload_file** on that input with the workspace path "${financialStatementsFile.sessionFilePath}".
+3. Confirm a filename is shown and the control no longer says **"No file chosen"**. Until then the upload has NOT worked: do not continue.
+4. If **upload_file** fails, use **evaluate** with this EXACT script:
 
 fetch('${financialStatementsUrl}').then(r=>r.blob()).then(blob=>{const f=new File([blob],'${financialStatementsFile.originalName}',{type:'application/pdf'});const d=new DataTransfer();d.items.add(f);const i=document.querySelector('input[type=\"file\"]');if(i){i.files=d.files;i.dispatchEvent(new Event('change',{bubbles:true}))}})
 
-7. After **evaluate**, verify again that the control no longer says **"No file chosen"**.
-8. Only once a filename is visible should you leave **"Would you like to upload another file?"** as **"No"** and click Save/Continue.
-9. Never leave the Accounts upload step while the control still says **"No file chosen"**. If the portal somehow advances without a file attached, go back and upload it before continuing.
-10. If neither **upload_file** nor **evaluate** works, STOP and report "REQUIRES_ATTENTION: Financial statements upload failed".
+5. Re-check the filename after **evaluate**. Only then leave **"Would you like to upload another file?"** as **"No"** and click Save/Continue.
+6. If the portal advances without a file attached (including reaching **reviewAndSubmit/summary**), go back to the Accounts section and upload it.
+7. If neither method works, STOP and report "REQUIRES_ATTENTION: Financial statements upload failed".
 `
     : !isCertificateTwo
       ? `
@@ -286,18 +278,14 @@ fetch('${financialStatementsUrl}').then(r=>r.blob()).then(blob=>{const f=new Fil
       : `
 
 ## CERTIFICATE 2 FILES
-- This is a Certificate 2 filing.
-- Do NOT look for or upload financial statements.
-- Do NOT attempt the Certificate 3 accounts upload flow.
+- Certificate 2: do NOT look for or upload financial statements or use the Certificate 3 accounts upload flow.
 `
 }
 ${
   overrideSaved
     ? `
 ## OVERRIDE MODE ENABLED
-- Re-enter ALL fields even if they appear to be already filled in
-- Do not skip any fields because they look complete - overwrite everything with the values provided below
-- This is a full re-submission of all data
+- Re-enter ALL fields from the data below, even ones that already look complete (the filing contact rules above still apply).
 `
     : ""
 }
@@ -385,8 +373,11 @@ ${
 4. Leave the portal on the final review/submit page with the submit button visible and ready
 5. Your final output MUST start with exactly: **READY_FOR_MANUAL_SUBMISSION:**
 6. Then state that the return is ready for manual submission and name the exact remaining button/action
-7. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action under any circumstances
-8. If there are validation errors, report them exactly as shown`
+7. Then add these two lines, so a later run can reopen this exact draft:
+   ${PREPARED_DRAFT_URL_LABEL}: <the full URL of the review/submit page currently open>
+   ${PREPARED_DRAFT_REFERENCE_LABEL}: <the return or case reference shown on the page, or NONE>
+8. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action under any circumstances
+9. If there are validation errors, report them exactly as shown`
 }
 `
       : `
@@ -467,7 +458,7 @@ RULES FOR THIS CONTINUATION (these override the FILING CONTACT and COMPLETION se
 - Do NOT type into, clear, edit or replace any contact name, email or telephone field. Leave whatever the person entered (or left) exactly as it is.
 - If the portal still shows the contact step, use its normal Save/Continue button to move to the final review/submit page. If the portal rejects the contact step (for example a required contact field is empty), do not fill it: STOP and report output starting with exactly **REQUIRES_ATTENTION: ${NEEDS_FILING_CONTACT_MARKER}:** and quote the portal's message.
 - Do NOT go back through earlier sections unless the portal shows a validation error there.
-- Once on the final review/submit page, follow the original COMPLETION steps for a prepare-only run: stop BEFORE submitting, leave the submit button visible, and start your final output with exactly **READY_FOR_MANUAL_SUBMISSION:**
+- Once on the final review/submit page, follow the original COMPLETION steps for a prepare-only run: stop BEFORE submitting, leave the submit button visible, and start your final output with exactly **READY_FOR_MANUAL_SUBMISSION:** followed by the lines **${PREPARED_DRAFT_URL_LABEL}: <full URL of the review/submit page>** and **${PREPARED_DRAFT_REFERENCE_LABEL}: <return or case reference shown, or NONE>**
 - Do **NOT** click Submit, Confirm, Print, Download, or any final filing action under any circumstances.
 
 Original task, for reference:
@@ -509,10 +500,9 @@ ${field("Economic Classification Code", form.economicClassificationCode)}
 ${field("Certificate Type", certificateType)}
 ${field("Entity Activity", form.entityActivity)}
 
-**IMPORTANT:**
-- Economic Classification Code is REQUIRED for 2025 returns — this is a dropdown field on the portal, select the matching option.
-- Certificate Type is fixed for this filing flow: always use ${certificateType}.
-- Entity Activity describes the nature of the entity's business (e.g., "Property Holdings"). Preferred to have it filled even if the entity has no relevant activity.
+**NOTES:**
+- Economic Classification Code is required for 2025 returns: select the matching dropdown option.
+- Entity Activity is the nature of the business (e.g. "Property Holdings"); fill it even when there is no relevant activity.
 - **Is Incorporated in Guernsey** must come from the saved form value above. Do NOT infer it from the registered address, administrator address or entity name. If the saved value is missing and the portal requires an answer, STOP and report **REQUIRES_ATTENTION** naming this field so the client can confirm it.
 `;
 }
@@ -535,12 +525,11 @@ ${field("Net Book Value", form.netBookValue)}
 ${field("Total Profit", form.totalProfit)}
 ${field("Profit Before Tax Allocation", form.profitAllocation)}
 
-**IMPORTANT:**
-- Net Book Value and Total Profit: the portal accepts negative values. If the figure above is negative (a loss), enter it exactly as given, including the leading minus sign (e.g. **-12345**). Do NOT replace it with 0.
-- Profit Before Tax Allocation is REQUIRED — must be either "Investment" or "Business".
+**NOTES:**
+- Net Book Value and Total Profit may be negative: enter a loss exactly as given, with the minus sign (e.g. **-12345**). Do NOT replace it with 0.
+- Profit Before Tax Allocation is required: "Investment" or "Business".
 - Accounts Preparer Name/Qualification is the ACCOUNTANT who prepared the financial statements, NOT LTS Tax.
-- **FINANCIAL STATEMENTS UPLOAD:** When the portal asks if financial statements are available online, select **"No"** and then use **upload_file** on the visible file input with the preloaded Browser Use workspace PDF described above. If the control still shows **"No file chosen"**, use **evaluate** as fallback. Do NOT click Save/Continue until a filename is visible.
-- If you reach **reviewAndSubmit/summary** before verifying this upload, go back into the filing using a **Change/Edit** link and return to the Financial Statements / Accounts section before continuing.
+- Upload the accounts as described under FINANCIAL STATEMENTS PDF above.
 `;
 }
 
@@ -556,12 +545,11 @@ ${field("CRS: Is Guernsey Financial Institution", form.isGuernseyFiCrs || "No")}
 ${field("Registered on IGOR", form.isRegisteredOnIgor || "No")}
 ${field("Is the entity a constituent entity", form.isConstituentEntity || "No")}
 
-**IMPORTANT:**
-- Company activity must be **Dormant**.
-- Economic substance questions should follow the out-of-scope / "No" path.
-- FATCA, CRS, IGOR, and CbCR should all be **No** unless the portal already shows the same fixed default.
+**NOTES:**
+- Company activity is **Dormant**; economic substance questions follow the out-of-scope / "No" path.
+- FATCA, CRS, IGOR and CbCR are **No** unless the portal already shows the same fixed default.
 - Do **NOT** upload accounts or financial statements for Certificate 2.
-- Do **NOT** enter Certificate 3-only information such as accounts preparer details, adequacy assessment amounts, CIGA, employees, or outsourcing.
+- Do **NOT** enter Certificate 3-only information (accounts preparer, adequacy assessment amounts, CIGA, employees, outsourcing).
 `;
 }
 
@@ -572,7 +560,7 @@ ${field("Is Guernsey Financial Institution (FATCA)", form.isGuernseyFiFatca)}
 ${field("Is Guernsey Financial Institution (CRS)", form.isGuernseyFiCrs)}
 ${field("Is Registered on IGOR", form.isRegisteredOnIgor)}
 
-**IMPORTANT:** If FATCA is "Yes", the entity MUST be registered on IGOR. "No" for IGOR with "Yes" for FATCA is a red flag on the Guernsey portal.
+**NOTE:** FATCA "Yes" requires IGOR "Yes". If the saved values say FATCA "Yes" and IGOR "No", STOP and report **REQUIRES_ATTENTION** rather than changing either.
 `;
 }
 
@@ -602,11 +590,7 @@ ${field("Relevant Activity", form.relevantActivity)}
 ${field("Has Multiple Relevant Activities", form.hasMultipleRelevantActivities)}
 ${field("Has Intellectual Property Holding", form.hasIntellectualPropertyHolding)}
 
-**IMPORTANT:**
-- If the portal requires a business description such as "Entity Activity", you may infer a concise description from the broader context.
-- Do **NOT** invent or research a missing **Relevant Activity**. If it is not clearly available from the saved form/documents, STOP and report **REQUIRES_ATTENTION**.
-- If "Has Intellectual Property Holding" is missing, infer it only from the provided context. Default to **"No"** unless the form context clearly indicates IP ownership, licensing, royalties, trademarks, patents, brands, software IP, or an Intellectual Property Holding Company activity.
-- If you encounter the final summary page while Section 6 has not been checked in this run, do **NOT** submit from there. Use a **Change/Edit** link to return to the relevant activities section and continue filling the form.
+**NOTE:** Do **NOT** invent or research a missing **Relevant Activity**: if the saved form and documents do not give it, STOP and report **REQUIRES_ATTENTION**.
 ${ipSection}
 `;
 }
@@ -678,10 +662,7 @@ ${ultimateParents.length > 0 ? ultimateParents.map(formatParent).join("\n") : "N
 ### Ultimate Beneficial Owners:
 ${ubos.length > 0 ? ubos.map(formatUbo).join("\n") : "None listed"}
 
-**IMPORTANT:**
-- If these sections are empty in the saved form, do **NOT** research the parent/UBO details elsewhere.
-- Use an explicit portal "No" / "None" path only if the portal supports it.
-- If the portal requires ownership details that are not provided here or in the attached documents, STOP and report **REQUIRES_ATTENTION**.
+**NOTE:** Never research missing parent/UBO details. Use a portal "No" / "None" path only where offered; if the portal requires details not given here or in the documents, STOP and report **REQUIRES_ATTENTION**.
 `;
 }
 
@@ -736,7 +717,7 @@ function buildCbcrSection(form: SubstanceForm): string {
 ## SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)
 ${field("Is the entity a constituent entity", form.isConstituentEntity || "No")}
 
-**IMPORTANT:** This is a REQUIRED question for 2025 returns. Default is "No".
+**NOTE:** Required for 2025 returns; "No" when not saved otherwise.
 `;
 }
 
@@ -787,5 +768,106 @@ REQUIRES_ATTENTION: Unable to proceed without the following information:
 - Current Page: ${currentPage}
 
 Please provide the missing information to continue with the form submission.
+`;
+}
+
+/** Output marker for a submit_prepared run that refused to submit. */
+export const PREPARED_DRAFT_NOT_VERIFIED_MARKER = "PREPARED_DRAFT_NOT_VERIFIED";
+
+/**
+ * Prompt for "Submit prepared return": open the exact draft an earlier
+ * prepare-only run left on the review/submit page, verify it is that draft
+ * and still ready, then submit once and save the completion PDF. No filling,
+ * editing or section-by-section review: the draft was already prepared and
+ * approved. Any failed check stops the run before Submit.
+ */
+export function buildSubmitPreparedReturnPrompt(options: {
+  taxReturn: Pick<TaxReturn, "entityName" | "taxYear">;
+  substanceForm: Pick<
+    SubstanceForm,
+    "companyNumber" | "accountingPeriodStart" | "accountingPeriodEnd"
+  >;
+  portalUrl: string;
+  returnLink?: string;
+  reviewUrl: string | null;
+  portalReference: string | null;
+  contactName: string;
+  contactEmail: string;
+}): string {
+  const {
+    taxReturn,
+    substanceForm,
+    portalUrl,
+    returnLink,
+    reviewUrl,
+    portalReference,
+    contactName,
+    contactEmail,
+  } = options;
+  const notVerified = `REQUIRES_ATTENTION: ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}:`;
+  // Only a canonical draft review URL and/or a specific portal reference can
+  // bind this run to the prepared draft; without either it must not run.
+  const draftId = reviewUrl ? getGuernseyReviewDraftId(reviewUrl) : null;
+  const reference = normalizePortalReference(portalReference);
+  if (!draftId && !reference) {
+    throw new Error(
+      "Submit prepared return needs the prepared draft's review page URL or portal reference",
+    );
+  }
+  const draftPath = draftId
+    ? `/company-tax-ui/${draftId}/reviewAndSubmit/summary`
+    : null;
+  const period =
+    substanceForm.accountingPeriodStart || substanceForm.accountingPeriodEnd
+      ? `${substanceForm.accountingPeriodStart || "?"} to ${substanceForm.accountingPeriodEnd || "?"}`
+      : null;
+
+  return `
+# TASK: Submit the already-prepared Guernsey return (no edits)
+
+An earlier run prepared this Guernsey Economic Substance Register return and left it on the portal's review/submit page. It has since been reviewed and approved for filing. Open **that exact draft**, confirm it is the right one and still ready, submit it **once**, and save the portal's completion PDF.
+
+You are **not** filling or reviewing the return. Do **NOT** open sections, click **Change**/**Edit**/section links, type into or change any field, upload files, re-assign the case, or open any other case or return.
+
+${PORTAL_LOGIN_SECTION}
+## 1. OPEN THE PREPARED DRAFT
+${
+  draftId
+    ? `- Go to the prepared review/submit page: ${reviewUrl}
+- If it redirects through login, log in and then go to that exact URL again. Do not reach a review page any other way (not through the case page, a list of returns or a search): another route may open a different draft.
+- The prepared draft is **${draftId}**. Before any check, read the browser address: it must be on **revenueservice.gov.gg** and its path must be **${draftPath}**. If it is not, or the page does not open, stop: this is a failed check.`
+    : `- Go to the case: ${returnLink || portalUrl}
+- Use only the case's **Go to tax return** / **Continue** / **Review and Submit** controls to reach the review/submit page (usually ending in **reviewAndSubmit/summary**).`
+}
+
+## 2. VERIFY — EVERY CHECK MUST PASS BEFORE YOU SUBMIT
+Read the review/submit page only. Do not change anything to make a check pass.
+- The page is the final review/submit page of the return and the final **Submit** action is visible.
+- Entity name is **${taxReturn.entityName}**.
+- Tax year is **${taxReturn.taxYear}**${period ? ` (accounting period ${period})` : ""}.${
+    substanceForm.companyNumber
+      ? `\n- If a company/registration number is shown, it is **${substanceForm.companyNumber}**.`
+      : ""
+  }${
+    draftPath
+      ? `\n- The browser address path is still **${draftPath}** (the prepared draft).`
+      : ""
+  }${
+    reference
+      ? `\n- The page shows the return/case reference **${reference}** exactly. If no reference is shown, or it differs, this check fails.`
+      : ""
+  }
+- No section is shown as incomplete, not started or in error, and no validation message is shown.
+- If the filing contact is shown, its name is **${contactName}** and its email is **${contactEmail}**.
+- The return is not already submitted or filed.
+
+If any check fails, or you cannot see enough to confirm it, do **NOT** submit. Your final output MUST start with exactly: **${notVerified}** followed by which check failed and what the page shows. If the return already appears submitted or filed, use the same marker, say so, and do not submit again.
+
+## 3. SUBMIT ONCE
+1. Click the final **Submit** action once. If the portal asks you to tick its declaration or confirm in a dialog, do that and confirm once.
+2. Never click Submit a second time. If an error appears after submitting, do not retry: report it exactly as shown, starting with **REQUIRES_ATTENTION:**.
+3. Wait for the post-submission confirmation page or state.
+4. Download the portal-generated completion/receipt/return PDF into the Browser Use session. Do not finish until the download completes, or you have reported that the portal offers no completion PDF.
+5. Final output: state that the prepared return was submitted, the confirmation/reference shown, and the PDF file name.
 `;
 }

@@ -49,12 +49,26 @@ import {
 import { getBrowserJobStaleReason } from "@/lib/browser-job-status";
 import { getFilingStartBlocker } from "@/lib/filing-start-guard";
 import {
+  fingerprintPreparedInputs,
+  getUnconfirmedSubmitBlocker,
+  hasSubmitPreparedDispatch,
+  resolvePreparedDraft,
+  SUBMIT_PREPARED_OPERATION,
+} from "@repo/database/prepared-draft";
+import { getFilingMaintenanceBlocker } from "@/lib/filing-maintenance";
+import {
   ACTIVE_JOB_STATUSES,
   MANUAL_COMPLETION_FROM_STATUSES,
   planManualCompletion,
   planManualCompletionRevert,
 } from "@/lib/manual-completion";
 import { requireStaffAccount } from "@/server/api/staff-auth";
+import {
+  OPERATOR_MESSAGE_MAX_LENGTH,
+  normalizeOperatorMessageContent,
+  planOperatorMessage,
+} from "@repo/database/operator-messages";
+import { mergeResultDataPatchSql } from "@repo/database/operator-messages-sql";
 import { triggerTaxSync } from "@/lib/tax-sync-launcher";
 import {
   jerseyCompanyReturnFormSchema,
@@ -220,20 +234,24 @@ async function maybeMarkBrowserJobStale<
     return job;
   }
 
-  const nextResultData = {
-    ...(getResultDataRecord(job.resultData) ?? {}),
+  const stalePatch = {
     staleFailureAt: Date.now(),
     staleFailureReason: reason,
   };
+  const nextResultData = {
+    ...(getResultDataRecord(job.resultData) ?? {}),
+    ...stalePatch,
+  };
 
-  // A worker may have claimed the job since this request read it.
+  // A worker may have claimed the job since this request read it. Merge in
+  // SQL so worker state written since (e.g. submit dispatch evidence) stays.
   const [failedJob] = await dbClient
     .update(jobs)
     .set({
       status: "failed",
       completedAt: new Date(),
       errorMessage: reason,
-      resultData: nextResultData,
+      resultData: mergeResultDataPatchSql(stalePatch),
     })
     .where(and(eq(jobs.id, job.id), eq(jobs.status, job.status)))
     .returning({ id: jobs.id });
@@ -1286,7 +1304,32 @@ export const taxReturnRouter = createTRPCRouter({
     .input(z.array(z.string()))
     .mutation(async ({ ctx, input }) => {
       if (input.length === 0) return;
-      await ctx.db.delete(tasks).where(inArray(tasks.id, input));
+      await requireStaffAccount();
+      await ctx.db.transaction(async (tx) => {
+        const taskJobs = await tx
+          .select({
+            id: jobs.id,
+            status: jobs.status,
+            createdAt: jobs.createdAt,
+            resultData: jobs.resultData,
+          })
+          .from(jobs)
+          .where(inArray(jobs.taskId, input))
+          .for("update");
+        if (taskJobs.some((job) => isActiveBrowserJobStatus(job.status))) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Cancel active runs before deleting their tasks.",
+          });
+        }
+        if (getUnconfirmedSubmitBlocker({ jobs: taskJobs })) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Keep tasks that record a possible filing. Check the return in the Guernsey Tax Portal and recover its receipt.",
+          });
+        }
+        await tx.delete(tasks).where(inArray(tasks.id, input));
+      });
     }),
 
   // List tasks with substance form status
@@ -1836,9 +1879,30 @@ export const taxReturnRouter = createTRPCRouter({
           .enum(["prepare_only", "submit_and_capture_pdf"])
           .optional()
           .default("prepare_only"),
+        // "submit_prepared" files the exact draft the latest Prepare only run
+        // left on the review page, without filling or reviewing it again.
+        filingOperation: z
+          .enum(["fill", SUBMIT_PREPARED_OPERATION])
+          .optional()
+          .default("fill"),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const isSubmitPrepared =
+        input.filingOperation === SUBMIT_PREPARED_OPERATION;
+      // Submitting a prepared draft is a final submission: every submit-mode
+      // gate (signoffs, receipt evidence, filing contact) applies to it.
+      const submissionMode = isSubmitPrepared
+        ? ("submit_and_capture_pdf" as const)
+        : input.submissionMode;
+      const overrideSaved = isSubmitPrepared ? false : input.overrideSaved;
+      // Timed maintenance blocks new filing runs only; existing jobs are untouched.
+      const maintenanceBlocker = getFilingMaintenanceBlocker();
+      if (maintenanceBlocker) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: maintenanceBlocker });
+      }
+      await requireStaffAccount();
+
       // Get the task with tax return
       const task = await ctx.db.query.tasks.findFirst({
         where: eq(tasks.id, input.taskId),
@@ -1872,6 +1936,19 @@ export const taxReturnRouter = createTRPCRouter({
       }
 
       if (
+        isSubmitPrepared &&
+        !(
+          task.taxReturn.jurisdiction?.code === "GG" &&
+          task.taxReturn.returnType === "economic_substance"
+        )
+      ) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Submit prepared return is only available for Guernsey ESR returns.",
+        });
+      }
+
+      if (
         task.taxReturn.jurisdiction?.code === "GG" &&
         task.taxReturn.returnType === "economic_substance"
       ) {
@@ -1893,7 +1970,7 @@ export const taxReturnRouter = createTRPCRouter({
 
       const filingBlocker = getFilingStartBlocker({
         taxReturn: task.taxReturn,
-        submissionMode: input.submissionMode,
+        submissionMode,
       });
       if (filingBlocker) {
         throw new TRPCError({
@@ -1937,7 +2014,7 @@ export const taxReturnRouter = createTRPCRouter({
             jurisdiction: task.taxReturn?.jurisdiction,
             substanceForm: currentForm,
           },
-          submissionMode: input.submissionMode,
+          submissionMode,
         });
         if (currentBlocker) {
           throw new TRPCError({ code: "PRECONDITION_FAILED", message: currentBlocker });
@@ -1956,6 +2033,50 @@ export const taxReturnRouter = createTRPCRouter({
           throw new Error("A job is already running for this return");
         }
 
+        let preparedJobId: string | null = null;
+        if (submissionMode === "submit_and_capture_pdf") {
+          const returnJobs = await tx
+            .select({
+              id: jobs.id,
+              status: jobs.status,
+              createdAt: jobs.createdAt,
+              resultData: jobs.resultData,
+            })
+            .from(jobs)
+            .innerJoin(tasks, eq(jobs.taskId, tasks.id))
+            .where(eq(tasks.taxReturnId, taxReturnId));
+          // A Submit prepared return run that reached the browser may have
+          // filed without a receipt: no new submission of any kind.
+          const unconfirmedSubmit = getUnconfirmedSubmitBlocker({
+            jobs: returnJobs,
+          });
+          if (unconfirmedSubmit) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: unconfirmedSubmit,
+            });
+          }
+          if (isSubmitPrepared) {
+            const resolution = resolvePreparedDraft({
+              jobs: returnJobs,
+              currentFingerprint: fingerprintPreparedInputs({
+                entityName: currentReturn.entityName,
+                taxYear: currentReturn.taxYear,
+                link: currentReturn.link,
+                files: currentReturn.files,
+                substanceForm: (currentForm ?? null) as Record<string, unknown> | null,
+              }),
+            });
+            if (!resolution.ok) {
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message: resolution.blocker,
+              });
+            }
+            preparedJobId = resolution.preparedJob.id;
+          }
+        }
+
         const [lastJob] = await tx
           .select({ jobNumber: jobs.jobNumber })
           .from(jobs)
@@ -1969,9 +2090,12 @@ export const taxReturnRouter = createTRPCRouter({
           aiModel: "claude-opus-5-5",
           cloudwatchLogGroup: env.ECS_LOG_GROUP,
           resultData: {
-            submissionMode: input.submissionMode,
-            overrideSaved: input.overrideSaved,
+            submissionMode,
+            overrideSaved,
             startupTimeoutMs: env.BROWSER_STARTUP_TIMEOUT_MS,
+            ...(preparedJobId
+              ? { filingOperation: SUBMIT_PREPARED_OPERATION, preparedJobId }
+              : {}),
           },
         }).returning();
         if (!job) {
@@ -1989,8 +2113,8 @@ export const taxReturnRouter = createTRPCRouter({
             jobId: newJob.id,
             taxReturnId: task.taxReturn.id,
             taskId: input.taskId,
-            overrideSaved: input.overrideSaved,
-            submissionMode: input.submissionMode,
+            overrideSaved,
+            submissionMode,
             workerMode: "single",
           });
 
@@ -2034,6 +2158,7 @@ export const taxReturnRouter = createTRPCRouter({
   stopJob: publicProcedure
     .input(z.object({ jobId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
+      await requireStaffAccount();
       const job = await ctx.db.query.jobs.findFirst({
         where: eq(jobs.id, input.jobId),
       });
@@ -2078,6 +2203,7 @@ export const taxReturnRouter = createTRPCRouter({
   cancelJob: publicProcedure
     .input(z.object({ jobId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
+      await requireStaffAccount();
       const job = await ctx.db.query.jobs.findFirst({
         where: eq(jobs.id, input.jobId),
       });
@@ -2138,6 +2264,7 @@ export const taxReturnRouter = createTRPCRouter({
   resumeJob: publicProcedure
     .input(z.object({ jobId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
+      await requireStaffAccount();
       const job = await ctx.db.query.jobs.findFirst({
         where: eq(jobs.id, input.jobId),
       });
@@ -2150,15 +2277,101 @@ export const taxReturnRouter = createTRPCRouter({
         throw new Error("Job is not paused");
       }
 
-      // Set job back to running - the ECS task is polling for this change
-      await ctx.db
+      // Set job back to running - the ECS task is polling for this change.
+      // Conditional so a resume racing a cancel/timeout cannot revive the job.
+      const resumed = await ctx.db
         .update(jobs)
         .set({
           status: "running",
         })
-        .where(eq(jobs.id, input.jobId));
+        .where(and(eq(jobs.id, input.jobId), eq(jobs.status, "paused")))
+        .returning({ id: jobs.id });
+
+      if (resumed.length === 0) {
+        throw new Error("Job is not paused");
+      }
 
       return { success: true };
+    }),
+
+  // Send the filing agent an answer/instruction. Paused: stored and the job
+  // resumes, so the worker hands it to the next run in the SAME browser
+  // session. Running: stored as an interrupt; the worker stops the current
+  // run and resumes with it. Never starts a run or files anything itself.
+  sendAgentMessage: publicProcedure
+    .input(
+      z.object({
+        jobId: z.string().uuid(),
+        clientMessageId: z
+          .string()
+          .regex(/^[A-Za-z0-9_-]{8,100}$/),
+        content: z.string().min(1).max(OPERATOR_MESSAGE_MAX_LENGTH * 2),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const staff = await requireStaffAccount();
+      const content = normalizeOperatorMessageContent(input.content);
+      if (!content) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Write a message of up to ${OPERATOR_MESSAGE_MAX_LENGTH} characters.`,
+        });
+      }
+
+      return ctx.db.transaction(async (tx) => {
+        const [job] = await tx
+          .select({
+            id: jobs.id,
+            status: jobs.status,
+            resultData: jobs.resultData,
+          })
+          .from(jobs)
+          .where(eq(jobs.id, input.jobId))
+          .for("update");
+
+        if (!job) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Run not found." });
+        }
+
+        const plan = planOperatorMessage({
+          jobStatus: job.status,
+          resultData: job.resultData,
+          id: input.clientMessageId,
+          content,
+          authorId: staff.id,
+          now: Date.now(),
+        });
+
+        if (plan.kind === "duplicate") {
+          // Retried send: already stored, do not change the job again.
+          return {
+            messageId: input.clientMessageId,
+            delivery: "duplicate" as const,
+          };
+        }
+
+        if (plan.kind === "rejected") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              plan.reason === "starting"
+                ? "The agent is still starting. Send your message once it is running."
+                : "This run has ended. Start a new run to continue.",
+          });
+        }
+
+        await tx
+          .update(jobs)
+          .set({
+            status: plan.nextStatus,
+            resultData: mergeResultDataPatchSql({
+              operatorMessages: plan.messages,
+            }),
+          })
+          .where(and(eq(jobs.id, job.id), eq(jobs.status, job.status)));
+
+        return { messageId: plan.message.id, delivery: plan.delivery };
+      });
     }),
 
   // Delete a job
@@ -2176,6 +2389,14 @@ export const taxReturnRouter = createTRPCRouter({
       // Don't allow deleting running jobs
       if (isActiveBrowserJobStatus(job.status)) {
         throw new Error("Cannot delete an active job. Stop it first.");
+      }
+      // It is the evidence that blocks a second submission of the return.
+      if (hasSubmitPreparedDispatch(job.resultData)) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "This Submit prepared return run reached the portal and may have filed the return, so it is kept as a record.",
+        });
       }
 
       await ctx.db.delete(jobs).where(eq(jobs.id, input.jobId));
@@ -2203,6 +2424,7 @@ export const taxReturnRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      await requireStaffAccount();
       const job = await ctx.db.query.jobs.findFirst({
         where: eq(jobs.id, input.jobId),
       });
@@ -2211,18 +2433,20 @@ export const taxReturnRouter = createTRPCRouter({
         throw new Error("Job not found");
       }
 
-      const currentData = (job.resultData as Record<string, unknown>) || {};
+      // Merge only these keys in SQL: a read-modify-write here could drop a
+      // reviewer message or worker state written concurrently.
+      const patch = {
+        ...(input.chatMessages && { chatMessages: input.chatMessages }),
+        ...(input.steps && { steps: input.steps }),
+        ...(input.liveUrl && { liveUrl: input.liveUrl }),
+      };
+      if (Object.keys(patch).length === 0) {
+        return { success: true };
+      }
 
       await ctx.db
         .update(jobs)
-        .set({
-          resultData: {
-            ...currentData,
-            ...(input.chatMessages && { chatMessages: input.chatMessages }),
-            ...(input.steps && { steps: input.steps }),
-            ...(input.liveUrl && { liveUrl: input.liveUrl }),
-          },
-        })
+        .set({ resultData: mergeResultDataPatchSql(patch) })
         .where(eq(jobs.id, input.jobId));
 
       return { success: true };

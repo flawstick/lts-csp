@@ -5,6 +5,7 @@ import {
   type RunTaskCommandInput,
 } from "@aws-sdk/client-ecs";
 import { env } from "@/env";
+import { assertFilingAutomationAvailable } from "@/lib/filing-maintenance";
 
 const client = new ECSClient({
   region: env.AWS_REGION,
@@ -23,6 +24,8 @@ export interface LaunchTaskParams {
 }
 
 export async function launchTask(params: LaunchTaskParams) {
+  assertFilingAutomationAvailable();
+
   const input: RunTaskCommandInput = {
     cluster: env.ECS_CLUSTER,
     taskDefinition: env.ECS_TASK_DEFINITION,
@@ -173,6 +176,8 @@ export interface LaunchBrowserTaskParams {
 }
 
 export async function launchBrowserTask(params: LaunchBrowserTaskParams) {
+  assertFilingAutomationAvailable();
+
   const taskDef = env.ECS_BROWSER_TASK_DEFINITION || env.ECS_TASK_DEFINITION;
   const containerName =
     env.ECS_BROWSER_TASK_CONTAINER_NAME || env.ECS_CONTAINER_NAME;

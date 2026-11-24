@@ -10,6 +10,14 @@ import {
 } from "@/components/ui/resizable";
 import { api } from "@/trpc/react";
 import { trackClient } from "@/lib/analytics";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { MessageSquare } from "@/lib/icons";
+import {
+  parseOperatorMessages,
+  parsePendingAgentQuestion,
+} from "@repo/database/operator-messages";
 
 import type { JobEvent, StepEvent, ChatMessage } from "./_components/types";
 import { TaskHeader } from "./_components/task-header";
@@ -17,6 +25,11 @@ import { BrowserToolbar } from "./_components/browser-toolbar";
 import { BrowserFrame } from "./_components/browser-frame";
 import { StepsTimeline } from "./_components/steps-timeline";
 import { AgentPanel } from "./_components/agent-panel";
+import {
+  buildChatTimeline,
+  createClientMessageId,
+  deriveComposerState,
+} from "./_components/chat/chat-logic";
 import { TaskLoading } from "./_components/task-loading";
 import { TaskNotFound } from "./_components/task-not-found";
 import { DirectionalTransition } from "@/components/view-transition";
@@ -46,6 +59,12 @@ export default function TaskDetailPage() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [messageInput, setMessageInput] = useState("");
   const [finalOutput, setFinalOutput] = useState<string | null>(null);
+  // Reviewer messages sent from this tab and not yet stored by the server.
+  const [sendingMessageIds, setSendingMessageIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [isChatSheetOpen, setIsChatSheetOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const connectedJobIdRef = useRef<string | null>(null);
@@ -455,14 +474,49 @@ export default function TaskDetailPage() {
           }
 
           if (data.type === "job:requires_attention") {
+            const question = parsePendingAgentQuestion(data.data);
+            const asked =
+              question?.reason === "agent_question" ||
+              question?.reason === "filing_contact";
             const message =
-              (data.data?.message as string) || (data.data?.output as string);
+              (asked ? question?.text : undefined) ||
+              (data.data?.message as string) ||
+              (data.data?.output as string);
+            const id = question
+              ? `question-${question.id}`
+              : `attention-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+            setChatMessages((prev) =>
+              prev.some((m) => m.id === id)
+                ? prev
+                : [
+                    ...prev,
+                    {
+                      id,
+                      role: "assistant",
+                      content:
+                        message ||
+                        "I need your help to continue. Complete the step in the browser, then resume or send me an instruction.",
+                      timestamp: Date.now(),
+                    },
+                  ],
+            );
+            if (asked) setIsChatSheetOpen(true);
+            refetch();
+          }
+
+          if (data.type === "job:resumed") {
+            const delivered = Array.isArray(data.data?.deliveredMessageIds)
+              ? (data.data.deliveredMessageIds as unknown[]).length
+              : 0;
             setChatMessages((prev) => [
               ...prev,
               {
-                id: `attention-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                id: `resumed-${data.timestamp ?? Date.now()}`,
                 role: "assistant",
-                content: `⚠️ ${message || "I need your help to continue. Please complete the required action in the browser (e.g., login) and click Resume."}`,
+                content:
+                  delivered > 0
+                    ? "Got your message. Continuing in the same browser session."
+                    : "Resumed. Continuing in the same browser session.",
                 timestamp: Date.now(),
               },
             ]);
@@ -667,9 +721,11 @@ export default function TaskDetailPage() {
   const handleStart = ({
     overrideSaved = false,
     submissionMode = "prepare_only",
+    filingOperation,
   }: {
     overrideSaved?: boolean;
     submissionMode?: SubmissionMode;
+    filingOperation?: "submit_prepared";
   } = {}) => {
     setEvents([]);
     setSteps([]);
@@ -677,7 +733,12 @@ export default function TaskDetailPage() {
     setCurrentStep(null);
     setFinalOutput(null);
     setChatMessages([]);
-    startJobMutation.mutate({ taskId, overrideSaved, submissionMode });
+    startJobMutation.mutate({
+      taskId,
+      overrideSaved,
+      submissionMode,
+      ...(filingOperation ? { filingOperation } : {}),
+    });
 
     if (task) {
       trackClient({
@@ -690,6 +751,7 @@ export default function TaskDetailPage() {
           entityName: task.name,
           source: overrideSaved ? "retry" : "manual",
           submissionMode,
+          filingOperation: filingOperation ?? "fill",
         },
       }).catch(console.error);
     }
@@ -747,31 +809,64 @@ export default function TaskDetailPage() {
     }
   };
 
+  const sendAgentMessageMutation = api.taxReturn.sendAgentMessage.useMutation();
+
   const handleSendMessage = () => {
-    if (!messageInput.trim()) return;
+    const content = messageInput.trim();
+    // Only the run shown in the chat can receive its messages.
+    const targetJob =
+      selectedJob &&
+      (selectedJob.status === "paused" || selectedJob.status === "running")
+        ? selectedJob
+        : null;
+    if (!content || !targetJob || sendAgentMessageMutation.isPending) return;
 
-    const userMsg = {
-      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      role: "user" as const,
-      content: messageInput,
-      timestamp: Date.now(),
-    };
-
-    setChatMessages((prev) => [...prev, userMsg]);
+    const id = createClientMessageId();
+    setSendingMessageIds((prev) => new Set(prev).add(id));
+    setChatMessages((prev) => [
+      ...prev,
+      { id, role: "user", content, timestamp: Date.now() },
+    ]);
     setMessageInput("");
 
-    setTimeout(() => {
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-          role: "assistant",
-          content:
-            "Message received. Note: Direct messaging to the agent is not yet supported. The agent follows its task instructions automatically. If you need to modify the task, please stop and restart with updated instructions.",
-          timestamp: Date.now(),
+    const clearSending = () =>
+      setSendingMessageIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+
+    sendAgentMessageMutation.mutate(
+      { jobId: targetJob.id, clientMessageId: id, content },
+      {
+        onSuccess: async () => {
+          // Keep "sending" until the stored copy (with delivery state) is loaded.
+          await refetch();
+          clearSending();
+          if (targetJob.status === "paused") {
+            trackClient({
+              name: "job_resumed",
+              data: {
+                jobId: targetJob.id,
+                taskId,
+                pausedDurationMs:
+                  Date.now() -
+                  (targetJob.updatedAt
+                    ? new Date(targetJob.updatedAt).getTime()
+                    : Date.now()),
+              },
+            }).catch(console.error);
+          }
         },
-      ]);
-    }, 500);
+        onError: (error) => {
+          clearSending();
+          setChatMessages((prev) => prev.filter((m) => m.id !== id));
+          setMessageInput((current) => current || content);
+          toast.error(error.message || "Message not sent. Try again.");
+          refetch();
+        },
+      },
+    );
   };
 
   // ── Loading ────────────────────────────────────────────────────
@@ -801,6 +896,61 @@ export default function TaskDetailPage() {
   const browserStatus = selectedJob?.status ?? activeJob?.status ?? null;
   const isRunning = !!runningJob;
 
+  const chatJobStatus = selectedJob?.status ?? null;
+  const chatResultData = selectedJob?.resultData;
+  const operatorMessages = parseOperatorMessages(chatResultData);
+  const pendingQuestion =
+    chatJobStatus === "paused" ? parsePendingAgentQuestion(chatResultData) : null;
+  const chatTimeline = buildChatTimeline({
+    chatMessages,
+    operatorMessages,
+    jobStatus: chatJobStatus,
+    sendingIds: sendingMessageIds,
+  });
+  // Mirrors the worker: anything but an explicit submit run is prepare-only.
+  const isPrepareOnlyRun =
+    (chatResultData as Record<string, unknown> | null | undefined)
+      ?.submissionMode !== "submit_and_capture_pdf";
+  const composerState = deriveComposerState({
+    jobStatus: chatJobStatus,
+    question: pendingQuestion,
+    hasPendingDelivery: operatorMessages.some((m) => m.status === "pending"),
+    isSending: sendAgentMessageMutation.isPending || sendingMessageIds.size > 0,
+    isPrepareOnly: isPrepareOnlyRun,
+  });
+  const needsReply = chatJobStatus === "paused";
+
+  const agentPanel = (onClose?: () => void) => (
+    <AgentPanel
+      entityName={entityName}
+      orgId={orgId}
+      taxReturnId={task.taxReturn?.id}
+      isSubstanceFormIncomplete={
+        !!(
+          task.taxReturn?.substanceForm &&
+          !task.taxReturn.substanceForm.isComplete
+        )
+      }
+      jobStatus={chatJobStatus}
+      isPrepareOnly={isPrepareOnlyRun}
+      question={pendingQuestion}
+      currentStep={currentStep}
+      timeline={chatTimeline}
+      composer={composerState}
+      messageInput={messageInput}
+      setMessageInput={setMessageInput}
+      onSendMessage={handleSendMessage}
+      onResumeWithoutMessage={
+        selectedJob?.status === "paused"
+          ? () => resumeJobMutation.mutate({ jobId: selectedJob.id })
+          : undefined
+      }
+      isResumePending={resumeJobMutation.isPending}
+      scrollRef={chatScrollRef}
+      onClose={onClose}
+    />
+  );
+
   // ── Main render ────────────────────────────────────────────────
 
   return (
@@ -819,7 +969,7 @@ export default function TaskDetailPage() {
       <div className="flex-1 overflow-hidden">
         <ResizablePanelGroup direction="horizontal" className="h-full">
           {/* Browser panel */}
-          <ResizablePanel defaultSize={70} minSize={30}>
+          <ResizablePanel id="browser" order={1} defaultSize={68} minSize={30}>
             <div className="flex h-full flex-col">
               <BrowserToolbar
                 orgId={orgId}
@@ -871,34 +1021,51 @@ export default function TaskDetailPage() {
             </div>
           </ResizablePanel>
 
-          <ResizableHandle withHandle />
-
-          {/* Agent panel */}
-          <ResizablePanel defaultSize={30} minSize={20} maxSize={50}>
-            <AgentPanel
-              entityName={entityName}
-              orgId={orgId}
-              taxReturnId={task.taxReturn?.id}
-              isSubstanceFormIncomplete={
-                !!(
-                  task.taxReturn?.substanceForm &&
-                  !task.taxReturn.substanceForm.isComplete
-                )
-              }
-              pausedJob={pausedJob}
-              runningJob={runningJob}
-              activeJobStatus={browserStatus}
-              currentStep={currentStep}
-              steps={steps}
-              chatMessages={chatMessages}
-              messageInput={messageInput}
-              setMessageInput={setMessageInput}
-              onSendMessage={handleSendMessage}
-              scrollRef={chatScrollRef}
-            />
-          </ResizablePanel>
+          {/* Agent chat: side panel on desktop, sheet on phones */}
+          {!isMobile ? (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel
+                id="agent"
+                order={2}
+                defaultSize={32}
+                minSize={24}
+                maxSize={50}
+              >
+                {agentPanel()}
+              </ResizablePanel>
+            </>
+          ) : null}
         </ResizablePanelGroup>
       </div>
+
+      {isMobile ? (
+        <>
+          <Button
+            onClick={() => setIsChatSheetOpen(true)}
+            className="fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 h-11 gap-2 rounded-full px-4 shadow-lg"
+            aria-label={needsReply ? "Open agent chat: the agent is waiting for you" : "Open agent chat"}
+          >
+            <MessageSquare className="size-4" />
+            Agent
+            {needsReply ? (
+              <span className="relative flex size-2" aria-hidden>
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex size-2 rounded-full bg-amber-400" />
+              </span>
+            ) : null}
+          </Button>
+          <Sheet open={isChatSheetOpen} onOpenChange={setIsChatSheetOpen}>
+            <SheetContent
+              side="right"
+              className="w-full gap-0 p-0 sm:max-w-md [&>button:last-child]:hidden"
+            >
+              <SheetTitle className="sr-only">Agent chat</SheetTitle>
+              {agentPanel(() => setIsChatSheetOpen(false))}
+            </SheetContent>
+          </Sheet>
+        </>
+      ) : null}
       </div>
     </DirectionalTransition>
   );

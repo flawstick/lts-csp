@@ -1,142 +1,456 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
+import {
+  OPERATOR_MESSAGE_MAX_LENGTH,
+  type AgentQuestion,
+} from "@repo/database/operator-messages";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Input } from "@/components/ui/input";
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
   AlertCircle,
   Bot,
-  CheckCircle2,
-  Globe,
-  Loader2,
-  MousePointer2,
+  Check,
   Clock,
+  Loader2,
+  Play,
   Send,
-  Type,
-  User,
-  Eye,
-  ArrowRight,
-  FileText,
-  Download,
+  Shield,
+  X,
 } from "@/lib/icons";
-import type { ChatMessage, StepEvent } from "./types";
+import { getStatusConfig, type StepEvent } from "./types";
+import {
+  formatTimeLeft,
+  type ChatTimelineItem,
+  type ComposerState,
+  type DeliveryState,
+} from "./chat/chat-logic";
 
 type AgentPanelProps = {
   entityName: string | null;
   orgId: string;
   taxReturnId?: string;
   isSubstanceFormIncomplete: boolean;
-  pausedJob: { id: string } | null | undefined;
-  runningJob: { id: string } | null | undefined;
-  activeJobStatus?: string | null;
+  jobStatus: string | null;
+  isPrepareOnly: boolean;
+  question: AgentQuestion | null;
   currentStep: StepEvent | null;
-  steps: StepEvent[];
-  chatMessages: ChatMessage[];
+  timeline: ChatTimelineItem[];
+  composer: ComposerState;
   messageInput: string;
   setMessageInput: (v: string) => void;
   onSendMessage: () => void;
+  onResumeWithoutMessage?: () => void;
+  isResumePending?: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
+  /** Mobile sheet: renders a close button in the header. */
+  onClose?: () => void;
+  className?: string;
 };
 
-function inferStepIcon(goal: string) {
-  const lower = goal.toLowerCase();
-  if (lower.includes("wait") || lower.includes("loading") || lower.includes("load")) {
-    return <Clock className="size-3 text-amber-500" />;
-  }
-  if (lower.includes("click") || lower.includes("select") || lower.includes("check") || lower.includes("press")) {
-    return <MousePointer2 className="size-3 text-blue-500" />;
-  }
-  if (lower.includes("navigate") || lower.includes("go to") || lower.includes("open")) {
-    return <Globe className="size-3 text-violet-500" />;
-  }
-  if (lower.includes("type") || lower.includes("enter") || lower.includes("input") || lower.includes("fill")) {
-    return <Type className="size-3 text-emerald-500" />;
-  }
-  if (lower.includes("read") || lower.includes("verify") || lower.includes("review") || lower.includes("look")) {
-    return <Eye className="size-3 text-cyan-500" />;
-  }
-  if (lower.includes("download") || lower.includes("save")) {
-    return <Download className="size-3 text-orange-500" />;
-  }
-  if (lower.includes("submit") || lower.includes("continue") || lower.includes("next") || lower.includes("proceed")) {
-    return <ArrowRight className="size-3 text-green-500" />;
-  }
-  if (lower.includes("form") || lower.includes("document") || lower.includes("file")) {
-    return <FileText className="size-3 text-indigo-500" />;
-  }
-  return <CheckCircle2 className="size-3 text-muted-foreground/50" />;
+function timeLabel(timestamp: number) {
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-function truncateGoal(text: string, max: number) {
-  if (text.length <= max) return text;
-  return text.slice(0, max).trimEnd() + "\u2026";
+// ── Header ──────────────────────────────────────────────────────────
+
+function PanelHeader({
+  entityName,
+  jobStatus,
+  isPrepareOnly,
+  onClose,
+}: Pick<AgentPanelProps, "entityName" | "jobStatus" | "isPrepareOnly" | "onClose">) {
+  const status = jobStatus ? getStatusConfig(jobStatus) : null;
+  const live = jobStatus === "running";
+  const waiting = jobStatus === "paused";
+
+  return (
+    <div className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
+      <span className="relative flex size-2 shrink-0" aria-hidden>
+        {live || waiting ? (
+          <span
+            className={cn(
+              "absolute inline-flex size-full animate-ping rounded-full opacity-60",
+              live ? "bg-blue-500" : "bg-amber-500",
+            )}
+          />
+        ) : null}
+        <span
+          className={cn(
+            "relative inline-flex size-2 rounded-full",
+            live ? "bg-blue-500" : waiting ? "bg-amber-500" : "bg-muted-foreground/30",
+          )}
+        />
+      </span>
+      <span className="text-[13px] font-medium tracking-tight">Agent</span>
+      {status ? (
+        <span className="text-muted-foreground text-[11px]">· {status.label}</span>
+      ) : null}
+      <div className="ml-auto flex min-w-0 items-center gap-1.5">
+        {isPrepareOnly && jobStatus ? (
+          <span
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/[0.06] px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
+            title="This run stops before submission and never files the return"
+          >
+            <Shield className="size-2.5" />
+            Prepare only
+          </span>
+        ) : null}
+        {entityName ? (
+          <span className="text-muted-foreground hidden max-w-[140px] truncate text-[11px] sm:inline">
+            {entityName}
+          </span>
+        ) : null}
+        {onClose ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            onClick={onClose}
+            aria-label="Close agent chat"
+          >
+            <X className="size-3.5" />
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
 }
+
+function LiveStepStrip({ step }: { step: StepEvent }) {
+  const goal = step.goal ?? step.message;
+  if (!goal) return null;
+  const memory =
+    typeof step.memory === "string" &&
+    step.memory.trim() &&
+    !step.memory.startsWith("{") &&
+    !step.memory.startsWith("[")
+      ? step.memory.trim()
+      : null;
+
+  return (
+    <HoverCard openDelay={200} closeDelay={100}>
+      <HoverCardTrigger asChild>
+        <div className="flex shrink-0 cursor-default items-center gap-2 border-b bg-blue-500/[0.04] px-3 py-1.5 text-[11px]">
+          <Loader2 className="size-3 shrink-0 animate-spin text-blue-500" />
+          {step.stepNumber ? (
+            <span className="text-blue-600 dark:text-blue-400 shrink-0 font-semibold tabular-nums">
+              {step.stepNumber}
+            </span>
+          ) : null}
+          <span className="text-muted-foreground truncate">{goal}</span>
+        </div>
+      </HoverCardTrigger>
+      <HoverCardContent side="bottom" align="start" className="w-72 p-3">
+        <p className="text-foreground text-[11px] leading-relaxed">{goal}</p>
+        {memory ? (
+          <p className="text-muted-foreground mt-2 text-[10px] leading-relaxed">
+            {memory}
+          </p>
+        ) : null}
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+// ── Messages ────────────────────────────────────────────────────────
+
+const DELIVERY_COPY: Record<
+  DeliveryState,
+  { label: string; icon: React.ReactNode; className: string }
+> = {
+  sending: {
+    label: "Sending",
+    icon: <Loader2 className="size-2.5 animate-spin" />,
+    className: "text-muted-foreground",
+  },
+  queued: {
+    label: "Waiting for the agent",
+    icon: <Clock className="size-2.5" />,
+    className: "text-amber-600 dark:text-amber-400",
+  },
+  delivered: {
+    label: "Agent has it",
+    icon: <Check className="size-2.5" />,
+    className: "text-emerald-600 dark:text-emerald-400",
+  },
+  undelivered: {
+    label: "Not delivered",
+    icon: <AlertCircle className="size-2.5" />,
+    className: "text-muted-foreground",
+  },
+};
+
+function AgentMessage({ item }: { item: Extract<ChatTimelineItem, { kind: "agent" }> }) {
+  return (
+    <div className="group flex gap-2.5">
+      <div className="bg-muted text-muted-foreground mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg">
+        <Bot className="size-3.5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="prose prose-sm dark:prose-invert text-foreground/90 max-w-none text-[13px] leading-relaxed break-words [&_p]:my-1 [&_p:first-child]:mt-0 [&_ul]:my-1 [&_li]:my-0">
+          <ReactMarkdown>{item.content}</ReactMarkdown>
+        </div>
+        <p className="text-muted-foreground/60 mt-0.5 text-[10px] tabular-nums opacity-0 transition-opacity group-hover:opacity-100">
+          {timeLabel(item.timestamp)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function OperatorMessage({
+  item,
+}: {
+  item: Extract<ChatTimelineItem, { kind: "operator" }>;
+}) {
+  const delivery = DELIVERY_COPY[item.delivery];
+  return (
+    <div className="flex flex-col items-end gap-1 pl-8">
+      {item.replyTo ? (
+        <p className="text-muted-foreground line-clamp-2 max-w-full border-r-2 border-amber-500/40 pr-2 text-right text-[11px] leading-snug">
+          {item.replyTo}
+        </p>
+      ) : null}
+      <div className="bg-foreground text-background max-w-full rounded-2xl rounded-br-md px-3 py-2 text-[13px] leading-relaxed">
+        <p className="break-words whitespace-pre-wrap">{item.content}</p>
+      </div>
+      <p
+        className={cn(
+          "flex items-center gap-1 text-[10px] tabular-nums",
+          delivery.className,
+        )}
+      >
+        {delivery.icon}
+        {item.interrupt && item.delivery === "queued"
+          ? "Pausing the agent"
+          : delivery.label}
+        <span className="text-muted-foreground/50">· {timeLabel(item.timestamp)}</span>
+      </p>
+    </div>
+  );
+}
+
+// ── Question card + composer ────────────────────────────────────────
+
+function useNow(enabled: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const id = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, [enabled]);
+  return now;
+}
+
+function QuestionCard({
+  question,
+  onResumeWithoutMessage,
+  isResumePending,
+}: {
+  question: AgentQuestion | null;
+  onResumeWithoutMessage?: () => void;
+  isResumePending?: boolean;
+}) {
+  const now = useNow(true);
+  const asked =
+    question?.reason === "agent_question" || question?.reason === "filing_contact";
+  const timeLeft = formatTimeLeft(question?.expiresAt, now);
+
+  return (
+    <div
+      role="status"
+      className="animate-in fade-in slide-in-from-bottom-1 rounded-2xl border border-amber-500/30 bg-amber-500/[0.06] p-3 duration-300"
+    >
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="size-1.5 rounded-full bg-amber-500" aria-hidden />
+        <span className="text-[11px] font-semibold tracking-wide text-amber-700 uppercase dark:text-amber-400">
+          {asked ? "The agent needs you" : "Paused"}
+        </span>
+        {timeLeft ? (
+          <span className="text-muted-foreground ml-auto text-[10px] tabular-nums">
+            {timeLeft}
+          </span>
+        ) : null}
+      </div>
+      {asked && question ? (
+        <div className="prose prose-sm dark:prose-invert text-foreground max-h-40 max-w-none overflow-y-auto text-[13px] leading-relaxed break-words [&_p]:my-1">
+          <ReactMarkdown>{question.text}</ReactMarkdown>
+        </div>
+      ) : (
+        <p className="text-foreground/85 text-[13px] leading-relaxed">
+          Finish anything you need in the browser, then resume, or tell the
+          agent what to do next.
+        </p>
+      )}
+      {question?.reason === "filing_contact" ? (
+        <p className="text-muted-foreground mt-2 text-[11px] leading-snug">
+          The agent will not type contact details. Fill the contact step in the
+          browser yourself, then resume.
+        </p>
+      ) : null}
+      {onResumeWithoutMessage ? (
+        <div className="mt-2.5 flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 rounded-full bg-transparent px-3 text-[11px]"
+            onClick={onResumeWithoutMessage}
+            disabled={isResumePending}
+          >
+            {isResumePending ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Play className="size-3" />
+            )}
+            {asked ? "Resume without replying" : "Resume"}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Composer({
+  composer,
+  value,
+  onChange,
+  onSend,
+}: {
+  composer: ComposerState;
+  value: string;
+  onChange: (v: string) => void;
+  onSend: () => void;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const disabled = !composer.canSend;
+  const length = value.trim().length;
+  const tooLong = length > OPERATOR_MESSAGE_MAX_LENGTH;
+  const canSubmit = !disabled && length > 0 && !tooLong;
+
+  useEffect(() => {
+    if (composer.mode === "answer") textareaRef.current?.focus();
+  }, [composer.mode]);
+
+  return (
+    <div
+      className={cn(
+        "bg-muted/40 rounded-[20px] border transition-[border-color,box-shadow,background-color] duration-200",
+        "focus-within:border-ring/60 focus-within:bg-background focus-within:ring-ring/15 focus-within:ring-[3px]",
+        composer.mode === "answer" && "border-amber-500/40",
+        disabled && "opacity-70",
+      )}
+    >
+      <label htmlFor="agent-composer" className="sr-only">
+        Message the agent
+      </label>
+      <textarea
+        id="agent-composer"
+        ref={textareaRef}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" &&
+            !event.shiftKey &&
+            !event.nativeEvent.isComposing
+          ) {
+            event.preventDefault();
+            if (canSubmit) onSend();
+          }
+        }}
+        disabled={disabled}
+        rows={1}
+        placeholder={composer.placeholder}
+        className="placeholder:text-muted-foreground/70 block max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[13px] leading-relaxed outline-none [field-sizing:content] disabled:cursor-not-allowed"
+      />
+      <div className="flex items-center justify-end gap-2 px-2 pb-2">
+        {length > OPERATOR_MESSAGE_MAX_LENGTH * 0.8 ? (
+          <span
+            className={cn(
+              "text-[10px] tabular-nums",
+              tooLong ? "text-destructive" : "text-muted-foreground",
+            )}
+          >
+            {length}/{OPERATOR_MESSAGE_MAX_LENGTH}
+          </span>
+        ) : null}
+        <Button
+          size="sm"
+          className="h-8 gap-1.5 rounded-full px-3 text-[12px]"
+          onClick={onSend}
+          disabled={!canSubmit}
+        >
+          {composer.mode === "waiting" ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Send className="size-3.5" />
+          )}
+          {composer.submitLabel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── Panel ───────────────────────────────────────────────────────────
 
 export function AgentPanel({
   entityName,
   orgId,
   taxReturnId,
   isSubstanceFormIncomplete,
-  pausedJob,
-  runningJob,
-  activeJobStatus,
+  jobStatus,
+  isPrepareOnly,
+  question,
   currentStep,
-  steps,
-  chatMessages,
+  timeline,
+  composer,
   messageInput,
   setMessageInput,
   onSendMessage,
+  onResumeWithoutMessage,
+  isResumePending,
   scrollRef,
+  onClose,
+  className,
 }: AgentPanelProps) {
-  const recentSteps = steps.slice(-16);
+  const showQuestion = jobStatus === "paused" && composer.mode !== "waiting";
 
   return (
-    <div className="bg-background flex h-full flex-col">
-      {/* Panel header */}
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
-        <Bot className="size-3.5 text-muted-foreground" />
-        <span className="text-xs font-medium text-muted-foreground">Agent Console</span>
-        {entityName ? (
-          <span className="text-muted-foreground ml-auto max-w-[140px] truncate text-[11px]">
-            {entityName}
-          </span>
-        ) : null}
-      </div>
-
-      {/* Paused banner */}
-      {pausedJob ? (
-        <div className="flex items-center gap-2 border-b border-amber-500/20 bg-amber-500/5 px-4 py-2">
-          <AlertCircle className="size-3.5 shrink-0 text-amber-500" />
-          <p className="flex-1 text-[11px] text-amber-700 dark:text-amber-400">
-            Action required — complete the step in the browser, then resume.
-          </p>
-        </div>
+    <div className={cn("bg-background flex h-full min-h-0 flex-col", className)}>
+      <PanelHeader
+        entityName={entityName}
+        jobStatus={jobStatus}
+        isPrepareOnly={isPrepareOnly}
+        onClose={onClose}
+      />
+      {jobStatus === "running" && currentStep ? (
+        <LiveStepStrip step={currentStep} />
       ) : null}
 
-      {/* Messages + Steps */}
       <ScrollArea className="min-h-0 flex-1" ref={scrollRef}>
-        <div className="space-y-4 p-4">
-          {steps.length === 0 && chatMessages.length === 0 ? (
-            <div className="py-16 text-center">
+        <div className="space-y-5 px-3 py-4 sm:px-4" aria-live="polite">
+          {timeline.length === 0 ? (
+            <div className="py-14 text-center">
               <div className="bg-muted mx-auto mb-3 flex size-10 items-center justify-center rounded-xl">
-                <Bot className="text-muted-foreground/30 size-5" />
+                <Bot className="text-muted-foreground/40 size-5" />
               </div>
-              <p className="text-foreground text-xs font-medium">
-                No activity yet
-              </p>
-              <p className="text-muted-foreground mt-0.5 text-[11px]">
-                Start the task to see agent progress
+              <p className="text-foreground text-xs font-medium">No activity yet</p>
+              <p className="text-muted-foreground mx-auto mt-1 max-w-[220px] text-[11px] leading-snug">
+                Start a run. If the agent gets stuck it asks you here, and your
+                reply goes straight back to the same browser.
               </p>
               {isSubstanceFormIncomplete && taxReturnId ? (
                 <div className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
@@ -155,181 +469,36 @@ export function AgentPanel({
                 </div>
               ) : null}
             </div>
-          ) : null}
-
-          {chatMessages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex gap-2.5 ${
-                msg.role === "user" ? "flex-row-reverse" : ""
-              }`}
-            >
-              <div
-                className={`flex size-7 shrink-0 items-center justify-center rounded-full ${
-                  msg.role === "user"
-                    ? "bg-foreground text-background"
-                    : "bg-blue-500/10 text-blue-500"
-                }`}
-              >
-                {msg.role === "user" ? (
-                  <User className="size-3.5" />
-                ) : (
-                  <Bot className="size-3.5" />
-                )}
-              </div>
-              <div
-                className={`max-w-[85%] min-w-0 ${
-                  msg.role === "user" ? "text-right" : ""
-                }`}
-              >
-                <div
-                  className={`inline-block rounded-xl px-3 py-2 text-[12px] leading-relaxed ${
-                    msg.role === "user"
-                      ? "bg-foreground text-background rounded-tr-sm"
-                      : "bg-muted/80 rounded-tl-sm"
-                  }`}
-                >
-                  {msg.role === "assistant" ? (
-                    <div className="prose prose-xs dark:prose-invert max-w-none break-words [&_p]:m-0 [&_p]:leading-relaxed">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    </div>
-                  ) : (
-                    <p className="break-words whitespace-pre-wrap">
-                      {msg.content}
-                    </p>
-                  )}
-                </div>
-                <p className="text-muted-foreground/50 mt-0.5 px-1 text-[9px] tabular-nums">
-                  {new Date(msg.timestamp).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </p>
-              </div>
-            </div>
-          ))}
-
-          {/* Steps as stacked badges with icons */}
-          {recentSteps.length > 0 ? (
-            <div className="flex flex-col gap-1">
-              {recentSteps.map((step, index) => {
-                const isActive =
-                  currentStep?.stepNumber !== undefined &&
-                  currentStep.stepNumber === step.stepNumber;
-                const isLast = index === recentSteps.length - 1;
-                const stepNum = step.stepNumber ?? index + 1;
-                const goal = step.goal ?? step.message ?? "Processing...";
-                const memory =
-                  typeof step.memory === "string" &&
-                  step.memory.trim() &&
-                  !step.memory.startsWith("{") &&
-                  !step.memory.startsWith("[")
-                    ? step.memory.trim()
-                    : null;
-                const url = step.url ?? null;
-
-                return (
-                  <HoverCard
-                    key={`step-badge-${stepNum}-${index}`}
-                    openDelay={200}
-                    closeDelay={100}
-                  >
-                    <HoverCardTrigger asChild>
-                      <Badge
-                        variant="outline"
-                        className={`cursor-default gap-1.5 rounded-md px-2 py-1 text-[11px] font-normal transition-colors ${
-                          isActive && isLast && runningJob
-                            ? "border-blue-500/40 bg-blue-500/10 text-blue-600 dark:text-blue-400"
-                            : "border-border/60 text-muted-foreground hover:bg-muted/50"
-                        }`}
-                      >
-                        {isActive && isLast && runningJob ? (
-                          <Loader2 className="size-3 animate-spin shrink-0 text-blue-500" />
-                        ) : (
-                          inferStepIcon(goal)
-                        )}
-                        <span className="font-semibold tabular-nums shrink-0">
-                          {stepNum}
-                        </span>
-                        <span className="truncate">
-                          {truncateGoal(goal, 50)}
-                        </span>
-                      </Badge>
-                    </HoverCardTrigger>
-                    <HoverCardContent
-                      side="top"
-                      align="start"
-                      className="w-72 p-3"
-                    >
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-1.5">
-                          <Badge
-                            variant="secondary"
-                            className="h-4 px-1.5 text-[10px] font-semibold"
-                          >
-                            Step {stepNum}
-                          </Badge>
-                          {url ? (
-                            <span className="text-muted-foreground/60 truncate text-[10px]">
-                              {url.replace(/^https?:\/\//, "").split("/")[0]}
-                            </span>
-                          ) : null}
-                        </div>
-                        <p className="text-foreground text-[11px] leading-relaxed">
-                          {goal}
-                        </p>
-                        {memory ? (
-                          <p className="text-muted-foreground text-[10px] leading-relaxed">
-                            {memory}
-                          </p>
-                        ) : null}
-                      </div>
-                    </HoverCardContent>
-                  </HoverCard>
-                );
-              })}
-            </div>
-          ) : null}
+          ) : (
+            timeline.map((item) =>
+              item.kind === "agent" ? (
+                <AgentMessage key={item.id} item={item} />
+              ) : (
+                <OperatorMessage key={item.id} item={item} />
+              ),
+            )
+          )}
         </div>
       </ScrollArea>
 
-      {/* Input */}
-      <div className="shrink-0 border-t p-3">
-        <div className="flex items-center gap-2">
-          <Input
-            placeholder="Message the agent..."
-            value={messageInput}
-            onChange={(e) => setMessageInput(e.target.value)}
-            onKeyDown={(e) =>
-              e.key === "Enter" && !e.shiftKey && onSendMessage()
+      <div className="shrink-0 space-y-2 border-t p-2.5 sm:p-3">
+        {showQuestion ? (
+          <QuestionCard
+            question={question}
+            onResumeWithoutMessage={
+              composer.canResumeWithoutMessage ? onResumeWithoutMessage : undefined
             }
-            disabled={!runningJob && !pausedJob}
-            className="h-9 text-xs"
+            isResumePending={isResumePending}
           />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon"
-                className="size-9 shrink-0"
-                onClick={onSendMessage}
-                disabled={(!runningJob && !pausedJob) || !messageInput.trim()}
-              >
-                <Send className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Send message</TooltipContent>
-          </Tooltip>
-        </div>
-        <p className="text-muted-foreground/50 mt-1.5 text-center text-[10px]">
-          {runningJob
-            ? "Agent is running"
-            : activeJobStatus === "queued"
-              ? "Waiting for a warm worker"
-              : activeJobStatus === "starting"
-                ? "Connecting browser session"
-            : pausedJob
-              ? "Waiting for user action"
-              : "Start task to enable chat"}
+        ) : null}
+        <Composer
+          composer={composer}
+          value={messageInput}
+          onChange={setMessageInput}
+          onSend={onSendMessage}
+        />
+        <p className="text-muted-foreground/70 px-1 text-[10px] leading-snug">
+          {composer.hint}
         </p>
       </div>
     </div>

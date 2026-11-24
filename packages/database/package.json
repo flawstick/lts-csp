@@ -57,6 +57,18 @@
     "./return-readiness": {
       "types": "./src/return-readiness.ts",
       "default": "./src/return-readiness.ts"
+    },
+    "./operator-messages": {
+      "types": "./src/operator-messages.ts",
+      "default": "./src/operator-messages.ts"
+    },
+    "./operator-messages-sql": {
+      "types": "./src/operator-messages-sql.ts",
+      "default": "./src/operator-messages-sql.ts"
+    },
+    "./prepared-draft": {
+      "types": "./src/prepared-draft.ts",
+      "default": "./src/prepared-draft.ts"
     }
   },
   "scripts": {

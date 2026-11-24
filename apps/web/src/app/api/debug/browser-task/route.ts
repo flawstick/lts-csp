@@ -10,6 +10,7 @@ import {
 } from "@repo/database";
 import { NextResponse } from "next/server";
 import { launchBrowserTask } from "@/lib/ecs";
+import { getFilingMaintenanceBlocker } from "@/lib/filing-maintenance";
 import { env } from "@/env";
 
 // Debug route to launch browser task for a tax return
@@ -64,6 +65,11 @@ export async function POST(request: Request) {
         },
         { status: 400 },
       );
+    }
+
+    const maintenanceBlocker = getFilingMaintenanceBlocker();
+    if (maintenanceBlocker) {
+      return NextResponse.json({ error: maintenanceBlocker }, { status: 503 });
     }
 
     // Create task

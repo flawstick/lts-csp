@@ -2,6 +2,7 @@ import { db, tasks, jobs, organisations, jurisdictions } from "@repo/database"
 import { eq, desc } from "drizzle-orm"
 import { NextResponse } from "next/server"
 import { launchTask as launchEcsTask } from "@/lib/ecs"
+import { getFilingMaintenanceBlocker } from "@/lib/filing-maintenance"
 import { trackServer } from "@/lib/analytics"
 
 export async function GET() {
@@ -41,6 +42,11 @@ export async function POST(request: Request) {
     const body = await request.json()
 
     const { name, description, taskType, orgId, jurisdictionId, pdfUrls, launchEcs } = body
+
+    const maintenanceBlocker = launchEcs && getFilingMaintenanceBlocker()
+    if (maintenanceBlocker) {
+      return NextResponse.json({ error: maintenanceBlocker }, { status: 503 })
+    }
 
     if (!name || !orgId || !jurisdictionId) {
       return NextResponse.json(

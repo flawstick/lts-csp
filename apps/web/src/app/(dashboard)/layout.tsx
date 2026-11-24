@@ -1,6 +1,8 @@
 import { cookies } from "next/headers"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/app-sidebar"
+import { FilingMaintenanceBanner } from "@/components/filing-maintenance-banner"
+import { getFilingMaintenance } from "@/lib/filing-maintenance"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 
@@ -14,11 +16,15 @@ export default async function DashboardLayout({
 
   // Default to open, but respect cookie if set
   const defaultOpen = sidebarStateCookie?.value !== "false"
+  const maintenance = getFilingMaintenance()
 
   return (
     <SidebarProvider defaultOpen={defaultOpen} className="bg-sidebar">
       <AppSidebar />
       <SidebarInset className="flex !bg-container min-h-0 min-w-0 flex-col overflow-hidden">
+        {maintenance.active && (
+          <FilingMaintenanceBanner message={maintenance.message} until={maintenance.until} />
+        )}
         {children}
       </SidebarInset>
     </SidebarProvider>

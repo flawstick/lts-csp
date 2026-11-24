@@ -2,6 +2,7 @@ import { db, tasks, jobs, organisations, jurisdictions } from "@repo/database"
 import { eq } from "drizzle-orm"
 import { NextResponse } from "next/server"
 import { launchTask as launchEcsTask } from "@/lib/ecs"
+import { getFilingMaintenanceBlocker } from "@/lib/filing-maintenance"
 
 // Debug route to create and launch a task without authentication
 // FOR DEVELOPMENT ONLY - remove in production
@@ -9,6 +10,11 @@ import { launchTask as launchEcsTask } from "@/lib/ecs"
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}))
+
+    const maintenanceBlocker = body.launchEcs && getFilingMaintenanceBlocker()
+    if (maintenanceBlocker) {
+      return NextResponse.json({ error: maintenanceBlocker }, { status: 503 })
+    }
 
     // Get the first org (LTS)
     const org = await db.query.organisations.findFirst({

@@ -58,6 +58,8 @@ type Job = {
 type StartOptions = {
   overrideSaved?: boolean;
   submissionMode?: "prepare_only" | "submit_and_capture_pdf";
+  /** Submit the exact draft the last Prepare only run left ready. */
+  filingOperation?: "submit_prepared";
 };
 
 type BrowserToolbarProps = {
@@ -169,6 +171,15 @@ export function BrowserToolbar({
   const startPreparation = (overrideSaved = false) => {
     onStart({ submissionMode: "prepare_only", overrideSaved });
   };
+  const requestPreparedSubmission = () => {
+    setSubmissionAcknowledged(false);
+    setPendingSubmission({
+      submissionMode: "submit_and_capture_pdf",
+      filingOperation: "submit_prepared",
+    });
+  };
+  const isPreparedSubmission =
+    pendingSubmission?.filingOperation === "submit_prepared";
   const requestSubmission = (overrideSaved = false) => {
     setSubmissionAcknowledged(false);
     setPendingSubmission({
@@ -186,15 +197,32 @@ export function BrowserToolbar({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Submit this return?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {isPreparedSubmission
+                ? "Submit the prepared return?"
+                : "Submit this return?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This authorises the agent to file{" "}
-              {entityName || "this entity's return"} with the Revenue Service
-              and save the confirmation PDF. Check the return and contact
-              details before continuing.
-              {pendingSubmission?.overrideSaved
-                ? " Existing portal answers will also be overwritten."
-                : ""}
+              {isPreparedSubmission ? (
+                <>
+                  This authorises the agent to open the draft of{" "}
+                  {entityName || "this entity's return"} left on the review
+                  page by the last Prepare only run, confirm it is that exact
+                  draft and still ready, and file it with the Revenue Service
+                  without changing any answers. It stops without submitting if
+                  any check fails.
+                </>
+              ) : (
+                <>
+                  This authorises the agent to file{" "}
+                  {entityName || "this entity's return"} with the Revenue
+                  Service and save the confirmation PDF. Check the return and
+                  contact details before continuing.
+                  {pendingSubmission?.overrideSaved
+                    ? " Existing portal answers will also be overwritten."
+                    : ""}
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <label className="flex items-start gap-2 text-sm">
@@ -207,8 +235,9 @@ export function BrowserToolbar({
               }
             />
             <span>
-              I have reviewed this return, including the employees and the
-              organisation&apos;s filing contact, and want to file it now.
+              {isPreparedSubmission
+                ? "I have reviewed the prepared draft on the portal, including the employees and the organisation's filing contact, and want to file it now."
+                : "I have reviewed this return, including the employees and the organisation's filing contact, and want to file it now."}
             </span>
           </label>
           <AlertDialogFooter>
@@ -222,7 +251,7 @@ export function BrowserToolbar({
                 }
               }}
             >
-              Submit return
+              {isPreparedSubmission ? "Submit prepared return" : "Submit return"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -528,6 +557,10 @@ export function BrowserToolbar({
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel>Final submission</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={requestPreparedSubmission}>
+                    <CheckCircle2 className="mr-2 size-3.5" /> Submit prepared
+                    return…
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => requestSubmission()}>
                     <Play className="mr-2 size-3.5" /> Submit return + save PDF…
                   </DropdownMenuItem>
