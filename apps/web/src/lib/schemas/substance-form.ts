@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   GUERNSEY_CONSTITUENT_ENTITY_LABEL,
+  GUERNSEY_NOTICE_OF_ASSESSMENT_LABEL,
   getGuernseyScopedMissingFields,
   isGuernseySubstanceInScope as sharedIsGuernseySubstanceInScope,
 } from "@repo/database/guernsey-filing";
@@ -204,6 +205,9 @@ export const substanceFormSchema = z.object({
   preparedDate: z.string().optional(),
   managerSignOff: z.string().optional(),
   managerSignOffDate: z.string().optional(),
+  // Reviewer's per-return answer to the portal declaration page's notice of
+  // assessment question. Required before submitting; null clears it.
+  noticeOfAssessment: yesNoEnum.nullable().optional(),
 
   // =========================================================================
   // SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)
@@ -403,6 +407,7 @@ export const FIELD_LABELS: Record<string, string> = {
   // Declaration
   managerSignOff: "Manager Sign Off",
   managerSignOffDate: "Manager Sign Off Date",
+  noticeOfAssessment: GUERNSEY_NOTICE_OF_ASSESSMENT_LABEL,
 
   // Country by Country Reporting
   isConstituentEntity: `${GUERNSEY_CONSTITUENT_ENTITY_LABEL} (CbCR)?`,
@@ -576,13 +581,14 @@ export const FORM_SECTIONS = [
     id: "additionalInformation",
     title: "Additional Information",
     description:
-      "C42 associations, contract info, and manager sign-off",
+      "C42 associations, contract info, manager sign-off and the notice of assessment answer",
     fields: [
       "hasC42Association",
       "c42AssociatedCompanies",
       "contractInformation",
       "managerSignOff",
       "managerSignOffDate",
+      "noticeOfAssessment",
     ],
   },
 ] as const;

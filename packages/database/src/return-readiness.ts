@@ -55,11 +55,23 @@ export function hasManagerSignoff(
 export const MANAGER_SIGNOFF_REQUIRED_MESSAGE =
   "The manager has not signed off this return. Record the manager's name and sign-off date under Finalising the Return before it is marked ready for submission.";
 
-/** Removes manager sign-off values from AI-extracted data. */
+/**
+ * Form answers only a person may record: the manager sign-off and the
+ * reviewer's per-return notice-of-assessment choice (never AI extraction).
+ */
+export const PERSON_ONLY_FORM_FIELDS = [
+  ...MANAGER_SIGNOFF_FIELDS,
+  "noticeOfAssessment",
+] as const;
+
+/**
+ * Removes manager sign-off values and other person-only answers
+ * (PERSON_ONLY_FORM_FIELDS) from AI-extracted data.
+ */
 export function stripManagerSignoffFields<T extends Record<string, unknown>>(
   data: T,
 ): T {
-  for (const field of MANAGER_SIGNOFF_FIELDS) delete data[field];
+  for (const field of PERSON_ONLY_FORM_FIELDS) delete data[field];
   return data;
 }
 

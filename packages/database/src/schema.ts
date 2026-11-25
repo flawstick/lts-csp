@@ -903,6 +903,11 @@ export const substanceForms = createTable(
     preparedDate: varchar("prepared_date", { length: 16 }),
     managerSignOff: varchar("manager_sign_off", { length: 256 }),
     managerSignOffDate: varchar("manager_sign_off_date", { length: 16 }),
+    // Yes/No: the reviewer's per-return answer to the portal declaration
+    // page's "Please indicate if you wish to receive a notice of assessment".
+    // Null until a person sets it; required before any submission (see
+    // getGuernseyNoticeOfAssessmentBlocker). No default on purpose.
+    noticeOfAssessment: varchar("notice_of_assessment", { length: 8 }),
 
     // =========================================================================
     // SECTION 13: COUNTRY BY COUNTRY REPORTING (CbCR)

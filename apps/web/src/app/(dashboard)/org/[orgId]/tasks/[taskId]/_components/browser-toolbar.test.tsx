@@ -1,10 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { BrowserToolbar } from "./browser-toolbar";
+import { BrowserToolbar, type ToolbarSubmitReadiness } from "./browser-toolbar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-function renderToolbar(onStart = vi.fn()) {
-  render(<TooltipProvider><BrowserToolbar
+function renderToolbar(
+  onStart = vi.fn(),
+  extra: {
+    submitReadiness?: ToolbarSubmitReadiness | null;
+    onActionsMenuOpen?: () => void;
+  } = {},
+) {
+  render(<TooltipProvider><BrowserToolbar {...extra}
     orgId="org" jurisdictionName="Guernsey" entityName="Example Entity"
     taskStatus="pending" isConnected={false} liveUrl={null}
     iframeRef={{ current: null }} allJobs={[]} selectedJobId={null} selectedJob={null}
@@ -98,6 +104,129 @@ describe("submit prepared return confirmation", () => {
   it("cancels without starting a run", async () => {
     const onStart = await openPreparedDialog();
     fireEvent.click(screen.getByRole("button", { name: "Keep reviewing" }));
+    expect(onStart).not.toHaveBeenCalled();
+  });
+});
+
+describe("submit readiness from the server", () => {
+  const ready = { ready: true, blocker: null };
+  const PREPARE_AGAIN =
+    "The latest preparation did not finish on the review page. Run Prepare only again, then submit the new draft.";
+
+  async function openMenu(
+    submitReadiness: ToolbarSubmitReadiness | null,
+    onActionsMenuOpen = vi.fn(),
+  ) {
+    const onStart = renderToolbar(vi.fn(), { submitReadiness, onActionsMenuOpen });
+    fireEvent.keyDown(screen.getByRole("button", { name: /More/ }), { key: "Enter" });
+    await screen.findByRole("menuitem", { name: /Submit prepared/ });
+    return { onStart, onActionsMenuOpen };
+  }
+
+  it("disables Submit prepared return and shows the server's reason", async () => {
+    const { onStart } = await openMenu({
+      submit: ready,
+      submitPrepared: { ready: false, blocker: PREPARE_AGAIN },
+    });
+    const prepared = screen.getByRole("menuitem", { name: /Submit prepared/ });
+    expect(prepared).toHaveAttribute("aria-disabled", "true");
+    expect(prepared).toHaveAccessibleDescription(PREPARE_AGAIN);
+    expect(screen.getByText(PREPARE_AGAIN)).toBeInTheDocument();
+
+    fireEvent.click(prepared);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(onStart).not.toHaveBeenCalled();
+
+    // The full submit is not blocked by a missing prepared draft.
+    const submit = screen.getByRole("menuitem", { name: /Submit return \+ save PDF/ });
+    expect(submit).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(submit);
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+  });
+
+  it("disables the full submit actions with their own reason", async () => {
+    const blocker = "The client has not signed off this return.";
+    await openMenu({ submit: { ready: false, blocker }, submitPrepared: ready });
+    for (const name of [/Submit return \+ save PDF/, /Refill answers \+/]) {
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).toHaveAttribute("aria-disabled", "true");
+      expect(item).toHaveAccessibleDescription(blocker);
+      fireEvent.click(item);
+    }
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /Submit prepared/ }),
+    ).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("shows a reason shared by every submit action once", async () => {
+    const blocker = "An earlier Submit prepared return run reached the portal.";
+    await openMenu({
+      submit: { ready: false, blocker },
+      submitPrepared: { ready: false, blocker },
+    });
+    expect(screen.getAllByText(blocker)).toHaveLength(1);
+    expect(
+      screen.getByRole("menuitem", { name: /Submit prepared/ }),
+    ).toHaveAccessibleDescription(blocker);
+  });
+
+  it("keeps Prepare only available whatever the submit readiness", async () => {
+    await openMenu({
+      submit: { ready: false, blocker: "x" },
+      submitPrepared: { ready: false, blocker: "y" },
+    });
+    expect(
+      screen.getByRole("menuitem", { name: /Refill saved answers/ }),
+    ).not.toHaveAttribute("aria-disabled");
+    // The open menu hides the rest of the toolbar from the accessibility tree.
+    expect(
+      screen.getByRole("button", { name: "Prepare only", hidden: true }),
+    ).toBeEnabled();
+  });
+
+  it("leaves the actions enabled when readiness is unknown", async () => {
+    await openMenu(null);
+    for (const name of [/Submit prepared/, /Submit return \+ save PDF/, /Refill answers \+/]) {
+      expect(screen.getByRole("menuitem", { name })).not.toHaveAttribute("aria-disabled");
+    }
+  });
+
+  it("refreshes readiness when the menu opens", async () => {
+    const { onActionsMenuOpen } = await openMenu(null);
+    expect(onActionsMenuOpen).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("readiness changing while the confirmation is open", () => {
+  it("disables the final Submit and says why", async () => {
+    const onStart = vi.fn();
+    const toolbar = (submitReadiness: ToolbarSubmitReadiness) => (
+      <TooltipProvider><BrowserToolbar
+        orgId="org" jurisdictionName="Guernsey" entityName="Example Entity"
+        taskStatus="pending" isConnected={false} liveUrl={null}
+        iframeRef={{ current: null }} allJobs={[]} selectedJobId={null} selectedJob={null}
+        activeJob={null} runningJob={null} pausedJob={null}
+        onSelectJob={vi.fn()} onPause={vi.fn()} onCancel={vi.fn()} onResume={vi.fn()}
+        onStart={onStart} onDeleteJob={vi.fn()}
+        isStartPending={false} isPausePending={false} isCancelPending={false}
+        isResumePending={false} isDeletePending={false}
+        submitReadiness={submitReadiness}
+      /></TooltipProvider>
+    );
+    const ready = { ready: true, blocker: null };
+    const { rerender } = render(toolbar({ submit: ready, submitPrepared: ready }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /More/ }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Submit prepared/ }));
+    await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByRole("checkbox"));
+
+    const blocker = "Another run is active on this return.";
+    rerender(toolbar({ submit: ready, submitPrepared: { ready: false, blocker } }));
+    const submit = screen.getByRole("button", { name: "Submit prepared return" });
+    expect(submit).toBeDisabled();
+    expect(screen.getByText(`This submission cannot start: ${blocker}`)).toBeInTheDocument();
+    fireEvent.click(submit);
     expect(onStart).not.toHaveBeenCalled();
   });
 });

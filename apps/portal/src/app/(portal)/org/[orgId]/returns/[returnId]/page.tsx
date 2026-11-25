@@ -13,6 +13,7 @@ import {
   type SubstanceFormData,
 } from "@/lib/schemas/substance-form";
 import {
+  getGuernseyNoticeOfAssessment,
   hasMeaningfulGuernseyFormData,
   resolveGuernseyCertificateType,
 } from "@repo/database/guernsey-filing";
@@ -353,6 +354,13 @@ export default function ReturnWorkspacePage() {
   const selectedFiles = asVaultFiles(selectedReturn?.files);
   const guernseyApprovalBlocker = getApprovalBlocker({
     isFormComplete: Boolean(selectedReturn?.isSubstanceComplete),
+    // Mirrors markReadyForSubmission, from the saved form once it has loaded.
+    isNoticeOfAssessmentSet:
+      selectedReturn?.jurisdictionCode === "GG" &&
+      selectedReturn?.returnType === "economic_substance" &&
+      substanceFormQuery.data
+        ? getGuernseyNoticeOfAssessment(substanceFormQuery.data) !== null
+        : undefined,
     isManagerSignedOff,
     requiresFinancialStatements,
     hasFinancialStatements: selectedFiles.some(

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GUERNSEY_NOTICE_OF_ASSESSMENT_SIGNOFF_MESSAGE } from "@repo/database/guernsey-filing";
 
 import { MANAGER_SIGNOFF_REQUIRED_MESSAGE } from "@repo/database/return-readiness";
 
@@ -86,6 +87,27 @@ describe("getApprovalBlocker", () => {
         pendingGbpConversionMessage: "Enter the GBP figures.",
       }),
     ).toBe("Enter the GBP figures.");
+  });
+
+  it("requires the notice-of-assessment answer before the signatory approves", () => {
+    expect(
+      getApprovalBlocker({ ...ready, isNoticeOfAssessmentSet: false }),
+    ).toBe(GUERNSEY_NOTICE_OF_ASSESSMENT_SIGNOFF_MESSAGE);
+    // Checked before the manager signoff, so the answer is set with it.
+    expect(
+      getApprovalBlocker({
+        ...ready,
+        isNoticeOfAssessmentSet: false,
+        isManagerSignedOff: false,
+      }),
+    ).toBe(GUERNSEY_NOTICE_OF_ASSESSMENT_SIGNOFF_MESSAGE);
+    expect(
+      getApprovalBlocker({ ...ready, isNoticeOfAssessmentSet: true }),
+    ).toBeNull();
+    // Not applicable or not loaded yet: the server still checks it.
+    expect(
+      getApprovalBlocker({ ...ready, isNoticeOfAssessmentSet: undefined }),
+    ).toBeNull();
   });
 
   it("does not require accounts for Certificate 2", () => {

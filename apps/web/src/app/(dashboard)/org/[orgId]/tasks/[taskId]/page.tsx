@@ -25,6 +25,12 @@ import { TaskHeader } from "./_components/task-header";
 import { BrowserToolbar } from "./_components/browser-toolbar";
 import { BrowserFrame } from "./_components/browser-frame";
 import { AgentPanel } from "./_components/agent-panel";
+import { SubmitLockBanner } from "./_components/submit-lock-banner";
+import {
+  StartErrorAlert,
+  describeStartAction,
+  type StartError,
+} from "./_components/start-error-alert";
 import {
   buildChatTimeline,
   createClientMessageId,
@@ -89,6 +95,8 @@ export default function TaskDetailPage() {
     () => new Set(),
   );
   const [isChatSheetOpen, setIsChatSheetOpen] = useState(false);
+  // Why the last start request was refused; stays until dismissed or a run starts.
+  const [startError, setStartError] = useState<StartError | null>(null);
   const isMobile = useIsMobile();
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -114,13 +122,45 @@ export default function TaskDetailPage() {
   } = api.taxReturn.getTask.useQuery({ taskId }, { enabled: !!taskId });
 
   const startJobMutation = api.taxReturn.startJob.useMutation({
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
+      // Only now is there a new run: clear the previous run's view.
+      setStartError(null);
+      setEvents([]);
+      setSteps([]);
+      setLiveUrl(null);
+      setCurrentStep(null);
+      setFinalOutput(null);
+      setChatMessages([]);
       setSelectedJobId(data.jobId);
       connectToSSE(data.jobId);
       refetch();
+
+      if (task) {
+        trackClient({
+          name: "job_started",
+          data: {
+            jobId: data.jobId,
+            taskId: task.id,
+            taskType: task.taskType || "tax_return",
+            jurisdiction: task.taxReturn?.jurisdiction?.name || "unknown",
+            entityName: task.name,
+            source: variables.overrideSaved ? "retry" : "manual",
+            submissionMode: variables.submissionMode ?? "prepare_only",
+            filingOperation: variables.filingOperation ?? "fill",
+          },
+        }).catch(console.error);
+      }
     },
-    onError: (error) => {
+    onError: (error, variables) => {
+      // The server refused: nothing started, so the current view stays as it
+      // was and the reason stays on screen until dismissed.
+      setStartError({
+        action: describeStartAction(variables),
+        message: error.message || "The run could not be started.",
+      });
       toast.error(error.message);
+      // Refresh readiness so the toolbar shows the current blocker.
+      refetch();
     },
   });
 
@@ -658,34 +698,15 @@ export default function TaskDetailPage() {
     submissionMode?: SubmissionMode;
     filingOperation?: "submit_prepared";
   } = {}) => {
-    setEvents([]);
-    setSteps([]);
-    setLiveUrl(null);
-    setCurrentStep(null);
-    setFinalOutput(null);
-    setChatMessages([]);
+    // The previous run's view is cleared only once the server accepts the
+    // start (see startJobMutation.onSuccess); a refusal leaves it in place.
+    setStartError(null);
     startJobMutation.mutate({
       taskId,
       overrideSaved,
       submissionMode,
       ...(filingOperation ? { filingOperation } : {}),
     });
-
-    if (task) {
-      trackClient({
-        name: "job_started",
-        data: {
-          jobId: selectedJobId || "pending",
-          taskId: task.id,
-          taskType: task.taskType || "tax_return",
-          jurisdiction: task.taxReturn?.jurisdiction?.name || "unknown",
-          entityName: task.name,
-          source: overrideSaved ? "retry" : "manual",
-          submissionMode,
-          filingOperation: filingOperation ?? "fill",
-        },
-      }).catch(console.error);
-    }
   };
 
   const handlePause = () => {
@@ -940,7 +961,20 @@ export default function TaskDetailPage() {
                 isCancelPending={cancelJobMutation.isPending}
                 isResumePending={resumeJobMutation.isPending}
                 isDeletePending={deleteJobMutation.isPending}
+                submitReadiness={task.submitReadiness ?? null}
+                onActionsMenuOpen={() => {
+                  void refetch();
+                }}
               />
+
+              {startError ? (
+                <StartErrorAlert
+                  error={startError}
+                  onDismiss={() => setStartError(null)}
+                />
+              ) : null}
+
+              <SubmitLockBanner taskId={taskId} onSelectJob={handleSelectJob} />
 
               <BrowserFrame
                 liveUrl={liveUrl}

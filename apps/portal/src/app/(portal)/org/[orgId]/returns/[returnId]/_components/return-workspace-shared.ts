@@ -9,6 +9,7 @@ import type { FORM_SECTIONS } from "@/lib/schemas/substance-form";
 import type { RouterOutputs } from "@/trpc/react";
 import { MANAGER_SIGNOFF_REQUIRED_MESSAGE } from "@repo/database/return-readiness";
 import {
+  GUERNSEY_NOTICE_OF_ASSESSMENT_SIGNOFF_MESSAGE,
   GUERNSEY_OPERATING_EXPENDITURE_FIELD,
   isGuernseyOperatingExpenditureRequired,
 } from "@repo/database/guernsey-filing";
@@ -303,6 +304,12 @@ export function describeChangedFields(fields: string[], limit = 4): string {
  */
 export function getApprovalBlocker(input: {
   isFormComplete: boolean;
+  /**
+   * False when a Guernsey ESR's saved form has no notice-of-assessment
+   * answer. Omitted (or true) when it does not apply or is not loaded yet;
+   * the server still checks it.
+   */
+  isNoticeOfAssessmentSet?: boolean;
   isManagerSignedOff: boolean;
   requiresFinancialStatements: boolean;
   hasFinancialStatements: boolean;
@@ -310,6 +317,9 @@ export function getApprovalBlocker(input: {
 }): string | null {
   if (!input.isFormComplete) {
     return "Complete every required field in the substance form first.";
+  }
+  if (input.isNoticeOfAssessmentSet === false) {
+    return GUERNSEY_NOTICE_OF_ASSESSMENT_SIGNOFF_MESSAGE;
   }
   if (!input.isManagerSignedOff) return MANAGER_SIGNOFF_REQUIRED_MESSAGE;
   if (input.requiresFinancialStatements && !input.hasFinancialStatements) {

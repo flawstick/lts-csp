@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/select"
 import { Loader2 } from "@/lib/icons"
 import {
+  GUERNSEY_NOTICE_OF_ASSESSMENT_FIELD,
+  GUERNSEY_NOTICE_OF_ASSESSMENT_RESIGNOFF_WARNING,
   GUERNSEY_OPERATING_EXPENDITURE_FIELD,
   isGuernseyFormValueSupplied,
   isGuernseyOperatingExpenditureRequired,
@@ -43,7 +45,15 @@ interface SubstanceFormEditorProps {
   onOpenChange: (open: boolean) => void
   onSave: (data: Partial<SubstanceFormData>) => Promise<void>
   isSaving: boolean
+  /**
+   * The client has signed off the return (and it is not completed): saving
+   * any change revokes that signoff, so the dialog says so before saving.
+   */
+  isClientSignedOff?: boolean
 }
+
+/** Select value for "no answer"; Radix Select items cannot use "". */
+const UNSET_VALUE = "__unset__"
 
 const ENTITY_TYPES = ["Company", "Partnership"] as const
 const YES_NO = ["Yes", "No"] as const
@@ -69,6 +79,7 @@ export function SubstanceFormEditor({
   onOpenChange,
   onSave,
   isSaving,
+  isClientSignedOff = false,
 }: SubstanceFormEditorProps) {
   const section = FORM_SECTIONS.find((s) => s.id === sectionId)
   const [localData, setLocalData] = useState<Partial<SubstanceFormData>>(formData ?? {})
@@ -86,14 +97,57 @@ export function SubstanceFormEditor({
     setLocalData((prev) => ({ ...prev, [field]: value }))
   }
 
+  // Send only what this dialog changed: unchanged values stay as saved
+  // (and unset ones would be rejected as null by the form schema).
+  const original = (formData ?? {}) as Record<string, unknown>
+  const changes = Object.fromEntries(
+    Object.entries(localData).filter(
+      ([key, next]) => JSON.stringify(next ?? null) !== JSON.stringify(original[key] ?? null),
+    ),
+  ) as Partial<SubstanceFormData>
+  const hasChanges = Object.keys(changes).length > 0
+
   const handleSave = async () => {
-    await onSave(localData)
+    if (hasChanges) {
+      await onSave(changes)
+    }
     onOpenChange(false)
   }
 
   const renderField = (field: string) => {
     const label = FIELD_LABELS[field] ?? field
     const value = localData[field as keyof SubstanceFormData]
+
+    // Declaration-page answer the filing agent must never choose itself.
+    if (field === GUERNSEY_NOTICE_OF_ASSESSMENT_FIELD) {
+      return (
+        <div key={field} className="space-y-2">
+          <Label htmlFor={field}>{label}</Label>
+          <Select
+            value={(value as string) || UNSET_VALUE}
+            onValueChange={(v) => updateField(field, v === UNSET_VALUE ? null : v)}
+          >
+            <SelectTrigger id={field}>
+              <SelectValue placeholder="Not set" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={UNSET_VALUE}>Not set</SelectItem>
+              {YES_NO.map((opt) => (
+                <SelectItem key={opt} value={opt}>
+                  {opt}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            The Guernsey portal asks this on its declaration page when the return is submitted.
+            Required before the client signs off and before submitting; Prepare only does not
+            need it. Set it before the client signs off: changing it afterwards clears the
+            client&apos;s sign-off.
+          </p>
+        </div>
+      )
+    }
 
     // Yes/No fields
     if (
@@ -349,6 +403,15 @@ export function SubstanceFormEditor({
           <DialogDescription>{section.description}</DialogDescription>
         </DialogHeader>
 
+        {isClientSignedOff ? (
+          <div
+            role="note"
+            className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200"
+          >
+            {GUERNSEY_NOTICE_OF_ASSESSMENT_RESIGNOFF_WARNING}
+          </div>
+        ) : null}
+
         <div className="grid gap-4 py-4">
           {section.fields.map(renderField)}
 
@@ -391,7 +454,7 @@ export function SubstanceFormEditor({
           </Button>
           <Button onClick={handleSave} disabled={isSaving}>
             {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Save Changes
+            {isClientSignedOff && hasChanges ? "Save and clear client sign-off" : "Save Changes"}
           </Button>
         </DialogFooter>
       </DialogContent>

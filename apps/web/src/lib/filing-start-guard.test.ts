@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSubmissionSignoffRevocation } from "@repo/database/return-readiness";
+import { GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE } from "@repo/database/guernsey-filing";
 import { getFilingStartBlocker, getPossibleFilingEvidence } from "./filing-start-guard";
 
 const guernseyReturn = {
@@ -8,7 +9,11 @@ const guernseyReturn = {
   jurisdiction: { code: "GG" },
   readyForSubmissionAt: null,
   metadata: null,
-  substanceForm: { managerSignOff: "J Smith", managerSignOffDate: "2026-11-01" },
+  substanceForm: {
+    managerSignOff: "J Smith",
+    managerSignOffDate: "2026-11-01",
+    noticeOfAssessment: "Yes" as string | null,
+  },
 };
 
 describe("getFilingStartBlocker", () => {
@@ -27,7 +32,11 @@ describe("getFilingStartBlocker", () => {
         taxReturn: {
           ...guernseyReturn,
           readyForSubmissionAt: new Date(),
-          substanceForm: { managerSignOff: null, managerSignOffDate: null },
+          substanceForm: {
+            managerSignOff: null,
+            managerSignOffDate: null,
+            noticeOfAssessment: "No",
+          },
         },
         submissionMode: "submit_and_capture_pdf",
       }),
@@ -59,6 +68,55 @@ describe("getFilingStartBlocker", () => {
         submissionMode: "submit_and_capture_pdf",
       }),
     ).toBeNull();
+  });
+
+  describe("notice of assessment answer", () => {
+    const signedOffWithout = (noticeOfAssessment: string | null) => ({
+      ...guernseyReturn,
+      readyForSubmissionAt: new Date(),
+      substanceForm: { ...guernseyReturn.substanceForm, noticeOfAssessment },
+    });
+
+    it.each([null, "", "maybe"])(
+      "blocks every submission while it is %j, even when fully signed off",
+      (noticeOfAssessment) => {
+        // Both submit operations (full submit and Submit prepared return)
+        // start in submit_and_capture_pdf mode and go through this check.
+        expect(
+          getFilingStartBlocker({
+            taxReturn: signedOffWithout(noticeOfAssessment),
+            submissionMode: "submit_and_capture_pdf",
+          }),
+        ).toBe(GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE);
+      },
+    );
+
+    it("does not require it to prepare a draft", () => {
+      expect(
+        getFilingStartBlocker({
+          taxReturn: signedOffWithout(null),
+          submissionMode: "prepare_only",
+        }),
+      ).toBeNull();
+    });
+
+    it.each(["Yes", "No"])("allows submission with %s", (noticeOfAssessment) => {
+      expect(
+        getFilingStartBlocker({
+          taxReturn: signedOffWithout(noticeOfAssessment),
+          submissionMode: "submit_and_capture_pdf",
+        }),
+      ).toBeNull();
+    });
+
+    it("does not apply outside Guernsey ESR returns", () => {
+      expect(
+        getFilingStartBlocker({
+          taxReturn: { ...signedOffWithout(null), jurisdiction: { code: "JE" } },
+          submissionMode: "submit_and_capture_pdf",
+        }),
+      ).toBeNull();
+    });
   });
 
   it("blocks submission while financial figures still need GBP conversion", () => {

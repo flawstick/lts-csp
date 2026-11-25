@@ -1,7 +1,10 @@
 import {
   buildGuernseyCertificateTwoDefaults,
   detectGuernseyCertificateTypeFromDocuments,
+  getGuernseyNoticeOfAssessment,
+  getGuernseyNoticeOfAssessmentBlocker,
   getGuernseyScopedMissingFields,
+  GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
   getGuernseyScopedRequirementBlocker,
   GUERNSEY_OPERATING_EXPENDITURE_REQUIRED_MESSAGE,
   hasMeaningfulGuernseyFormData,
@@ -284,5 +287,32 @@ describe("guernsey-filing", () => {
         missingFields: ["adequacyExpenditureDetails"],
       });
     });
+  });
+});
+
+describe("notice of assessment", () => {
+  it("accepts only an explicit Yes or No", () => {
+    expect(getGuernseyNoticeOfAssessment({ noticeOfAssessment: "Yes" })).toBe("Yes");
+    expect(getGuernseyNoticeOfAssessment({ noticeOfAssessment: "No" })).toBe("No");
+    for (const noticeOfAssessment of [null, undefined, "", "yes", "N/A", " Yes"]) {
+      expect(getGuernseyNoticeOfAssessment({ noticeOfAssessment })).toBeNull();
+    }
+    expect(getGuernseyNoticeOfAssessment(null)).toBeNull();
+  });
+
+  it("blocks submission until a reviewer answers it", () => {
+    expect(getGuernseyNoticeOfAssessmentBlocker({ noticeOfAssessment: null })).toBe(
+      GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
+    );
+    expect(getGuernseyNoticeOfAssessmentBlocker(undefined)).toBe(
+      GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
+    );
+    expect(getGuernseyNoticeOfAssessmentBlocker({ noticeOfAssessment: "No" })).toBeNull();
+  });
+
+  it("warns that setting it on a signed-off return needs a new client signoff", () => {
+    expect(GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE).toContain(
+      "mark the return ready for submission again",
+    );
   });
 });

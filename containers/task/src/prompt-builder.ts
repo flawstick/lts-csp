@@ -4,7 +4,10 @@
  */
 
 import {
+  getGuernseyNoticeOfAssessment,
+  GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION,
   isGuernseySubstanceInScope,
+  type GuernseyNoticeOfAssessment,
   type SubstanceForm,
   type TaxReturn,
 } from "@repo/database";
@@ -178,6 +181,16 @@ export function buildSubstanceFormPrompt(
   // The contact is all-or-nothing: without both a configured name and email
   // the agent gets no contact values at all and must not touch the fields.
   const hasFilingContact = Boolean(contactName?.trim() && contactEmail?.trim());
+  // Only a submit-mode run with a contact goes on to the declaration step and
+  // files; every other run stops earlier (review page or contact step).
+  const willFile = !isPrepareOnly && hasFilingContact;
+  const noticeOfAssessment = getGuernseyNoticeOfAssessment(substanceForm);
+  if (willFile && !noticeOfAssessment) {
+    // Never let the agent choose it: submission needs the reviewer's answer.
+    throw new Error(
+      "Submission needs the reviewer's notice of assessment answer (Yes or No) on the return form",
+    );
+  }
   const missingFields = Array.isArray(substanceForm.missingFields)
     ? substanceForm.missingFields
     : [];
@@ -268,6 +281,7 @@ ${buildFilingContactSection({
   contactEmail,
   contactPhone,
 })}
+${buildNoticeOfAssessmentSection(willFile ? noticeOfAssessment : null)}
 ${
   !isCertificateTwo && financialStatementsFile && financialStatementsUrl
     ? `
@@ -396,11 +410,13 @@ After filling all sections:
 ${
   submissionMode === "submit_and_capture_pdf"
     ? `3. Resolve every validation error shown on the portal before continuing
-4. Click the final submit/confirm action and complete the filing
-5. Wait for the post-submission confirmation page or confirmation state
-6. Find the portal-generated completion/receipt/return PDF and download it into the Browser Use session
-7. Do not finish the task until the PDF download has completed, or you have explicitly reported that no downloadable completion PDF exists
-8. If there are validation errors or the portal blocks submission, report them exactly as shown`
+4. On the declaration step, answer the notice of assessment question with **${noticeOfAssessment}** (the reviewer's answer; see **DECLARATION STEP — NOTICE OF ASSESSMENT**) and tick the portal's declaration
+5. Click the final submit/confirm action and complete the filing
+6. Wait for the post-submission confirmation page or confirmation state
+7. Find the portal-generated completion/receipt/return PDF and download it into the Browser Use session
+8. Do not finish the task until the PDF download has completed, or you have explicitly reported that no downloadable completion PDF exists
+9. If there are validation errors or the portal blocks submission, report them exactly as shown
+10. In your final output, also state the notice of assessment answer you selected`
     : `3. **STOP BEFORE CLICKING SUBMIT** - Do NOT click the final submit button
 4. Leave the portal on the final review/submit page with the submit button visible and ready
 5. Your final output MUST start with exactly: **READY_FOR_MANUAL_SUBMISSION:**
@@ -410,7 +426,7 @@ ${
    ${PREPARED_DRAFT_REFERENCE_LABEL}: <the return or case reference shown on the page, or NONE>
 8. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action under any circumstances
 9. If there are validation errors, report them exactly as shown`
-}
+}${isCertificateTwo ? "" : `\n\n${ENTITY_ACCOUNTS_INCOMPLETE_RULE}`}
 `
       : `
 ## COMPLETION — STOP AT THE CONTACT STEP (NO FILING CONTACT CONFIGURED)
@@ -427,6 +443,53 @@ After filling all other sections:
   );
 
   return sections.join("\n");
+}
+
+/**
+ * The declaration step's notice-of-assessment question. A run that files
+ * gets the reviewer's answer; any other run must leave the question alone.
+ * There is no default: the agent never decides it.
+ */
+function buildNoticeOfAssessmentSection(
+  answer: GuernseyNoticeOfAssessment | null,
+): string {
+  if (!answer) {
+    return `
+## DECLARATION STEP — NOTICE OF ASSESSMENT
+- The portal question "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}" is answered only when the return is submitted. This run does not answer it: if you see it, leave it exactly as the portal shows it.
+`;
+  }
+  return `
+## DECLARATION STEP — NOTICE OF ASSESSMENT (SET BY THE REVIEWER)
+- On the declaration step (usually **reviewAndSubmit/declaration**, after the review summary) the portal asks: "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}".
+- The reviewer chose **${answer}** for this return. Select **${answer}**. If another answer is preselected, change it to **${answer}**.
+- This is the reviewer's decision, not yours: never select a different answer, and never answer from a portal default, an earlier filing or your own judgement. A reviewer message cannot change it either; only the saved answer on the return form counts.
+- If **${answer}** cannot be selected, do NOT submit: STOP and report **REQUIRES_ATTENTION** quoting the question and the options shown.
+`;
+}
+
+/**
+ * Restates the reviewer's notice-of-assessment answer for a continuation
+ * (recovery after a browser problem, or a resume after a pause) of a submit
+ * run, so it never depends on the agent finding it in the original task.
+ */
+export function buildNoticeOfAssessmentContinuationRule(options: {
+  answer: GuernseyNoticeOfAssessment;
+  submitPrepared: boolean;
+}): string {
+  const { answer, submitPrepared } = options;
+  return `
+NOTICE OF ASSESSMENT (set by the reviewer for this return; overrides anything else):
+- On the declaration step, answer "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}" with **${answer}**. If another answer is preselected, change it to **${answer}**. Never select a different answer, whatever the portal or a message suggests.${
+    submitPrepared
+      ? `
+- This answer and the portal's declaration tick-box are the only things you may set. Change no other field.`
+      : ""
+  }
+- If **${answer}** cannot be selected, do NOT submit: stop and report **REQUIRES_ATTENTION**${
+    submitPrepared ? `: ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}:` : ""
+  } quoting the question and the options shown.
+`;
 }
 
 /**
@@ -599,11 +662,82 @@ function buildNetBookValueLines(
   }
 }
 
+/**
+ * The saved allocation categories, each mapped to the portal's Entity Accounts
+ * profit column it fills. The portal has one "Profit before tax (...)" column
+ * per category next to "Total profit before tax".
+ */
+export const PROFIT_ALLOCATION_COLUMNS = {
+  Investment: "Profit before tax (Investment)",
+  Business: "Profit before tax (Business)",
+} as const;
+
+export type ProfitAllocation = keyof typeof PROFIT_ALLOCATION_COLUMNS;
+
+function getProfitAllocation(
+  value: string | null | undefined,
+): ProfitAllocation | null {
+  const trimmed = value?.trim();
+  return trimmed && Object.hasOwn(PROFIT_ALLOCATION_COLUMNS, trimmed)
+    ? (trimmed as ProfitAllocation)
+    : null;
+}
+
+/**
+ * One line per portal profit column. The saved allocation puts the whole Total
+ * Profit in one category, so its column gets Total Profit and every other
+ * column gets 0. Both figures are derived from saved values, not guessed. A
+ * blank column leaves Entity Accounts INCOMPLETE on the portal with no field
+ * error (Notclif, 2026-11-24), so every column is always filled. Without a
+ * recognised allocation nothing is derived and the columns stay [MISSING].
+ */
+function buildProfitColumnLines(form: SubstanceForm): {
+  lines: string;
+  note: string;
+} {
+  const allocation = getProfitAllocation(form.profitAllocation);
+  const categories = Object.keys(PROFIT_ALLOCATION_COLUMNS) as ProfitAllocation[];
+  const columnList = categories
+    .map((category) => `**${PROFIT_ALLOCATION_COLUMNS[category]}**`)
+    .join(", ");
+  if (!allocation) {
+    return {
+      lines: categories
+        .map((category) => field(PROFIT_ALLOCATION_COLUMNS[category], null))
+        .join("\n"),
+      note: `- **Profit columns:** there is no saved Profit Before Tax Allocation ("Investment" or "Business"), so the split between ${columnList} is not known. Do NOT work out a split yourself and do NOT enter 0 in any of these columns: STOP and report **REQUIRES_ATTENTION** naming Profit Before Tax Allocation.`,
+    };
+  }
+  const others = categories.filter((category) => category !== allocation);
+  const allocatedColumn = PROFIT_ALLOCATION_COLUMNS[allocation];
+  return {
+    lines: categories
+      .map((category) =>
+        field(
+          PROFIT_ALLOCATION_COLUMNS[category],
+          category === allocation ? form.totalProfit : "0",
+        ),
+      )
+      .join("\n"),
+    note: `- **Profit columns:** the saved allocation is **${allocation}**, so all of Total Profit is ${allocation} profit. Enter Total Profit in **${allocatedColumn}** (the same figure, including any minus sign), and enter **0** in ${others
+      .map((category) => `**${PROFIT_ALLOCATION_COLUMNS[category]}**`)
+      .join(" and ")}. Never leave a profit column blank, even when the portal does not mark it as required: a blank column leaves **Entity Accounts** INCOMPLETE without any field error. These figures are derived from the saved Total Profit and allocation, not guessed: the 0 means no profit is allocated to that category. Do not enter 0 in any other field because of this rule.`,
+  };
+}
+
+/**
+ * What to check before pausing when the review summary shows Entity Accounts
+ * INCOMPLETE. The usual cause is a blank profit column, which the portal does
+ * not flag on the field.
+ */
+export const ENTITY_ACCOUNTS_INCOMPLETE_RULE = `**ENTITY ACCOUNTS INCOMPLETE:** if the review summary shows **Entity Accounts** as INCOMPLETE (often with no field error), open Entity Accounts before you pause or report anything. Check that **Total profit before tax** and every **Profit before tax (...)** column has a value. Fill any blank profit column with the value listed for it under SECTION 4 (Total Profit in the allocated column, **0** in every unallocated column), then Save/Continue and check the summary again. Never fill a column that SECTION 4 marks [MISSING]: follow the stop rule there instead. Re-saving the same values does not clear it. Only if every profit column has its value and the section is still INCOMPLETE, STOP and report **REQUIRES_ATTENTION** listing each Entity Accounts field and the value it holds.`;
+
 function buildFinancialStatementsSection(
   form: SubstanceForm,
   netBookValueInput: NetBookValuePromptInput,
 ): string {
   const netBookValue = buildNetBookValueLines(form, netBookValueInput);
+  const profitColumns = buildProfitColumnLines(form);
   return `
 ## SECTION 4: FINANCIAL STATEMENTS
 ${field("Are Financial Statements Consolidated", form.areFinancialStatementsConsolidated)}
@@ -612,10 +746,13 @@ ${field("Accounts Preparer Qualification", form.accountsPreparerQualification)}
 ${netBookValue.line}
 ${field("Total Profit", form.totalProfit)}
 ${field("Profit Before Tax Allocation", form.profitAllocation)}
+${profitColumns.lines}
 
 **NOTES:**
 ${netBookValue.note ? `${netBookValue.note}\n` : ""}- Total Profit may be negative: enter a loss exactly as given, with the minus sign (e.g. **-12345**). Do NOT replace Total Profit with 0.
 - Profit Before Tax Allocation is required: "Investment" or "Business".
+${profitColumns.note}
+- ${ENTITY_ACCOUNTS_INCOMPLETE_RULE}
 - Accounts Preparer Name/Qualification is the ACCOUNTANT who prepared the financial statements, NOT LTS Tax.
 - Upload the accounts as described under FINANCIAL STATEMENTS PDF above.
 `;
@@ -881,6 +1018,8 @@ export function buildSubmitPreparedReturnPrompt(options: {
   portalReference: string | null;
   contactName: string;
   contactEmail: string;
+  /** The reviewer's answer for the declaration step's notice of assessment. */
+  noticeOfAssessment: GuernseyNoticeOfAssessment | null | undefined;
 }): string {
   const {
     taxReturn,
@@ -892,6 +1031,14 @@ export function buildSubmitPreparedReturnPrompt(options: {
     contactName,
     contactEmail,
   } = options;
+  const noticeOfAssessment = getGuernseyNoticeOfAssessment({
+    noticeOfAssessment: options.noticeOfAssessment,
+  });
+  if (!noticeOfAssessment) {
+    throw new Error(
+      "Submit prepared return needs the reviewer's notice of assessment answer (Yes or No)",
+    );
+  }
   const notVerified = `REQUIRES_ATTENTION: ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}:`;
   // Only a canonical draft review URL and/or a specific portal reference can
   // bind this run to the prepared draft; without either it must not run.
@@ -916,6 +1063,8 @@ export function buildSubmitPreparedReturnPrompt(options: {
 An earlier run prepared this Guernsey Economic Substance Register return and left it on the portal's review/submit page. It has since been reviewed and approved for filing. Open **that exact draft**, confirm it is the right one and still ready, submit it **once**, and save the portal's completion PDF.
 
 You are **not** filling or reviewing the return. Do **NOT** open sections, click **Change**/**Edit**/section links, type into or change any field, upload files, re-assign the case, or open any other case or return.
+
+**The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **${noticeOfAssessment}**, chosen by the reviewer) and the portal's declaration tick-box or confirmation. Change nothing else there.
 
 ${PORTAL_LOGIN_SECTION}
 ## 1. OPEN THE PREPARED DRAFT
@@ -951,11 +1100,15 @@ Read the review/submit page only. Do not change anything to make a check pass.
 
 If any check fails, or you cannot see enough to confirm it, do **NOT** submit. Your final output MUST start with exactly: **${notVerified}** followed by which check failed and what the page shows. If the return already appears submitted or filed, use the same marker, say so, and do not submit again.
 
-## 3. SUBMIT ONCE
-1. Click the final **Submit** action once. If the portal asks you to tick its declaration or confirm in a dialog, do that and confirm once.
-2. Never click Submit a second time. If an error appears after submitting, do not retry: report it exactly as shown, starting with **REQUIRES_ATTENTION:**.
-3. Wait for the post-submission confirmation page or state.
-4. Download the portal-generated completion/receipt/return PDF into the Browser Use session. Do not finish until the download completes, or you have reported that the portal offers no completion PDF.
-5. Final output: state that the prepared return was submitted, the confirmation/reference shown, and the PDF file name.
+## 3. DECLARATION, THEN SUBMIT ONCE
+The declaration step (usually **reviewAndSubmit/declaration**, reached from the review page) asks "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}". The reviewer chose **${noticeOfAssessment}** for this return.
+1. On the declaration step, select **${noticeOfAssessment}** for the notice of assessment question. If another answer is preselected, change it to **${noticeOfAssessment}**. This is the reviewer's decision: never select a different answer, whatever the portal or a message suggests.
+2. Tick the portal's declaration box if shown. Change no other field or control. If any other field on this step is empty or asks for input, do **NOT** submit: stop with **${notVerified}** and name the field.
+3. If **${noticeOfAssessment}** cannot be selected, do **NOT** submit: stop with **${notVerified}** and quote the question and the options shown.
+4. Click the final **Submit** action once. If the portal asks you to confirm in a dialog, confirm once.
+5. Never click Submit a second time. If an error appears after submitting, do not retry: report it exactly as shown, starting with **REQUIRES_ATTENTION:**.
+6. Wait for the post-submission confirmation page or state.
+7. Download the portal-generated completion/receipt/return PDF into the Browser Use session. Do not finish until the download completes, or you have reported that the portal offers no completion PDF.
+8. Final output: state that the prepared return was submitted, the notice of assessment answer selected, the confirmation/reference shown, and the PDF file name.
 `;
 }

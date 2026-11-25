@@ -43,17 +43,40 @@ import { decryptPortalCredentials } from "@repo/database/portal-credentials";
 import { launchBrowserTask } from "@/lib/ecs";
 import {
   getBrowserUseApiVersion,
+  getBrowserUseSessionStatus,
   stopBrowserUseSession,
   waitForBrowserUseSessionToPause,
 } from "@/lib/browser-use-control";
 import { getBrowserJobStaleReason } from "@/lib/browser-job-status";
 import { getFilingStartBlocker } from "@/lib/filing-start-guard";
 import {
-  fingerprintPreparedInputs,
+  ACTIVE_JOB_ON_RETURN_MESSAGE,
+  getStartTargetBlocker,
+  getSubmitDraftGate,
+  getSubmitReadinessByOperation,
+  RETURN_ALREADY_COMPLETED_MESSAGE,
+} from "@/lib/submit-readiness";
+import {
+  getSubmitBrowserStopRefusal,
+  getSubmitNotFiledConfirmationRefusal,
+  getSubmitRunAgentReport,
+  getSubmitRunBrowserSessionId,
+  isBrowserSessionStoppedStatus,
+  parseSubmitBrowserStop,
+  planSubmitBrowserStop,
+  SUBMIT_BROWSER_STOP_KEY,
   getUnconfirmedSubmitBlocker,
   hasSubmitPreparedDispatch,
-  resolvePreparedDraft,
+  parseSubmitNotFiledConfirmation,
+  planSubmitNotFiledConfirmation,
+  SUBMIT_NOT_FILED_CONFIRMATION_KEY,
+  SUBMIT_NOT_FILED_NOTE_MAX_LENGTH,
+  SUBMIT_NOT_FILED_NOTE_MIN_LENGTH,
+  SUBMIT_NOT_FILED_QUIET_PERIOD_MS,
+  SUBMIT_NOT_FILED_UNVERIFIED_QUIET_PERIOD_MS,
+  SUBMIT_PREPARED_DISPATCHED_KEY,
   SUBMIT_PREPARED_OPERATION,
+  UNCONFIRMED_SUBMIT_BLOCKER,
 } from "@repo/database/prepared-draft";
 import { getFilingMaintenanceBlocker } from "@/lib/filing-maintenance";
 import {
@@ -1329,6 +1352,13 @@ export const taxReturnRouter = createTRPCRouter({
             message: "Keep tasks that record a possible filing. Check the return in the Guernsey Tax Portal and recover its receipt.",
           });
         }
+        // Confirmed-not-filed runs stay too: they hold the staff audit record.
+        if (taskJobs.some((job) => hasSubmitPreparedDispatch(job.resultData))) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Keep tasks with a Submit prepared return run that reached the portal: they are the filing audit record.",
+          });
+        }
         await tx.delete(tasks).where(inArray(tasks.id, input));
       });
     }),
@@ -1833,9 +1863,30 @@ export const taxReturnRouter = createTRPCRouter({
         ),
       );
 
+      // Read after the stale check above so this task's lost runs count as
+      // ended, the same as startJob sees them.
+      const submitReadiness = task.taxReturn
+        ? getSubmitReadinessByOperation({
+            taxReturn: task.taxReturn,
+            returnJobs: await ctx.db
+              .select({
+                id: jobs.id,
+                status: jobs.status,
+                createdAt: jobs.createdAt,
+                resultData: jobs.resultData,
+              })
+              .from(jobs)
+              .innerJoin(tasks, eq(jobs.taskId, tasks.id))
+              .where(eq(tasks.taxReturnId, task.taxReturn.id)),
+            maintenanceBlocker: getFilingMaintenanceBlocker(),
+          })
+        : null;
+
       return {
         ...task,
         jobs: normalizedJobs,
+        // Advisory: startJob re-checks every gate under the return row lock.
+        submitReadiness,
       };
     }),
 
@@ -1927,46 +1978,17 @@ export const taxReturnRouter = createTRPCRouter({
         throw new Error("Task has no associated tax return");
       }
 
-      if (
-        task.taxReturn.jurisdiction?.code === "JE" &&
-        task.taxReturn.returnType === "company"
-      ) {
-        throw new Error(
-          "Jersey browser automation is not implemented yet. Use the Jersey return form workflow instead.",
-        );
-      }
-
-      if (
-        isSubmitPrepared &&
-        !(
-          task.taxReturn.jurisdiction?.code === "GG" &&
-          task.taxReturn.returnType === "economic_substance"
-        )
-      ) {
+      // Jersey company returns, Submit prepared return outside Guernsey ESR,
+      // and an unresolved Guernsey certificate (shared with getTask readiness).
+      const targetBlocker = getStartTargetBlocker({
+        taxReturn: task.taxReturn,
+        isSubmitPrepared,
+      });
+      if (targetBlocker) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "Submit prepared return is only available for Guernsey ESR returns.",
+          message: targetBlocker,
         });
-      }
-
-      if (
-        task.taxReturn.jurisdiction?.code === "GG" &&
-        task.taxReturn.returnType === "economic_substance"
-      ) {
-        const certificateResolution = getGuernseyCertificateResolutionForReturn(
-          {
-            metadata: task.taxReturn.metadata,
-            substanceForm: task.taxReturn.substanceForm,
-          },
-        );
-
-        if (certificateResolution.unresolved) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message:
-              "Certificate type is unresolved for this Guernsey return. Confirm Certificate 2 or Certificate 3 on the return page before starting automation.",
-          });
-        }
       }
 
       const filingBlocker = getFilingStartBlocker({
@@ -2003,7 +2025,7 @@ export const taxReturnRouter = createTRPCRouter({
         if (currentReturn.status === "completed") {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
-            message: "This return is already completed.",
+            message: RETURN_ALREADY_COMPLETED_MESSAGE,
           });
         }
         const currentForm = await tx.query.substanceForms.findFirst({
@@ -2031,7 +2053,7 @@ export const taxReturnRouter = createTRPCRouter({
           ))
           .limit(1);
         if (activeJob) {
-          throw new Error("A job is already running for this return");
+          throw new Error(ACTIVE_JOB_ON_RETURN_MESSAGE);
         }
 
         let preparedJobId: string | null = null;
@@ -2046,37 +2068,21 @@ export const taxReturnRouter = createTRPCRouter({
             .from(jobs)
             .innerJoin(tasks, eq(jobs.taskId, tasks.id))
             .where(eq(tasks.taxReturnId, taxReturnId));
-          // A Submit prepared return run that reached the browser may have
-          // filed without a receipt: no new submission of any kind.
-          const unconfirmedSubmit = getUnconfirmedSubmitBlocker({
-            jobs: returnJobs,
+          // No earlier Submit prepared return run that may have filed; for
+          // Submit prepared return, a draft that still matches this return.
+          const gate = getSubmitDraftGate({
+            isSubmitPrepared,
+            returnJobs,
+            taxReturn: currentReturn,
+            substanceForm: (currentForm ?? null) as Record<string, unknown> | null,
           });
-          if (unconfirmedSubmit) {
+          if (!gate.ok) {
             throw new TRPCError({
               code: "PRECONDITION_FAILED",
-              message: unconfirmedSubmit,
+              message: gate.blocker,
             });
           }
-          if (isSubmitPrepared) {
-            const resolution = resolvePreparedDraft({
-              jobs: returnJobs,
-              requireNetBookValueReview: currentForm?.certificateType !== "Certificate 2",
-              currentFingerprint: fingerprintPreparedInputs({
-                entityName: currentReturn.entityName,
-                taxYear: currentReturn.taxYear,
-                link: currentReturn.link,
-                files: currentReturn.files,
-                substanceForm: (currentForm ?? null) as Record<string, unknown> | null,
-              }),
-            });
-            if (!resolution.ok) {
-              throw new TRPCError({
-                code: "PRECONDITION_FAILED",
-                message: resolution.blocker,
-              });
-            }
-            preparedJobId = resolution.preparedJob.id;
-          }
+          preparedJobId = gate.preparedJobId;
         }
 
         const [lastJob] = await tx
@@ -2375,6 +2381,442 @@ export const taxReturnRouter = createTRPCRouter({
           .where(and(eq(jobs.id, job.id), eq(jobs.status, job.status)));
 
         return { messageId: plan.message.id, delivery: plan.delivery };
+      });
+    }),
+
+  // Staff: the dispatch lock on a return (Submit prepared return runs that
+  // reached the portal without a receipt), with each run's own report and
+  // whether it can be confirmed as not filed yet.
+  getSubmitDispatchLock: publicProcedure
+    .input(z.object({ taskId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      await requireStaffAccount();
+      const task = await ctx.db.query.tasks.findFirst({
+        where: eq(tasks.id, input.taskId),
+        columns: { id: true, taxReturnId: true },
+      });
+      const limits = {
+        noteMinLength: SUBMIT_NOT_FILED_NOTE_MIN_LENGTH,
+        noteMaxLength: SUBMIT_NOT_FILED_NOTE_MAX_LENGTH,
+        quietPeriodMinutes: Math.round(SUBMIT_NOT_FILED_QUIET_PERIOD_MS / 60_000),
+        unverifiedQuietPeriodHours: Math.round(
+          SUBMIT_NOT_FILED_UNVERIFIED_QUIET_PERIOD_MS / 3_600_000,
+        ),
+      };
+      if (!task?.taxReturnId) {
+        return { blocker: null, runs: [], ...limits };
+      }
+      const taxReturn = await ctx.db.query.taxReturns.findFirst({
+        where: eq(taxReturns.id, task.taxReturnId),
+        columns: { id: true, status: true, files: true, metadata: true },
+      });
+      if (!taxReturn) {
+        return { blocker: null, runs: [], ...limits };
+      }
+      const returnJobs = await ctx.db
+        .select({
+          id: jobs.id,
+          taskId: jobs.taskId,
+          jobNumber: jobs.jobNumber,
+          status: jobs.status,
+          createdAt: jobs.createdAt,
+          completedAt: jobs.completedAt,
+          updatedAt: jobs.updatedAt,
+          errorMessage: jobs.errorMessage,
+          resultData: jobs.resultData,
+        })
+        .from(jobs)
+        .innerJoin(tasks, eq(jobs.taskId, tasks.id))
+        .where(eq(tasks.taxReturnId, taxReturn.id))
+        .orderBy(desc(jobs.createdAt));
+      const hasActiveJob = returnJobs.some((job) =>
+        (ACTIVE_JOB_STATUSES as readonly string[]).includes(job.status),
+      );
+      const now = Date.now();
+      const runs = returnJobs
+        .filter((job) => hasSubmitPreparedDispatch(job.resultData))
+        .map((job) => {
+          const data = getResultDataRecord(job.resultData) ?? {};
+          const confirmation = parseSubmitNotFiledConfirmation(data);
+          const confirmed = confirmation !== null && (job.status === "failed" || job.status === "cancelled");
+          const capture = getResultDataRecord(
+            getResultDataRecord(taxReturn.metadata)?.filedReturnPdf,
+          );
+          const sessionId = getSubmitRunBrowserSessionId(data);
+          const stop = parseSubmitBrowserStop(data);
+          const browserStop =
+            sessionId && stop && stop.sessionId === sessionId
+              ? {
+                  stoppedAt: stop.stoppedAt,
+                  stoppedByName: stop.stoppedByName,
+                  statusBefore: stop.statusBefore,
+                  statusAfter: stop.statusAfter,
+                  verified: stop.verified,
+                  wasActive: !isBrowserSessionStoppedStatus(stop.statusBefore),
+                }
+              : null;
+          return {
+            jobId: job.id,
+            taskId: job.taskId,
+            jobNumber: job.jobNumber,
+            status: job.status,
+            createdAt: job.createdAt,
+            completedAt: job.completedAt,
+            dispatchedAt: getResultDataNumber(data, SUBMIT_PREPARED_DISPATCHED_KEY) ?? null,
+            agentReport: getSubmitRunAgentReport(job),
+            receiptCaptureStatus:
+              capture?.jobId === job.id && typeof capture.status === "string"
+                ? capture.status
+                : null,
+            confirmation: confirmed ? confirmation : null,
+            hasBrowserSession: sessionId !== null,
+            browserStop,
+            stopRefusal: confirmed ? null : getSubmitBrowserStopRefusal(job),
+            confirmRefusal: confirmed
+              ? null
+              : getSubmitNotFiledConfirmationRefusal({
+                  job,
+                  taxReturn,
+                  hasActiveJob,
+                  now,
+                }),
+          };
+        });
+      return {
+        blocker: runs.some((run) => !run.confirmation)
+          ? UNCONFIRMED_SUBMIT_BLOCKER
+          : null,
+        runs,
+        ...limits,
+      };
+    }),
+
+  // Staff, step 1 before confirming a dispatched run did not file: stop the
+  // run's Browser Use session and record when Browser Use reported it
+  // stopped. The confirmation is only accepted a quiet period after this, so
+  // the person's portal check comes after the browser could no longer act.
+  stopSubmitRunBrowser: publicProcedure
+    .input(z.object({ jobId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const staff = await requireStaffAccount();
+      const existing = await ctx.db.query.jobs.findFirst({
+        where: eq(jobs.id, input.jobId),
+        columns: { id: true, status: true, createdAt: true, resultData: true },
+      });
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Run not found." });
+      }
+      // Never stops an active run's browser (Cancel does that).
+      const refusal = getSubmitBrowserStopRefusal(existing);
+      if (refusal) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: refusal });
+      }
+      const record = getResultDataRecord(existing.resultData);
+      const sessionId = getSubmitRunBrowserSessionId(record) as string;
+      const version = getBrowserUseApiVersion(record);
+
+      // Read the status BEFORE stopping, so a browser that was still active is
+      // recorded as such, then stop it and read it back.
+      let statusBefore: string | null;
+      try {
+        statusBefore = await getBrowserUseSessionStatus(sessionId, version);
+      } catch (error) {
+        console.error("stopSubmitRunBrowser: reading the browser session status failed", {
+          jobId: existing.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Could not read this run's browser status from Browser Use. Try again in a minute.",
+        });
+      }
+      try {
+        await stopBrowserUseSession(sessionId, "session", version);
+      } catch (error) {
+        console.error("stopSubmitRunBrowser: stopping the browser session failed", {
+          jobId: existing.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      let statusAfter: string | null;
+      try {
+        statusAfter = await waitForBrowserUseSessionToPause(sessionId, version);
+      } catch (error) {
+        console.error("stopSubmitRunBrowser: reading the browser session status failed", {
+          jobId: existing.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "The run's browser was asked to stop, but Browser Use did not report its status. Try again in a minute.",
+        });
+      }
+
+      return ctx.db.transaction(async (tx) => {
+        const [jobRow] = await tx
+          .select({
+            id: jobs.id,
+            status: jobs.status,
+            createdAt: jobs.createdAt,
+            resultData: jobs.resultData,
+          })
+          .from(jobs)
+          .where(eq(jobs.id, input.jobId))
+          .for("update");
+        if (!jobRow) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Run not found." });
+        }
+        const plan = planSubmitBrowserStop({
+          job: jobRow,
+          statusBefore,
+          statusAfter,
+          actor: { id: staff.id, name: staff.fullName },
+          now: Date.now(),
+        });
+        if (!plan.ok) {
+          throw new TRPCError({ code: plan.code, message: plan.message });
+        }
+        if (plan.record.sessionId !== sessionId) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "The run changed while stopping its browser. Reload and try again.",
+          });
+        }
+        const updated = await tx
+          .update(jobs)
+          .set({
+            resultData: mergeResultDataPatchSql({
+              [SUBMIT_BROWSER_STOP_KEY]: plan.record,
+            }),
+          })
+          .where(and(eq(jobs.id, jobRow.id), eq(jobs.status, jobRow.status)))
+          .returning({ id: jobs.id });
+        if (updated.length === 0) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "The run changed while stopping its browser. Reload and try again.",
+          });
+        }
+        console.info("Submit prepared return run browser stopped by staff", {
+          jobId: jobRow.id,
+          accountId: staff.id,
+          statusBefore,
+          statusAfter,
+          verified: plan.record.verified,
+        });
+        return {
+          jobId: jobRow.id,
+          stoppedAt: plan.record.stoppedAt,
+          verified: plan.record.verified,
+          wasActive: plan.wasActive,
+        };
+      });
+    }),
+
+  // Staff: "I checked the Guernsey portal: this return was NOT submitted" for
+  // one Submit prepared return run that reached the portal. The only way to
+  // lift the dispatch lock it set; the agent's own report never does. Never
+  // starts, resumes or files anything.
+  confirmSubmitNotFiled: publicProcedure
+    .input(
+      z.object({
+        jobId: z.string().uuid(),
+        confirmCheckedPortal: z.literal(true),
+        // The browser stop time the dialog showed (null: none recorded).
+        checkedAfterBrowserStoppedAt: z.number().int().nullable(),
+        note: z.string().max(SUBMIT_NOT_FILED_NOTE_MAX_LENGTH * 2),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const staff = await requireStaffAccount();
+
+      const existing = await ctx.db.query.jobs.findFirst({
+        where: eq(jobs.id, input.jobId),
+        columns: { id: true, status: true, resultData: true },
+      });
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Run not found." });
+      }
+      if (!hasSubmitPreparedDispatch(existing.resultData)) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Only a Submit prepared return run that reached the portal needs this confirmation.",
+        });
+      }
+      // Checked again under lock; here so an active run's browser is never
+      // stopped by this action and a bad note fails before any side effect.
+      if (existing.status !== "failed" && existing.status !== "cancelled") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "This run has not ended. Cancel it first, wait for it to stop, then check the portal.",
+        });
+      }
+      if (input.note.trim().length < SUBMIT_NOT_FILED_NOTE_MIN_LENGTH) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Describe what the Guernsey Tax Portal shows for this return (at least ${SUBMIT_NOT_FILED_NOTE_MIN_LENGTH} characters).`,
+        });
+      }
+
+      // Read (never stop here) the run's browser status. A browser that is
+      // still active means the person's portal check may predate a Submit
+      // click: stop it, drop the earlier stop record so the quiet period
+      // restarts from a new stop, and refuse.
+      const record = getResultDataRecord(existing.resultData);
+      const sessionId = getSubmitRunBrowserSessionId(record);
+      let browserSessionStatus: string | null = null;
+      if (sessionId) {
+        const version = getBrowserUseApiVersion(record);
+        try {
+          browserSessionStatus = await getBrowserUseSessionStatus(sessionId, version);
+        } catch (error) {
+          console.error("confirmSubmitNotFiled: reading the browser session status failed", {
+            jobId: existing.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Could not read this run's browser status from Browser Use. Try again in a minute.",
+          });
+        }
+        if (
+          browserSessionStatus !== null &&
+          !isBrowserSessionStoppedStatus(browserSessionStatus)
+        ) {
+          try {
+            await stopBrowserUseSession(sessionId, "session", version);
+          } catch (error) {
+            console.error("confirmSubmitNotFiled: stopping the browser session failed", {
+              jobId: existing.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          await ctx.db
+            .update(jobs)
+            .set({
+              resultData: mergeResultDataPatchSql({ [SUBMIT_BROWSER_STOP_KEY]: null }),
+            })
+            .where(eq(jobs.id, existing.id));
+          console.warn("confirmSubmitNotFiled: refused, browser session still active", {
+            jobId: existing.id,
+            accountId: staff.id,
+            browserSessionStatus,
+          });
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `This run's browser was still active ("${browserSessionStatus}"), so it may have acted on the portal after you checked. It has been asked to stop. Use Stop browser again, wait, check the Guernsey Tax Portal again, then confirm.`,
+          });
+        }
+      }
+
+      return ctx.db.transaction(async (tx) => {
+        const [jobRow] = await tx
+          .select({
+            id: jobs.id,
+            taskId: jobs.taskId,
+            status: jobs.status,
+            createdAt: jobs.createdAt,
+            completedAt: jobs.completedAt,
+            updatedAt: jobs.updatedAt,
+            resultData: jobs.resultData,
+          })
+          .from(jobs)
+          .where(eq(jobs.id, input.jobId))
+          .for("update");
+        if (!jobRow) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Run not found." });
+        }
+        const task = await tx.query.tasks.findFirst({
+          where: eq(tasks.id, jobRow.taskId),
+          columns: { taxReturnId: true },
+        });
+        if (!task?.taxReturnId) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        }
+        // Serialize with startJob and staff completion on the same return.
+        const [taxReturn] = await tx
+          .select({
+            id: taxReturns.id,
+            status: taxReturns.status,
+            files: taxReturns.files,
+            metadata: taxReturns.metadata,
+          })
+          .from(taxReturns)
+          .where(eq(taxReturns.id, task.taxReturnId))
+          .for("update");
+        if (!taxReturn) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Return not found." });
+        }
+        const [activeJob] = await tx
+          .select({ id: jobs.id })
+          .from(jobs)
+          .innerJoin(tasks, eq(jobs.taskId, tasks.id))
+          .where(
+            and(
+              eq(tasks.taxReturnId, taxReturn.id),
+              inArray(jobs.status, [...ACTIVE_JOB_STATUSES]),
+            ),
+          )
+          .limit(1);
+
+        const plan = planSubmitNotFiledConfirmation({
+          job: jobRow,
+          taxReturn,
+          hasActiveJob: !!activeJob,
+          browserSessionStatus,
+          checkedAfterBrowserStoppedAt: input.checkedAfterBrowserStoppedAt,
+          actor: { id: staff.id, name: staff.fullName },
+          note: input.note,
+          now: Date.now(),
+        });
+        if (!plan.ok) {
+          throw new TRPCError({ code: plan.code, message: plan.message });
+        }
+
+        const updated = await tx
+          .update(jobs)
+          .set({
+            resultData: mergeResultDataPatchSql({
+              [SUBMIT_NOT_FILED_CONFIRMATION_KEY]: plan.confirmation,
+            }),
+          })
+          .where(and(eq(jobs.id, jobRow.id), eq(jobs.status, jobRow.status)))
+          .returning({ id: jobs.id });
+        if (updated.length === 0) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "The run changed while saving. Reload and try again.",
+          });
+        }
+
+        // Durable audit trail on the return as well, kept even if the job's
+        // copy is later dropped (which brings the lock back).
+        const metadata = getResultDataRecord(taxReturn.metadata) ?? {};
+        const history = Array.isArray(metadata.submitNotFiledConfirmations)
+          ? metadata.submitNotFiledConfirmations
+          : [];
+        await tx
+          .update(taxReturns)
+          .set({
+            metadata: {
+              ...metadata,
+              submitNotFiledConfirmations: [
+                ...history,
+                { jobId: jobRow.id, ...plan.confirmation },
+              ],
+            },
+            updatedAt: new Date(),
+          })
+          .where(eq(taxReturns.id, taxReturn.id));
+
+        console.info("Submit prepared return run confirmed not filed by staff", {
+          jobId: jobRow.id,
+          taxReturnId: taxReturn.id,
+          accountId: staff.id,
+          confirmedAt: plan.confirmation.confirmedNotFiledAt,
+        });
+
+        return { jobId: jobRow.id, confirmation: plan.confirmation };
       });
     }),
 

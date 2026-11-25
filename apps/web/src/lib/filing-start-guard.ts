@@ -1,4 +1,7 @@
-import { getGuernseyScopedRequirementBlocker } from "@repo/database/guernsey-filing";
+import {
+  getGuernseyNoticeOfAssessmentBlocker,
+  getGuernseyScopedRequirementBlocker,
+} from "@repo/database/guernsey-filing";
 import {
   getPendingGbpConversionMessage,
   hasManagerSignoff,
@@ -18,6 +21,7 @@ type FilingStartTaxReturn = {
     certificateType?: string | null;
     relevantActivity?: string | null;
     adequacyExpenditureDetails?: string | null;
+    noticeOfAssessment?: string | null;
   } | null;
 };
 
@@ -60,8 +64,9 @@ export function getPossibleFilingEvidence(taxReturn: {
  *
  * Preparing a draft (prepare_only) stops before the final submit and is
  * reviewed by LTS, so it is allowed before any approval. Submitting to the
- * Guernsey Tax Portal requires the manager's signoff on the form, the client's
- * signoff on the current data, and GBP financial figures.
+ * Guernsey Tax Portal (a full submit or Submit prepared return) requires the
+ * reviewer's notice-of-assessment answer, the manager's signoff on the form,
+ * the client's signoff on the current data, and GBP financial figures.
  */
 export function getFilingStartBlocker(input: {
   taxReturn: FilingStartTaxReturn;
@@ -91,6 +96,13 @@ export function getFilingStartBlocker(input: {
     taxReturn.substanceForm,
   );
   if (scopedRequirementBlocker) return scopedRequirementBlocker;
+
+  // The portal's declaration page asks it on every submission. A person
+  // decides it per return; the filing agent is never left to pick it.
+  const noticeOfAssessmentBlocker = getGuernseyNoticeOfAssessmentBlocker(
+    taxReturn.substanceForm,
+  );
+  if (noticeOfAssessmentBlocker) return noticeOfAssessmentBlocker;
 
   if (!hasManagerSignoff(taxReturn.substanceForm)) {
     return "The manager has not signed off this return. Record the manager's name and sign-off date under Finalising the Return, then have an authorised signatory mark it ready for submission in the client portal.";

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { parsePreparedDraftOutput } from "@repo/database/prepared-draft";
 import {
+  ENTITY_ACCOUNTS_INCOMPLETE_RULE,
+  PROFIT_ALLOCATION_COLUMNS,
+  buildNoticeOfAssessmentContinuationRule,
   buildResumePrompt,
   buildSubmitPreparedReturnPrompt,
   buildSubstanceFormPrompt,
@@ -316,6 +319,114 @@ describe("prepared draft identity", () => {
   });
 });
 
+describe("profit allocation columns", () => {
+  const contact = { contactName: "NSM Filings Team", contactEmail: "filings@nsm.example" };
+  const build = (
+    form: Record<string, unknown>,
+    submissionMode: "prepare_only" | "submit_and_capture_pdf" = "prepare_only",
+  ) =>
+    buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: {
+        certificateType: "Certificate 3",
+        relevantActivity: "Banking",
+        noticeOfAssessment: "Yes",
+        ...form,
+      } as any,
+      portalUrl: "https://my.gov.gg",
+      submissionMode,
+      ...contact,
+    });
+  const lines = (prompt: string) =>
+    prompt.split("\n").filter((line) => /^- (Total Profit|Profit before tax \([^)]*\)): ["[]/.test(line));
+
+  it("enters 0 in the Business column when all profit is Investment (Notclif)", () => {
+    const prompt = build({ totalProfit: "86895", profitAllocation: "Investment" });
+    expect(lines(prompt)).toEqual([
+      '- Total Profit: "86895"',
+      '- Profit before tax (Investment): "86895"',
+      '- Profit before tax (Business): "0"',
+    ]);
+    expect(prompt).toContain("enter **0** in **Profit before tax (Business)**");
+    expect(prompt).toContain("Never leave a profit column blank");
+  });
+
+  it("enters 0 in the Investment column when all profit is Business", () => {
+    const prompt = build({ totalProfit: "120000", profitAllocation: "Business" });
+    expect(lines(prompt)).toEqual([
+      '- Total Profit: "120000"',
+      '- Profit before tax (Investment): "0"',
+      '- Profit before tax (Business): "120000"',
+    ]);
+    expect(prompt).toContain("enter **0** in **Profit before tax (Investment)**");
+  });
+
+  it("carries a loss into the allocated column and still zeroes the other", () => {
+    const prompt = build({ totalProfit: "-45000", profitAllocation: "Investment" });
+    expect(lines(prompt)).toEqual([
+      '- Total Profit: "-45000"',
+      '- Profit before tax (Investment): "-45000"',
+      '- Profit before tax (Business): "0"',
+    ]);
+    expect(prompt).toContain("Do NOT replace Total Profit with 0.");
+  });
+
+  it("explains the 0 is derived, not guessed, and keeps the never-guess rule", () => {
+    const prompt = build({ totalProfit: "86895", profitAllocation: "Investment" });
+    expect(prompt).toContain(
+      "These figures are derived from the saved Total Profit and allocation, not guessed",
+    );
+    expect(prompt).toContain("Do not enter 0 in any other field because of this rule.");
+    expect(prompt).toContain("Never guess a value that could change the filing");
+  });
+
+  it("does not derive the allocated column when Total Profit is missing", () => {
+    const prompt = build({ profitAllocation: "Investment" });
+    expect(lines(prompt)).toEqual([
+      "- Total Profit: [MISSING - STOP if required]",
+      "- Profit before tax (Investment): [MISSING - STOP if required]",
+      '- Profit before tax (Business): "0"',
+    ]);
+  });
+
+  it.each([undefined, null, "", "Mixed", "Trading"])(
+    "derives no split and stops when the allocation is not a saved category (%j)",
+    (profitAllocation) => {
+      const prompt = build({ totalProfit: "86895", profitAllocation });
+      expect(lines(prompt)).toEqual([
+        '- Total Profit: "86895"',
+        "- Profit before tax (Investment): [MISSING - STOP if required]",
+        "- Profit before tax (Business): [MISSING - STOP if required]",
+      ]);
+      expect(prompt).toContain("Do NOT work out a split yourself and do NOT enter 0");
+      expect(prompt).toContain("STOP and report **REQUIRES_ATTENTION** naming Profit Before Tax Allocation");
+      expect(prompt).not.toContain('- Profit before tax (Business): "0"');
+    },
+  );
+
+  it.each(["prepare_only", "submit_and_capture_pdf"] as const)(
+    "checks every profit column before pausing on Entity Accounts INCOMPLETE (%s)",
+    (submissionMode) => {
+      const prompt = build({ totalProfit: "86895", profitAllocation: "Investment" }, submissionMode);
+      expect(prompt).toContain("**ENTITY ACCOUNTS INCOMPLETE:**");
+      expect(prompt).toContain("open Entity Accounts before you pause or report anything");
+      expect(prompt).toContain("**0** in every unallocated column");
+      expect(prompt).toContain("Never fill a column that SECTION 4 marks [MISSING]");
+      expect(prompt).toContain("Re-saving the same values does not clear it.");
+      // Restated in COMPLETION, where the agent decides to pause.
+      expect(prompt.lastIndexOf(ENTITY_ACCOUNTS_INCOMPLETE_RULE)).toBeGreaterThan(
+        prompt.indexOf("## COMPLETION"),
+      );
+    },
+  );
+
+  it("adds no profit column rules to a Certificate 2 return", () => {
+    const prompt = build({ certificateType: "Certificate 2", totalProfit: "0" });
+    expect(prompt).not.toContain("Profit before tax (");
+    expect(prompt).not.toContain("ENTITY ACCOUNTS INCOMPLETE");
+  });
+});
+
 describe("buildSubmitPreparedReturnPrompt", () => {
   const base = {
     taxReturn: { entityName: "Example Limited", taxYear: 2025 } as any,
@@ -330,7 +441,14 @@ describe("buildSubmitPreparedReturnPrompt", () => {
     portalReference: "ESR-42",
     contactName: "NSM Filings Team",
     contactEmail: "filings@nsm.example",
+    noticeOfAssessment: "No" as const,
   };
+
+  it("never tells a submit prepared run to fill a blank profit column", () => {
+    const prompt = buildSubmitPreparedReturnPrompt(base);
+    expect(prompt).not.toContain("ENTITY ACCOUNTS INCOMPLETE");
+    expect(prompt).not.toContain("Profit before tax (");
+  });
 
   it("opens the exact prepared draft and verifies identity and review state before submitting", () => {
     const prompt = buildSubmitPreparedReturnPrompt(base);
@@ -390,12 +508,123 @@ describe("buildSubmitPreparedReturnPrompt", () => {
   it("is much shorter than the filling prompt", () => {
     const fill = buildSubstanceFormPrompt({
       taxReturn: baseTaxReturn,
-      substanceForm: { certificateType: "Certificate 3", relevantActivity: "Banking" } as any,
+      substanceForm: {
+        certificateType: "Certificate 3",
+        relevantActivity: "Banking",
+        noticeOfAssessment: "Yes",
+      } as any,
       portalUrl: "https://my.gov.gg",
       submissionMode: "submit_and_capture_pdf",
       contactName: "NSM Filings Team",
       contactEmail: "filings@nsm.example",
     });
     expect(buildSubmitPreparedReturnPrompt(base).length).toBeLessThan(fill.length / 2);
+  });
+
+  it("answers the notice of assessment with the reviewer's choice and allows no other change", () => {
+    const prompt = buildSubmitPreparedReturnPrompt(base);
+    expect(prompt).toContain(
+      'asks "Please indicate if you wish to receive a notice of assessment". The reviewer chose **No** for this return.',
+    );
+    expect(prompt).toContain("select **No** for the notice of assessment question");
+    expect(prompt).toContain("never select a different answer");
+    expect(prompt).toContain(
+      "**The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **No**, chosen by the reviewer) and the portal's declaration tick-box or confirmation. Change nothing else there.",
+    );
+    expect(prompt).toContain("Change no other field or control");
+    // Answering happens before the single Submit click.
+    expect(prompt.indexOf("select **No** for the notice")).toBeLessThan(
+      prompt.indexOf("Click the final **Submit** action once"),
+    );
+    expect(buildSubmitPreparedReturnPrompt({ ...base, noticeOfAssessment: "Yes" })).toContain(
+      "select **Yes** for the notice of assessment question",
+    );
+  });
+
+  it("refuses to build without the reviewer's notice of assessment answer", () => {
+    for (const noticeOfAssessment of [null, undefined, "yes" as any]) {
+      expect(() => buildSubmitPreparedReturnPrompt({ ...base, noticeOfAssessment })).toThrow(
+        "notice of assessment",
+      );
+    }
+  });
+});
+
+describe("notice of assessment in the filling prompt", () => {
+  const form = (noticeOfAssessment?: string | null) =>
+    ({
+      certificateType: "Certificate 3",
+      relevantActivity: "Banking",
+      noticeOfAssessment,
+    }) as any;
+  const contact = { contactName: "NSM Filings Team", contactEmail: "filings@nsm.example" };
+
+  it.each(["Yes", "No"])("tells a full submit to select the reviewer's %s on the declaration step", (answer) => {
+    const prompt = buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: form(answer),
+      portalUrl: "https://my.gov.gg",
+      submissionMode: "submit_and_capture_pdf",
+      ...contact,
+    });
+    expect(prompt).toContain("DECLARATION STEP — NOTICE OF ASSESSMENT (SET BY THE REVIEWER)");
+    expect(prompt).toContain(`The reviewer chose **${answer}** for this return. Select **${answer}**.`);
+    expect(prompt).toContain("never select a different answer");
+    expect(prompt).toContain(
+      `answer the notice of assessment question with **${answer}** (the reviewer's answer`,
+    );
+    expect(prompt.indexOf("answer the notice of assessment question")).toBeLessThan(
+      prompt.indexOf("Click the final submit/confirm action"),
+    );
+  });
+
+  it.each([null, undefined, "", "maybe"])(
+    "never builds a filing prompt without the reviewer's answer (%j)",
+    (answer) => {
+      expect(() =>
+        buildSubstanceFormPrompt({
+          taxReturn: baseTaxReturn,
+          substanceForm: form(answer),
+          portalUrl: "https://my.gov.gg",
+          submissionMode: "submit_and_capture_pdf",
+          ...contact,
+        }),
+      ).toThrow("notice of assessment");
+    },
+  );
+
+  it("does not need or use it to prepare, and leaves the question alone", () => {
+    for (const answer of [null, "Yes"]) {
+      const prompt = buildSubstanceFormPrompt({
+        taxReturn: baseTaxReturn,
+        substanceForm: form(answer),
+        portalUrl: "https://my.gov.gg",
+        submissionMode: "prepare_only",
+        ...contact,
+      });
+      expect(prompt).toContain("This run does not answer it: if you see it, leave it exactly as the portal shows it.");
+      expect(prompt).not.toContain("SET BY THE REVIEWER");
+      expect(prompt).not.toContain("The reviewer chose");
+    }
+  });
+});
+
+describe("buildNoticeOfAssessmentContinuationRule", () => {
+  it("restates the reviewer's answer for a recovered or resumed full submit", () => {
+    const rule = buildNoticeOfAssessmentContinuationRule({ answer: "Yes", submitPrepared: false });
+    expect(rule).toContain(
+      'answer "Please indicate if you wish to receive a notice of assessment" with **Yes**',
+    );
+    expect(rule).toContain("Never select a different answer");
+    expect(rule).not.toContain("only things you may set");
+  });
+
+  it("keeps a submit prepared continuation to that answer and the declaration tick", () => {
+    const rule = buildNoticeOfAssessmentContinuationRule({ answer: "No", submitPrepared: true });
+    expect(rule).toContain("with **No**");
+    expect(rule).toContain(
+      "This answer and the portal's declaration tick-box are the only things you may set. Change no other field.",
+    );
+    expect(rule).toContain("REQUIRES_ATTENTION**: PREPARED_DRAFT_NOT_VERIFIED:");
   });
 });

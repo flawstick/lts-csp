@@ -256,8 +256,15 @@ export default function ReturnDetailPage() {
   });
 
   const updateFormMutation = api.substanceForm.update.useMutation({
-    onSuccess: () => {
+    onSuccess: (result) => {
       utils.substanceForm.getByTaxReturnId.invalidate({ taxReturnId: id });
+      // A change can revoke the client's signoff: refresh the status banner.
+      utils.taxReturn.getById.invalidate({ id });
+      if (result?.signoffRevoked) {
+        toast.warning(
+          "Saved. The client's sign-off was cleared because the form changed. An authorised signatory must mark the return ready for submission again in the client portal.",
+        );
+      }
     },
   });
 
@@ -1480,6 +1487,9 @@ export default function ReturnDetailPage() {
           onOpenChange={(open) => !open && setEditingSection(null)}
           onSave={handleSaveSection}
           isSaving={updateFormMutation.isPending}
+          isClientSignedOff={
+            !!taxReturn?.readyForSubmissionAt && taxReturn.status !== "completed"
+          }
         />
       )}
     </DirectionalTransition>

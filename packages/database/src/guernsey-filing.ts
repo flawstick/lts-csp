@@ -592,3 +592,63 @@ export function hasMeaningfulGuernseyFormData(value: unknown) {
     return true;
   });
 }
+
+// ============================================================================
+// Notice of assessment (declaration page answer)
+// ============================================================================
+
+/**
+ * The Guernsey Tax Portal's declaration page (reviewAndSubmit/declaration)
+ * asks "Please indicate if you wish to receive a notice of assessment"
+ * (Yes/No) before the final Submit. It is a per-return choice a reviewer
+ * records on the form: there is no default, and a filing agent must never
+ * pick it. It is only answered when submitting, never while preparing.
+ */
+export const GUERNSEY_NOTICE_OF_ASSESSMENT_FIELD = "noticeOfAssessment" as const;
+
+export const GUERNSEY_NOTICE_OF_ASSESSMENT_LABEL =
+  "Receive a notice of assessment?";
+
+/** The portal's own wording of the declaration-page question. */
+export const GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION =
+  "Please indicate if you wish to receive a notice of assessment";
+
+export type GuernseyNoticeOfAssessment = "Yes" | "No";
+
+export const GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE =
+  'The notice of assessment answer is not set for this return. A reviewer must choose Yes or No for "Receive a notice of assessment?" on the return form (with the manager sign-off) before it can be submitted. Prepare only does not need it. Setting it changes the form, so if the client has already signed off, an authorised signatory must mark the return ready for submission again.';
+
+/** Why a client signatory cannot sign off a Guernsey ESR return yet. */
+export const GUERNSEY_NOTICE_OF_ASSESSMENT_SIGNOFF_MESSAGE =
+  'Choose Yes or No for "Receive a notice of assessment?" under Finalising the Return before marking this return ready for submission. The Guernsey Tax Portal asks it when the return is submitted.';
+
+/**
+ * Shown where staff set the answer on a return the client has already signed
+ * off: saving any form change, this one included, clears that sign-off.
+ */
+export const GUERNSEY_NOTICE_OF_ASSESSMENT_RESIGNOFF_WARNING =
+  "The client has already signed off this return. Saving a change here clears that sign-off, and an authorised signatory must mark the return ready for submission again in the client portal before it can be submitted.";
+
+/**
+ * The reviewer's notice-of-assessment answer, or null when it is not set.
+ * Only an exact "Yes" or "No" counts: anything else is treated as unset so a
+ * submission never proceeds on an ambiguous value.
+ */
+export function getGuernseyNoticeOfAssessment(
+  form: { noticeOfAssessment?: string | null } | null | undefined,
+): GuernseyNoticeOfAssessment | null {
+  const value = form?.noticeOfAssessment;
+  return value === "Yes" || value === "No" ? value : null;
+}
+
+/**
+ * Reason a Guernsey ESR submission must not start because the
+ * notice-of-assessment answer is missing, or null when it is set.
+ */
+export function getGuernseyNoticeOfAssessmentBlocker(
+  form: { noticeOfAssessment?: string | null } | null | undefined,
+): string | null {
+  return getGuernseyNoticeOfAssessment(form)
+    ? null
+    : GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE;
+}

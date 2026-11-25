@@ -1,0 +1,1 @@
+ALTER TABLE "lts_substance_form" ADD COLUMN "notice_of_assessment" varchar(8);

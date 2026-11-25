@@ -12,6 +12,8 @@ import {
   eq,
   sql,
   orgSettings,
+  getGuernseyNoticeOfAssessment,
+  GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
   parseFinancialFiguresMetadata,
   type TaxReturnFileCategory,
   type TaxReturnFileRole,
@@ -86,6 +88,7 @@ import {
   type ReviewerNetBookValue,
 } from "./portal-net-book-value";
 import {
+  buildNoticeOfAssessmentContinuationRule,
   buildResumePrompt,
   buildSubmitPreparedReturnPrompt,
   buildSubstanceFormPrompt,
@@ -1492,6 +1495,24 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
         "Submission refused: the Net Book Value has not been confirmed as a non-negative tangible-asset figure. Enter it on the form, or prepare the return first so a reviewer can confirm it.",
       );
     }
+    // The declaration step's notice-of-assessment answer is the reviewer's,
+    // per return. A submit run never starts without it (the web API refuses
+    // first; this re-checks the current form) and never lets the agent pick.
+    const noticeOfAssessment =
+      submissionMode === "submit_and_capture_pdf"
+        ? getGuernseyNoticeOfAssessment(taxReturn.substanceForm)
+        : null;
+    if (submissionMode === "submit_and_capture_pdf") {
+      if (!noticeOfAssessment) {
+        throw new Error(
+          `Submission refused: ${GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE}`,
+        );
+      }
+      // Audit: the answer this run was instructed to select.
+      await updateActiveJobRecord({
+        resultDataPatch: { noticeOfAssessment },
+      });
+    }
     await refuseAfterUnconfirmedSubmit(runtime);
     const preparedDraft = isSubmitPrepared
       ? await verifyPreparedDraftForSubmission({
@@ -1649,8 +1670,16 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
           // Submit mode only starts with a configured contact (refused above).
           contactName: filingContactInfo?.name ?? "",
           contactEmail: filingContactInfo?.email ?? "",
+          noticeOfAssessment,
         })
       : buildFillPrompt();
+    // Restated in every recovery/resume continuation of a submit run.
+    const noticeOfAssessmentRule = noticeOfAssessment
+      ? buildNoticeOfAssessmentContinuationRule({
+          answer: noticeOfAssessment,
+          submitPrepared: isSubmitPrepared,
+        })
+      : "";
     const recoveryReturnUrl =
       taxReturn.link ||
       taxReturn.jurisdiction?.portalUrl ||
@@ -1984,7 +2013,7 @@ LTS read the reviewer's reply as the tangible-asset Net Book Value${resolved.neg
       );
       const resumed = await dispatchBrowserTask(
         withOperatorMessages(
-          `${netBookValueRules}${buildContinuation(prompt)}`,
+          `${netBookValueRules}${noticeOfAssessmentRule}${buildContinuation(prompt)}`,
           {
             messages: pending,
             question,
@@ -2522,7 +2551,7 @@ RECOVERY RULES:
 - Switch back to the main Guernsey portal tab or close the stray tab. If you cannot recover it quickly, follow step 1 of the task below to reopen the prepared draft.
 - First check whether the return was already submitted (a confirmation page, or the case/return shown as submitted). If it was, do NOT submit again: download the completion PDF if offered and report the submission.
 - Otherwise follow the task below from step 1. Do not edit any section.
-
+${noticeOfAssessmentRule}
 Continue the original task now:
 
 ${prompt}
@@ -2542,7 +2571,7 @@ RECOVERY RULES:
           }
 - From the summary page, use a Change or Edit link to reopen the filing sections and continue the return.
 - Verify the Financial Statements / Accounts upload before leaving that section, and do not continue while the control still says "No file chosen".
-
+${noticeOfAssessmentRule}
 Continue the original task now:
 
 ${prompt}

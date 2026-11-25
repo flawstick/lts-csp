@@ -117,6 +117,8 @@ const YES_NO_FIELDS = new Set([
   "hasFailedEconomicSubstance",
   "isPillar2InScope",
   "expectConstituentEntityNextPeriod",
+  // Declaration-page answer for the submit; set per return by a reviewer.
+  "noticeOfAssessment",
 ]);
 
 const YES_NO_NA_FIELDS = new Set([

@@ -1238,7 +1238,7 @@ export const substanceFormRouter = createTRPCRouter({
 
       // LTS can always correct filing data, but a change to a signed-off return
       // revokes the signoff so the client signatory re-approves before filing.
-      await syncTaxReturnAfterFormChange({
+      const { signoffRevoked } = await syncTaxReturnAfterFormChange({
         db: ctx.db,
         taxReturnId: input.taxReturnId,
         changedFields,
@@ -1246,7 +1246,7 @@ export const substanceFormRouter = createTRPCRouter({
         confirmFinancialFigures: true,
       });
 
-      return updated;
+      return { ...updated, signoffRevoked };
     }),
 
   // Extract data from uploaded files using AI

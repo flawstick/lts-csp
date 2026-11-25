@@ -108,6 +108,7 @@ describe("submission signoff", () => {
         entityName: "B Settlement Ltd",
         managerSignOff: "Extracted Name",
         managerSignOffDate: "2025-01-01",
+        noticeOfAssessment: "Yes",
       }),
     ).toEqual({ entityName: "B Settlement Ltd" });
   });

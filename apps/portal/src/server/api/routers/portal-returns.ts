@@ -57,7 +57,9 @@ import {
 import {
   buildGuernseyCertificateTwoDefaults,
   detectGuernseyCertificateTypeFromDocuments,
+  getGuernseyNoticeOfAssessment,
   getGuernseyScopedRequirementBlocker,
+  GUERNSEY_NOTICE_OF_ASSESSMENT_SIGNOFF_MESSAGE,
   hasMeaningfulGuernseyFormData,
   reconcileGuernseyFormCompletion,
   withGuernseyScopedCompletion,
@@ -1332,6 +1334,19 @@ async function validateReturnReadyForSubmission(ctx: {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: scopedRequirementBlocker,
+      });
+    }
+
+    // The Guernsey portal asks it on its declaration page at submission, and
+    // setting it later would revoke this signoff, so the signatory approves a
+    // form that already carries the answer.
+    if (
+      ctx.returnRecord.jurisdiction?.code === "GG" &&
+      !getGuernseyNoticeOfAssessment(substanceForm)
+    ) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: GUERNSEY_NOTICE_OF_ASSESSMENT_SIGNOFF_MESSAGE,
       });
     }
 
