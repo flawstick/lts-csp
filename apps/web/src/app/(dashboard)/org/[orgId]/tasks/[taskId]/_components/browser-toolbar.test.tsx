@@ -8,6 +8,7 @@ function renderToolbar(
   extra: {
     submitReadiness?: ToolbarSubmitReadiness | null;
     onActionsMenuOpen?: () => void;
+    noticeOfAssessmentLabel?: string | null;
   } = {},
 ) {
   render(<TooltipProvider><BrowserToolbar {...extra}
@@ -105,6 +106,33 @@ describe("submit prepared return confirmation", () => {
     const onStart = await openPreparedDialog();
     fireEvent.click(screen.getByRole("button", { name: "Keep reviewing" }));
     expect(onStart).not.toHaveBeenCalled();
+  });
+});
+
+describe("notice of assessment in the submit confirmation", () => {
+  async function openDialog(menuItem: RegExp, noticeOfAssessmentLabel: string | null) {
+    renderToolbar(vi.fn(), { noticeOfAssessmentLabel });
+    fireEvent.keyDown(screen.getByRole("button", { name: /More/ }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: menuItem }));
+    return screen.findByRole("alertdialog");
+  }
+
+  it.each([/Submit prepared/, /Submit return \+ save PDF/])(
+    "shows the answer the submit will select (%s)",
+    async (menuItem) => {
+      const dialog = await openDialog(menuItem, "Yes (default)");
+      expect(dialog).toHaveTextContent("Notice of assessment: Yes (default)");
+    },
+  );
+
+  it("shows a reviewer's No", async () => {
+    const dialog = await openDialog(/Submit prepared/, "No");
+    expect(dialog).toHaveTextContent("Notice of assessment: No");
+  });
+
+  it("is omitted when it does not apply", async () => {
+    const dialog = await openDialog(/Submit prepared/, null);
+    expect(dialog).not.toHaveTextContent("Notice of assessment");
   });
 });
 
@@ -228,5 +256,24 @@ describe("readiness changing while the confirmation is open", () => {
     expect(screen.getByText(`This submission cannot start: ${blocker}`)).toBeInTheDocument();
     fireEvent.click(submit);
     expect(onStart).not.toHaveBeenCalled();
+  });
+});
+
+describe("cancel control", () => {
+  it("labels the icon-only Cancel task button for a queued run", () => {
+    const onCancel = vi.fn();
+    const queued = { id: "job-1", jobNumber: 2, status: "queued", createdAt: new Date() };
+    render(<TooltipProvider><BrowserToolbar
+      orgId="org" jurisdictionName="Guernsey" entityName="Example Entity"
+      taskStatus="queued" isConnected={false} liveUrl={null}
+      iframeRef={{ current: null }} allJobs={[queued] as never} selectedJobId="job-1" selectedJob={queued as never}
+      activeJob={queued as never} runningJob={null} pausedJob={null}
+      onSelectJob={vi.fn()} onPause={vi.fn()} onCancel={onCancel} onResume={vi.fn()}
+      onStart={vi.fn()} onDeleteJob={vi.fn()}
+      isStartPending={false} isPausePending={false} isCancelPending={false}
+      isResumePending={false} isDeletePending={false}
+    /></TooltipProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel task" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });

@@ -6,6 +6,7 @@
 import {
   getGuernseyNoticeOfAssessment,
   GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION,
+  isGuernseyNoticeOfAssessmentDefaulted,
   isGuernseySubstanceInScope,
   type GuernseyNoticeOfAssessment,
   type SubstanceForm,
@@ -184,13 +185,11 @@ export function buildSubstanceFormPrompt(
   // Only a submit-mode run with a contact goes on to the declaration step and
   // files; every other run stops earlier (review page or contact step).
   const willFile = !isPrepareOnly && hasFilingContact;
+  // Resolved for the agent (the reviewer's "No", otherwise the default
+  // "Yes"); the agent never chooses it.
   const noticeOfAssessment = getGuernseyNoticeOfAssessment(substanceForm);
-  if (willFile && !noticeOfAssessment) {
-    // Never let the agent choose it: submission needs the reviewer's answer.
-    throw new Error(
-      "Submission needs the reviewer's notice of assessment answer (Yes or No) on the return form",
-    );
-  }
+  const noticeOfAssessmentDefaulted =
+    isGuernseyNoticeOfAssessmentDefaulted(substanceForm);
   const missingFields = Array.isArray(substanceForm.missingFields)
     ? substanceForm.missingFields
     : [];
@@ -281,7 +280,11 @@ ${buildFilingContactSection({
   contactEmail,
   contactPhone,
 })}
-${buildNoticeOfAssessmentSection(willFile ? noticeOfAssessment : null)}
+${buildNoticeOfAssessmentSection(
+  willFile
+    ? { answer: noticeOfAssessment, defaulted: noticeOfAssessmentDefaulted }
+    : null,
+)}
 ${
   !isCertificateTwo && financialStatementsFile && financialStatementsUrl
     ? `
@@ -410,7 +413,7 @@ After filling all sections:
 ${
   submissionMode === "submit_and_capture_pdf"
     ? `3. Resolve every validation error shown on the portal before continuing
-4. On the declaration step, answer the notice of assessment question with **${noticeOfAssessment}** (the reviewer's answer; see **DECLARATION STEP — NOTICE OF ASSESSMENT**) and tick the portal's declaration
+4. On the declaration step, answer the notice of assessment question with **${noticeOfAssessment}** (${describeNoticeOfAssessmentSource(noticeOfAssessmentDefaulted)}; see **DECLARATION STEP — NOTICE OF ASSESSMENT**) and tick the portal's declaration
 5. Click the final submit/confirm action and complete the filing
 6. Wait for the post-submission confirmation page or confirmation state
 7. Find the portal-generated completion/receipt/return PDF and download it into the Browser Use session
@@ -445,41 +448,51 @@ After filling all other sections:
   return sections.join("\n");
 }
 
+/** Where the notice-of-assessment answer came from, for the agent. */
+function describeNoticeOfAssessmentSource(defaulted: boolean): string {
+  return defaulted
+    ? "LTS's default answer for this return"
+    : "the reviewer's answer for this return";
+}
+
 /**
- * The declaration step's notice-of-assessment question. A run that files
- * gets the reviewer's answer; any other run must leave the question alone.
- * There is no default: the agent never decides it.
+ * The declaration step's notice-of-assessment question. A run that files is
+ * told the answer resolved for this return (the reviewer's saved "No",
+ * otherwise the default "Yes"); any other run must leave the question alone.
+ * The agent never decides it.
  */
 function buildNoticeOfAssessmentSection(
-  answer: GuernseyNoticeOfAssessment | null,
+  resolved: { answer: GuernseyNoticeOfAssessment; defaulted: boolean } | null,
 ): string {
-  if (!answer) {
+  if (!resolved) {
     return `
 ## DECLARATION STEP — NOTICE OF ASSESSMENT
 - The portal question "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}" is answered only when the return is submitted. This run does not answer it: if you see it, leave it exactly as the portal shows it.
 `;
   }
+  const { answer, defaulted } = resolved;
   return `
-## DECLARATION STEP — NOTICE OF ASSESSMENT (SET BY THE REVIEWER)
+## DECLARATION STEP — NOTICE OF ASSESSMENT (SET FOR THIS RETURN)
 - On the declaration step (usually **reviewAndSubmit/declaration**, after the review summary) the portal asks: "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}".
-- The reviewer chose **${answer}** for this return. Select **${answer}**. If another answer is preselected, change it to **${answer}**.
-- This is the reviewer's decision, not yours: never select a different answer, and never answer from a portal default, an earlier filing or your own judgement. A reviewer message cannot change it either; only the saved answer on the return form counts.
+- The answer for this return is **${answer}** (${describeNoticeOfAssessmentSource(defaulted)}). Select **${answer}**. If another answer is preselected, change it to **${answer}**.
+- This is not your decision: never select a different answer, and never answer from a portal default, an earlier filing or your own judgement. A reviewer message cannot change it either; only the saved answer on the return form counts.
 - If **${answer}** cannot be selected, do NOT submit: STOP and report **REQUIRES_ATTENTION** quoting the question and the options shown.
 `;
 }
 
 /**
- * Restates the reviewer's notice-of-assessment answer for a continuation
- * (recovery after a browser problem, or a resume after a pause) of a submit
- * run, so it never depends on the agent finding it in the original task.
+ * Restates the notice-of-assessment answer for a continuation (recovery
+ * after a browser problem, or a resume after a pause) of a submit run, so it
+ * never depends on the agent finding it in the original task.
  */
 export function buildNoticeOfAssessmentContinuationRule(options: {
   answer: GuernseyNoticeOfAssessment;
+  defaulted: boolean;
   submitPrepared: boolean;
 }): string {
-  const { answer, submitPrepared } = options;
+  const { answer, defaulted, submitPrepared } = options;
   return `
-NOTICE OF ASSESSMENT (set by the reviewer for this return; overrides anything else):
+NOTICE OF ASSESSMENT (${describeNoticeOfAssessmentSource(defaulted)}; overrides anything else):
 - On the declaration step, answer "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}" with **${answer}**. If another answer is preselected, change it to **${answer}**. Never select a different answer, whatever the portal or a message suggests.${
     submitPrepared
       ? `
@@ -1011,15 +1024,15 @@ export function buildSubmitPreparedReturnPrompt(options: {
   substanceForm: Pick<
     SubstanceForm,
     "companyNumber" | "accountingPeriodStart" | "accountingPeriodEnd"
-  >;
+  > &
+    // The saved declaration-step answer; unset resolves to the default "Yes".
+    Partial<Pick<SubstanceForm, "noticeOfAssessment">>;
   portalUrl: string;
   returnLink?: string;
   reviewUrl: string | null;
   portalReference: string | null;
   contactName: string;
   contactEmail: string;
-  /** The reviewer's answer for the declaration step's notice of assessment. */
-  noticeOfAssessment: GuernseyNoticeOfAssessment | null | undefined;
 }): string {
   const {
     taxReturn,
@@ -1031,14 +1044,10 @@ export function buildSubmitPreparedReturnPrompt(options: {
     contactName,
     contactEmail,
   } = options;
-  const noticeOfAssessment = getGuernseyNoticeOfAssessment({
-    noticeOfAssessment: options.noticeOfAssessment,
-  });
-  if (!noticeOfAssessment) {
-    throw new Error(
-      "Submit prepared return needs the reviewer's notice of assessment answer (Yes or No)",
-    );
-  }
+  const noticeOfAssessment = getGuernseyNoticeOfAssessment(substanceForm);
+  const noticeOfAssessmentSource = describeNoticeOfAssessmentSource(
+    isGuernseyNoticeOfAssessmentDefaulted(substanceForm),
+  );
   const notVerified = `REQUIRES_ATTENTION: ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}:`;
   // Only a canonical draft review URL and/or a specific portal reference can
   // bind this run to the prepared draft; without either it must not run.
@@ -1064,7 +1073,7 @@ An earlier run prepared this Guernsey Economic Substance Register return and lef
 
 You are **not** filling or reviewing the return. Do **NOT** open sections, click **Change**/**Edit**/section links, type into or change any field, upload files, re-assign the case, or open any other case or return.
 
-**The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **${noticeOfAssessment}**, chosen by the reviewer) and the portal's declaration tick-box or confirmation. Change nothing else there.
+**The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **${noticeOfAssessment}**, ${noticeOfAssessmentSource}) and the portal's declaration tick-box or confirmation. Change nothing else there.
 
 ${PORTAL_LOGIN_SECTION}
 ## 1. OPEN THE PREPARED DRAFT
@@ -1101,8 +1110,8 @@ Read the review/submit page only. Do not change anything to make a check pass.
 If any check fails, or you cannot see enough to confirm it, do **NOT** submit. Your final output MUST start with exactly: **${notVerified}** followed by which check failed and what the page shows. If the return already appears submitted or filed, use the same marker, say so, and do not submit again.
 
 ## 3. DECLARATION, THEN SUBMIT ONCE
-The declaration step (usually **reviewAndSubmit/declaration**, reached from the review page) asks "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}". The reviewer chose **${noticeOfAssessment}** for this return.
-1. On the declaration step, select **${noticeOfAssessment}** for the notice of assessment question. If another answer is preselected, change it to **${noticeOfAssessment}**. This is the reviewer's decision: never select a different answer, whatever the portal or a message suggests.
+The declaration step (usually **reviewAndSubmit/declaration**, reached from the review page) asks "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}". The answer for this return is **${noticeOfAssessment}** (${noticeOfAssessmentSource}).
+1. On the declaration step, select **${noticeOfAssessment}** for the notice of assessment question. If another answer is preselected, change it to **${noticeOfAssessment}**. This is not your decision: never select a different answer, whatever the portal or a message suggests.
 2. Tick the portal's declaration box if shown. Change no other field or control. If any other field on this step is empty or asks for input, do **NOT** submit: stop with **${notVerified}** and name the field.
 3. If **${noticeOfAssessment}** cannot be selected, do **NOT** submit: stop with **${notVerified}** and quote the question and the options shown.
 4. Click the final **Submit** action once. If the portal asks you to confirm in a dialog, confirm once.

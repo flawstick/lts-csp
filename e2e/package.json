@@ -1,0 +1,21 @@
+{
+  "name": "@repo/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local end-to-end harness: real browser runs against a throwaway local stack. Not part of `bun run test`.",
+  "scripts": {
+    "e2e": "bun run src/run.ts",
+    "e2e:keep": "bun run src/run.ts --keep",
+    "e2e:down": "bun run src/run.ts --down"
+  },
+  "dependencies": {
+    "@repo/database": "workspace:*",
+    "@repo/task": "workspace:*",
+    "playwright": "1.58.2",
+    "postgres": "^3.4.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}

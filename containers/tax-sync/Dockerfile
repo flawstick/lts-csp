@@ -9,6 +9,8 @@ COPY packages/database ./packages/database
 COPY packages/redis/package.json packages/redis/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY containers/task/package.json containers/task/package.json
+# Every literal entry in the root "workspaces" list must exist for bun install
+COPY e2e/package.json e2e/package.json
 COPY containers/tax-sync ./containers/tax-sync
 
 RUN bun install --frozen-lockfile

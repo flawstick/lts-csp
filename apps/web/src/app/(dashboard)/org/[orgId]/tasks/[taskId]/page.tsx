@@ -9,6 +9,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import { api } from "@/trpc/react";
+import { describeGuernseyNoticeOfAssessment } from "@repo/database/guernsey-filing";
 import { trackClient } from "@/lib/analytics";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import { BrowserToolbar } from "./_components/browser-toolbar";
 import { BrowserFrame } from "./_components/browser-frame";
 import { AgentPanel } from "./_components/agent-panel";
 import { SubmitLockBanner } from "./_components/submit-lock-banner";
+import { getJobToCancel } from "./_components/cancel-target";
 import {
   StartErrorAlert,
   describeStartAction,
@@ -755,7 +757,7 @@ export default function TaskDetailPage() {
   });
 
   const handleCancel = () => {
-    const jobToCancel = runningJob || pausedJob;
+    const jobToCancel = getJobToCancel({ runningJob, pausedJob, activeJob });
     if (jobToCancel) {
       cancelJobMutation.mutate({ jobId: jobToCancel.id });
     }
@@ -845,6 +847,12 @@ export default function TaskDetailPage() {
 
   const jurisdictionName = task.taxReturn?.jurisdiction?.name ?? null;
   const entityName = task.taxReturn?.entityName ?? null;
+  // The answer a Guernsey ESR submit selects on the declaration page.
+  const noticeOfAssessmentLabel =
+    task.taxReturn?.jurisdiction?.code === "GG" &&
+    task.taxReturn.returnType === "economic_substance"
+      ? describeGuernseyNoticeOfAssessment(task.taxReturn.substanceForm)
+      : null;
   const browserStatus = selectedJob?.status ?? activeJob?.status ?? null;
 
   const chatJobStatus = selectedJob?.status ?? null;
@@ -962,6 +970,7 @@ export default function TaskDetailPage() {
                 isResumePending={resumeJobMutation.isPending}
                 isDeletePending={deleteJobMutation.isPending}
                 submitReadiness={task.submitReadiness ?? null}
+                noticeOfAssessmentLabel={noticeOfAssessmentLabel}
                 onActionsMenuOpen={() => {
                   void refetch();
                 }}

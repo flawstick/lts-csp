@@ -3,6 +3,11 @@
  * client signoff, signoff revocation after edits, and GBP financial figures.
  */
 
+import {
+  GUERNSEY_NOTICE_OF_ASSESSMENT_FIELD,
+  getGuernseyNoticeOfAssessment,
+} from "./guernsey-filing";
+
 export const GUERNSEY_FILING_CURRENCY = "GBP";
 
 const FINANCIAL_FIGURES_METADATA_KEY = "financialFigures";
@@ -203,16 +208,35 @@ function normalizeComparableValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** Field names in `patch` whose value differs from `existing`. */
+/**
+ * Field names in `patch` whose value differs from `existing`. The notice of
+ * assessment compares by its effective answer: an unset answer already means
+ * "Yes", so saving an explicit "Yes" over it changes nothing.
+ */
 export function getChangedFormFields(
   existing: Record<string, unknown> | null | undefined,
   patch: Record<string, unknown>,
 ): string[] {
-  return Object.keys(patch).filter(
-    (key) =>
+  return Object.keys(patch).filter((key) => {
+    if (key === GUERNSEY_NOTICE_OF_ASSESSMENT_FIELD) {
+      return (
+        getGuernseyNoticeOfAssessment({
+          noticeOfAssessment: asOptionalString(existing?.[key]),
+        }) !==
+        getGuernseyNoticeOfAssessment({
+          noticeOfAssessment: asOptionalString(patch[key]),
+        })
+      );
+    }
+    return (
       normalizeComparableValue(existing?.[key]) !==
-      normalizeComparableValue(patch[key]),
-  );
+      normalizeComparableValue(patch[key])
+    );
+  });
+}
+
+function asOptionalString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
 /**

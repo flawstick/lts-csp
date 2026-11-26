@@ -1,10 +1,12 @@
 import {
   buildGuernseyCertificateTwoDefaults,
   detectGuernseyCertificateTypeFromDocuments,
+  describeGuernseyNoticeOfAssessment,
   getGuernseyNoticeOfAssessment,
-  getGuernseyNoticeOfAssessmentBlocker,
+  getGuernseyNoticeOfAssessmentChoice,
   getGuernseyScopedMissingFields,
-  GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
+  GUERNSEY_NOTICE_OF_ASSESSMENT_DEFAULT,
+  isGuernseyNoticeOfAssessmentDefaulted,
   getGuernseyScopedRequirementBlocker,
   GUERNSEY_OPERATING_EXPENDITURE_REQUIRED_MESSAGE,
   hasMeaningfulGuernseyFormData,
@@ -291,28 +293,33 @@ describe("guernsey-filing", () => {
 });
 
 describe("notice of assessment", () => {
-  it("accepts only an explicit Yes or No", () => {
-    expect(getGuernseyNoticeOfAssessment({ noticeOfAssessment: "Yes" })).toBe("Yes");
-    expect(getGuernseyNoticeOfAssessment({ noticeOfAssessment: "No" })).toBe("No");
-    for (const noticeOfAssessment of [null, undefined, "", "yes", "N/A", " Yes"]) {
-      expect(getGuernseyNoticeOfAssessment({ noticeOfAssessment })).toBeNull();
+  it("defaults to Yes when no reviewer answer is saved", () => {
+    for (const noticeOfAssessment of [null, undefined, "", "N/A", "maybe"]) {
+      expect(getGuernseyNoticeOfAssessment({ noticeOfAssessment })).toBe("Yes");
+      expect(isGuernseyNoticeOfAssessmentDefaulted({ noticeOfAssessment })).toBe(true);
+      expect(describeGuernseyNoticeOfAssessment({ noticeOfAssessment })).toBe(
+        "Yes (default)",
+      );
     }
-    expect(getGuernseyNoticeOfAssessment(null)).toBeNull();
+    expect(getGuernseyNoticeOfAssessment(null)).toBe("Yes");
+    expect(getGuernseyNoticeOfAssessment(undefined)).toBe("Yes");
+    expect(GUERNSEY_NOTICE_OF_ASSESSMENT_DEFAULT).toBe("Yes");
   });
 
-  it("blocks submission until a reviewer answers it", () => {
-    expect(getGuernseyNoticeOfAssessmentBlocker({ noticeOfAssessment: null })).toBe(
-      GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
-    );
-    expect(getGuernseyNoticeOfAssessmentBlocker(undefined)).toBe(
-      GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
-    );
-    expect(getGuernseyNoticeOfAssessmentBlocker({ noticeOfAssessment: "No" })).toBeNull();
+  it("honours an explicit No", () => {
+    for (const noticeOfAssessment of ["No", "no", " No "]) {
+      expect(getGuernseyNoticeOfAssessment({ noticeOfAssessment })).toBe("No");
+      expect(getGuernseyNoticeOfAssessmentChoice({ noticeOfAssessment })).toBe("No");
+      expect(isGuernseyNoticeOfAssessmentDefaulted({ noticeOfAssessment })).toBe(false);
+    }
+    expect(describeGuernseyNoticeOfAssessment({ noticeOfAssessment: "No" })).toBe("No");
   });
 
-  it("warns that setting it on a signed-off return needs a new client signoff", () => {
-    expect(GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE).toContain(
-      "mark the return ready for submission again",
-    );
+  it("records an explicit Yes as the reviewer's choice", () => {
+    expect(getGuernseyNoticeOfAssessment({ noticeOfAssessment: "Yes" })).toBe("Yes");
+    expect(getGuernseyNoticeOfAssessmentChoice({ noticeOfAssessment: "Yes" })).toBe("Yes");
+    expect(isGuernseyNoticeOfAssessmentDefaulted({ noticeOfAssessment: "Yes" })).toBe(false);
+    expect(describeGuernseyNoticeOfAssessment({ noticeOfAssessment: "Yes" })).toBe("Yes");
+    expect(getGuernseyNoticeOfAssessmentChoice({ noticeOfAssessment: null })).toBeNull();
   });
 });

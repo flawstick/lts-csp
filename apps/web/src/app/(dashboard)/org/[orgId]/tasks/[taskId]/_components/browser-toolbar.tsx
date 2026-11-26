@@ -100,6 +100,11 @@ type BrowserToolbarProps = {
   submitReadiness?: ToolbarSubmitReadiness | null;
   /** Called when the run actions menu opens, to refresh readiness. */
   onActionsMenuOpen?: () => void;
+  /**
+   * The notice-of-assessment answer a submit selects on the portal's
+   * declaration page, e.g. "Yes (default)". Null when it does not apply.
+   */
+  noticeOfAssessmentLabel?: string | null;
 };
 
 function blockerOf(readiness: SubmitReadiness | undefined) {
@@ -195,6 +200,7 @@ export function BrowserToolbar({
   isDeletePending,
   submitReadiness,
   onActionsMenuOpen,
+  noticeOfAssessmentLabel = null,
 }: BrowserToolbarProps) {
   const reasonIdBase = useId();
   const submitPreparedBlocker = blockerOf(submitReadiness?.submitPrepared);
@@ -278,6 +284,18 @@ export function BrowserToolbar({
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {noticeOfAssessmentLabel ? (
+            <p className="text-sm">
+              <span className="text-muted-foreground">
+                Notice of assessment:
+              </span>{" "}
+              <span className="font-medium">{noticeOfAssessmentLabel}</span>
+              <span className="text-muted-foreground block text-xs">
+                Selected on the portal&apos;s declaration page. Change it under
+                Additional Information on the return before submitting.
+              </span>
+            </p>
+          ) : null}
           <label className="flex items-start gap-2 text-sm">
             <input
               type="checkbox"
@@ -500,6 +518,7 @@ export function BrowserToolbar({
                     variant="ghost"
                     size="icon"
                     className="text-muted-foreground hover:text-destructive size-6"
+                    aria-label="Cancel task"
                     onClick={onCancel}
                     disabled={isCancelPending}
                   >
@@ -525,6 +544,7 @@ export function BrowserToolbar({
                     variant="ghost"
                     size="icon"
                     className="text-muted-foreground hover:text-destructive size-6"
+                    aria-label="Cancel task"
                     onClick={onCancel}
                     disabled={isCancelPending}
                   >
@@ -555,6 +575,7 @@ export function BrowserToolbar({
                     variant="ghost"
                     size="icon"
                     className="text-muted-foreground hover:text-destructive size-6"
+                    aria-label="Cancel task"
                     onClick={onCancel}
                     disabled={isCancelPending}
                   >

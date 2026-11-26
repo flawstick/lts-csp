@@ -125,6 +125,22 @@ describe("submission signoff", () => {
     );
   });
 
+  it("treats the notice of assessment by its effective answer", () => {
+    // Unset already means Yes: saving Yes over it is not a change.
+    expect(
+      getChangedFormFields({ noticeOfAssessment: null }, { noticeOfAssessment: "Yes" }),
+    ).toEqual([]);
+    expect(
+      getChangedFormFields({ noticeOfAssessment: "Yes" }, { noticeOfAssessment: null }),
+    ).toEqual([]);
+    expect(
+      getChangedFormFields({ noticeOfAssessment: null }, { noticeOfAssessment: "No" }),
+    ).toEqual(["noticeOfAssessment"]);
+    expect(
+      getChangedFormFields({ noticeOfAssessment: "No" }, { noticeOfAssessment: null }),
+    ).toEqual(["noticeOfAssessment"]);
+  });
+
   it("revokes signoff when filing data changes after approval", () => {
     const patch = buildSubmissionSignoffRevocation({
       taxReturn: {

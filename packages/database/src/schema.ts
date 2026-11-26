@@ -905,8 +905,9 @@ export const substanceForms = createTable(
     managerSignOffDate: varchar("manager_sign_off_date", { length: 16 }),
     // Yes/No: the reviewer's per-return answer to the portal declaration
     // page's "Please indicate if you wish to receive a notice of assessment".
-    // Null until a person sets it; required before any submission (see
-    // getGuernseyNoticeOfAssessmentBlocker). No default on purpose.
+    // Null means "Yes" (LTS's default for every return it prepares); a
+    // reviewer records "No" to opt out. Resolve it with
+    // getGuernseyNoticeOfAssessment, never by reading the column directly.
     noticeOfAssessment: varchar("notice_of_assessment", { length: 8 }),
 
     // =========================================================================

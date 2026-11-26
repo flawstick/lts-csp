@@ -441,8 +441,11 @@ describe("buildSubmitPreparedReturnPrompt", () => {
     portalReference: "ESR-42",
     contactName: "NSM Filings Team",
     contactEmail: "filings@nsm.example",
-    noticeOfAssessment: "No" as const,
   };
+  const withAnswer = (noticeOfAssessment: string | null | undefined) => ({
+    ...base,
+    substanceForm: { ...base.substanceForm, noticeOfAssessment },
+  });
 
   it("never tells a submit prepared run to fill a blank profit column", () => {
     const prompt = buildSubmitPreparedReturnPrompt(base);
@@ -521,32 +524,42 @@ describe("buildSubmitPreparedReturnPrompt", () => {
     expect(buildSubmitPreparedReturnPrompt(base).length).toBeLessThan(fill.length / 2);
   });
 
-  it("answers the notice of assessment with the reviewer's choice and allows no other change", () => {
-    const prompt = buildSubmitPreparedReturnPrompt(base);
+  it("answers the notice of assessment with the reviewer's No and allows no other change", () => {
+    const prompt = buildSubmitPreparedReturnPrompt(withAnswer("No"));
     expect(prompt).toContain(
-      'asks "Please indicate if you wish to receive a notice of assessment". The reviewer chose **No** for this return.',
+      'asks "Please indicate if you wish to receive a notice of assessment". The answer for this return is **No** (the reviewer\'s answer for this return).',
     );
     expect(prompt).toContain("select **No** for the notice of assessment question");
     expect(prompt).toContain("never select a different answer");
     expect(prompt).toContain(
-      "**The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **No**, chosen by the reviewer) and the portal's declaration tick-box or confirmation. Change nothing else there.",
+      "**The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **No**, the reviewer's answer for this return) and the portal's declaration tick-box or confirmation. Change nothing else there.",
     );
     expect(prompt).toContain("Change no other field or control");
     // Answering happens before the single Submit click.
     expect(prompt.indexOf("select **No** for the notice")).toBeLessThan(
       prompt.indexOf("Click the final **Submit** action once"),
     );
-    expect(buildSubmitPreparedReturnPrompt({ ...base, noticeOfAssessment: "Yes" })).toContain(
+    expect(buildSubmitPreparedReturnPrompt(withAnswer("Yes"))).toContain(
       "select **Yes** for the notice of assessment question",
     );
   });
 
-  it("refuses to build without the reviewer's notice of assessment answer", () => {
-    for (const noticeOfAssessment of [null, undefined, "yes" as any]) {
-      expect(() => buildSubmitPreparedReturnPrompt({ ...base, noticeOfAssessment })).toThrow(
-        "notice of assessment",
+  it.each([null, undefined, "", "maybe"])(
+    "selects the default Yes when no answer is saved (%j)",
+    (noticeOfAssessment) => {
+      const prompt = buildSubmitPreparedReturnPrompt(withAnswer(noticeOfAssessment));
+      expect(prompt).toContain(
+        "The answer for this return is **Yes** (LTS's default answer for this return).",
       );
-    }
+      expect(prompt).toContain("select **Yes** for the notice of assessment question");
+      expect(prompt).not.toContain("**No**");
+    },
+  );
+
+  it("selects the default Yes when the form carries no answer field", () => {
+    expect(buildSubmitPreparedReturnPrompt(base)).toContain(
+      "select **Yes** for the notice of assessment question",
+    );
   });
 });
 
@@ -567,11 +580,13 @@ describe("notice of assessment in the filling prompt", () => {
       submissionMode: "submit_and_capture_pdf",
       ...contact,
     });
-    expect(prompt).toContain("DECLARATION STEP — NOTICE OF ASSESSMENT (SET BY THE REVIEWER)");
-    expect(prompt).toContain(`The reviewer chose **${answer}** for this return. Select **${answer}**.`);
+    expect(prompt).toContain("DECLARATION STEP — NOTICE OF ASSESSMENT (SET FOR THIS RETURN)");
+    expect(prompt).toContain(
+      `The answer for this return is **${answer}** (the reviewer's answer for this return). Select **${answer}**.`,
+    );
     expect(prompt).toContain("never select a different answer");
     expect(prompt).toContain(
-      `answer the notice of assessment question with **${answer}** (the reviewer's answer`,
+      `answer the notice of assessment question with **${answer}** (the reviewer's answer for this return;`,
     );
     expect(prompt.indexOf("answer the notice of assessment question")).toBeLessThan(
       prompt.indexOf("Click the final submit/confirm action"),
@@ -579,17 +594,21 @@ describe("notice of assessment in the filling prompt", () => {
   });
 
   it.each([null, undefined, "", "maybe"])(
-    "never builds a filing prompt without the reviewer's answer (%j)",
+    "tells a full submit to select the default Yes when no answer is saved (%j)",
     (answer) => {
-      expect(() =>
-        buildSubstanceFormPrompt({
-          taxReturn: baseTaxReturn,
-          substanceForm: form(answer),
-          portalUrl: "https://my.gov.gg",
-          submissionMode: "submit_and_capture_pdf",
-          ...contact,
-        }),
-      ).toThrow("notice of assessment");
+      const prompt = buildSubstanceFormPrompt({
+        taxReturn: baseTaxReturn,
+        substanceForm: form(answer),
+        portalUrl: "https://my.gov.gg",
+        submissionMode: "submit_and_capture_pdf",
+        ...contact,
+      });
+      expect(prompt).toContain(
+        "The answer for this return is **Yes** (LTS's default answer for this return). Select **Yes**.",
+      );
+      expect(prompt).toContain(
+        "answer the notice of assessment question with **Yes** (LTS's default answer for this return;",
+      );
     },
   );
 
@@ -603,15 +622,20 @@ describe("notice of assessment in the filling prompt", () => {
         ...contact,
       });
       expect(prompt).toContain("This run does not answer it: if you see it, leave it exactly as the portal shows it.");
-      expect(prompt).not.toContain("SET BY THE REVIEWER");
-      expect(prompt).not.toContain("The reviewer chose");
+      expect(prompt).not.toContain("SET FOR THIS RETURN");
+      expect(prompt).not.toContain("The answer for this return is");
     }
   });
 });
 
 describe("buildNoticeOfAssessmentContinuationRule", () => {
   it("restates the reviewer's answer for a recovered or resumed full submit", () => {
-    const rule = buildNoticeOfAssessmentContinuationRule({ answer: "Yes", submitPrepared: false });
+    const rule = buildNoticeOfAssessmentContinuationRule({
+      answer: "Yes",
+      defaulted: false,
+      submitPrepared: false,
+    });
+    expect(rule).toContain("NOTICE OF ASSESSMENT (the reviewer's answer for this return;");
     expect(rule).toContain(
       'answer "Please indicate if you wish to receive a notice of assessment" with **Yes**',
     );
@@ -620,11 +644,27 @@ describe("buildNoticeOfAssessmentContinuationRule", () => {
   });
 
   it("keeps a submit prepared continuation to that answer and the declaration tick", () => {
-    const rule = buildNoticeOfAssessmentContinuationRule({ answer: "No", submitPrepared: true });
+    const rule = buildNoticeOfAssessmentContinuationRule({
+      answer: "No",
+      defaulted: false,
+      submitPrepared: true,
+    });
     expect(rule).toContain("with **No**");
     expect(rule).toContain(
       "This answer and the portal's declaration tick-box are the only things you may set. Change no other field.",
     );
     expect(rule).toContain("REQUIRES_ATTENTION**: PREPARED_DRAFT_NOT_VERIFIED:");
+  });
+});
+
+describe("buildNoticeOfAssessmentContinuationRule with the default", () => {
+  it("says the Yes is LTS's default", () => {
+    const rule = buildNoticeOfAssessmentContinuationRule({
+      answer: "Yes",
+      defaulted: true,
+      submitPrepared: true,
+    });
+    expect(rule).toContain("NOTICE OF ASSESSMENT (LTS's default answer for this return;");
+    expect(rule).toContain("with **Yes**");
   });
 });

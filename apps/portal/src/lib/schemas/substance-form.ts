@@ -228,8 +228,8 @@ export const substanceFormSchema = z.object({
   preparedDate: z.string().optional(),
   managerSignOff: z.string().optional(),
   managerSignOffDate: z.string().optional(),
-  // Reviewer's per-return answer to the portal declaration page's notice of
-  // assessment question. Required before submitting; null clears it.
+  // Per-return answer to the portal declaration page's notice of assessment
+  // question. Unset means "Yes" (see getGuernseyNoticeOfAssessment).
   noticeOfAssessment: yesNoEnum.nullable().optional(),
 
   // =========================================================================
