@@ -600,9 +600,11 @@ export function hasMeaningfulGuernseyFormData(value: unknown) {
 /**
  * The Guernsey Tax Portal's declaration page (reviewAndSubmit/declaration)
  * asks "Please indicate if you wish to receive a notice of assessment"
- * (Yes/No) before the final Submit. It is a per-return choice a reviewer
- * records on the form: there is no default, and a filing agent must never
- * pick it. It is only answered when submitting, never while preparing.
+ * (Yes/No) before the final Submit. LTS answers **Yes** for every return it
+ * prepares unless a reviewer records "No" on the form, so an unset answer
+ * never blocks a submission. It is only answered when submitting, never
+ * while preparing, and the filing agent always selects the answer resolved
+ * here rather than choosing one itself.
  */
 export const GUERNSEY_NOTICE_OF_ASSESSMENT_FIELD = "noticeOfAssessment" as const;
 
@@ -615,40 +617,62 @@ export const GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION =
 
 export type GuernseyNoticeOfAssessment = "Yes" | "No";
 
-export const GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE =
-  'The notice of assessment answer is not set for this return. A reviewer must choose Yes or No for "Receive a notice of assessment?" on the return form (with the manager sign-off) before it can be submitted. Prepare only does not need it. Setting it changes the form, so if the client has already signed off, an authorised signatory must mark the return ready for submission again.';
-
-/** Why a client signatory cannot sign off a Guernsey ESR return yet. */
-export const GUERNSEY_NOTICE_OF_ASSESSMENT_SIGNOFF_MESSAGE =
-  'Choose Yes or No for "Receive a notice of assessment?" under Finalising the Return before marking this return ready for submission. The Guernsey Tax Portal asks it when the return is submitted.';
+/** The answer used when a reviewer has not chosen one for the return. */
+export const GUERNSEY_NOTICE_OF_ASSESSMENT_DEFAULT: GuernseyNoticeOfAssessment =
+  "Yes";
 
 /**
- * Shown where staff set the answer on a return the client has already signed
- * off: saving any form change, this one included, clears that sign-off.
+ * Shown where staff edit a return the client has already signed off: saving
+ * a change to the form clears that sign-off.
  */
-export const GUERNSEY_NOTICE_OF_ASSESSMENT_RESIGNOFF_WARNING =
+export const GUERNSEY_FORM_EDIT_RESIGNOFF_WARNING =
   "The client has already signed off this return. Saving a change here clears that sign-off, and an authorised signatory must mark the return ready for submission again in the client portal before it can be submitted.";
 
 /**
- * The reviewer's notice-of-assessment answer, or null when it is not set.
- * Only an exact "Yes" or "No" counts: anything else is treated as unset so a
- * submission never proceeds on an ambiguous value.
+ * The answer a reviewer explicitly saved on the form ("Yes" or "No"), or
+ * null when none is saved. Surrounding spaces and letter case are ignored.
  */
-export function getGuernseyNoticeOfAssessment(
+export function getGuernseyNoticeOfAssessmentChoice(
   form: { noticeOfAssessment?: string | null } | null | undefined,
 ): GuernseyNoticeOfAssessment | null {
   const value = form?.noticeOfAssessment;
-  return value === "Yes" || value === "No" ? value : null;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "yes") return "Yes";
+  if (normalized === "no") return "No";
+  return null;
 }
 
 /**
- * Reason a Guernsey ESR submission must not start because the
- * notice-of-assessment answer is missing, or null when it is set.
+ * The notice-of-assessment answer a submission selects: the reviewer's saved
+ * "No" is honoured; anything else (unset, empty or unrecognised) resolves to
+ * the default "Yes".
  */
-export function getGuernseyNoticeOfAssessmentBlocker(
+export function getGuernseyNoticeOfAssessment(
   form: { noticeOfAssessment?: string | null } | null | undefined,
-): string | null {
-  return getGuernseyNoticeOfAssessment(form)
-    ? null
-    : GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE;
+): GuernseyNoticeOfAssessment {
+  return (
+    getGuernseyNoticeOfAssessmentChoice(form) ??
+    GUERNSEY_NOTICE_OF_ASSESSMENT_DEFAULT
+  );
+}
+
+/** True when no reviewer answer is saved, so the default applies. */
+export function isGuernseyNoticeOfAssessmentDefaulted(
+  form: { noticeOfAssessment?: string | null } | null | undefined,
+): boolean {
+  return getGuernseyNoticeOfAssessmentChoice(form) === null;
+}
+
+/**
+ * The effective answer for display: "Yes (default)" when no reviewer answer
+ * is saved, otherwise the saved "Yes" or "No".
+ */
+export function describeGuernseyNoticeOfAssessment(
+  form: { noticeOfAssessment?: string | null } | null | undefined,
+): string {
+  const answer = getGuernseyNoticeOfAssessment(form);
+  return isGuernseyNoticeOfAssessmentDefaulted(form)
+    ? `${answer} (default)`
+    : answer;
 }

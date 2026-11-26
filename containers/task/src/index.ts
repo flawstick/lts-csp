@@ -13,7 +13,7 @@ import {
   sql,
   orgSettings,
   getGuernseyNoticeOfAssessment,
-  GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
+  isGuernseyNoticeOfAssessmentDefaulted,
   parseFinancialFiguresMetadata,
   type TaxReturnFileCategory,
   type TaxReturnFileRole,
@@ -1495,22 +1495,23 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
         "Submission refused: the Net Book Value has not been confirmed as a non-negative tangible-asset figure. Enter it on the form, or prepare the return first so a reviewer can confirm it.",
       );
     }
-    // The declaration step's notice-of-assessment answer is the reviewer's,
-    // per return. A submit run never starts without it (the web API refuses
-    // first; this re-checks the current form) and never lets the agent pick.
+    // The declaration step's notice-of-assessment answer, resolved from the
+    // current form: the reviewer's saved "No", otherwise the default "Yes".
+    // The agent is always told which to select and never picks it itself.
     const noticeOfAssessment =
       submissionMode === "submit_and_capture_pdf"
         ? getGuernseyNoticeOfAssessment(taxReturn.substanceForm)
         : null;
-    if (submissionMode === "submit_and_capture_pdf") {
-      if (!noticeOfAssessment) {
-        throw new Error(
-          `Submission refused: ${GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE}`,
-        );
-      }
-      // Audit: the answer this run was instructed to select.
+    if (noticeOfAssessment) {
+      // Audit: the answer this run was instructed to select, and whether it
+      // came from the default rather than a saved reviewer answer.
       await updateActiveJobRecord({
-        resultDataPatch: { noticeOfAssessment },
+        resultDataPatch: {
+          noticeOfAssessment,
+          noticeOfAssessmentDefaulted: isGuernseyNoticeOfAssessmentDefaulted(
+            taxReturn.substanceForm,
+          ),
+        },
       });
     }
     await refuseAfterUnconfirmedSubmit(runtime);
@@ -1670,13 +1671,15 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
           // Submit mode only starts with a configured contact (refused above).
           contactName: filingContactInfo?.name ?? "",
           contactEmail: filingContactInfo?.email ?? "",
-          noticeOfAssessment,
         })
       : buildFillPrompt();
     // Restated in every recovery/resume continuation of a submit run.
     const noticeOfAssessmentRule = noticeOfAssessment
       ? buildNoticeOfAssessmentContinuationRule({
           answer: noticeOfAssessment,
+          defaulted: isGuernseyNoticeOfAssessmentDefaulted(
+            taxReturn.substanceForm,
+          ),
           submitPrepared: isSubmitPrepared,
         })
       : "";

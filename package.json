@@ -4,7 +4,8 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "containers/*"
+    "containers/*",
+    "e2e"
   ],
   "scripts": {
     "build": "turbo build",
@@ -21,7 +22,10 @@
     "db:generate": "cd packages/database && bun run db:generate",
     "db:migrate": "cd packages/database && bun run db:migrate",
     "db:push": "cd packages/database && bun run db:push",
-    "db:studio": "cd packages/database && bun run db:studio"
+    "db:studio": "cd packages/database && bun run db:studio",
+    "e2e": "cd e2e && bun run e2e",
+    "e2e:keep": "cd e2e && bun run e2e:keep",
+    "e2e:down": "cd e2e && bun run e2e:down"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

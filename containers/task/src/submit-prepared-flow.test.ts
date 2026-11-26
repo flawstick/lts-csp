@@ -12,11 +12,6 @@ import {
   type PreparedDraftRecord,
   SUBMIT_PREPARED_DISPATCHED_KEY,
 } from "@repo/database/prepared-draft";
-import {
-  getGuernseyNoticeOfAssessment,
-  getGuernseyNoticeOfAssessmentBlocker,
-  GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
-} from "@repo/database/guernsey-filing";
 import { buildSubmitPreparedReturnPrompt } from "./prompt-builder";
 import {
   classifyRunOutcome,
@@ -74,8 +69,8 @@ PORTAL_REFERENCE: ESR-42`;
 describe("prepare then submit prepared return", () => {
   it("submits the exact recorded draft and gates completion on the receipt", () => {
     const prepared = prepareRun(READY_OUTPUT);
-    // Manager signs off and the reviewer answers the notice of assessment
-    // after reviewing the draft: neither invalidates it.
+    // Manager signs off and the reviewer switches the notice of assessment to
+    // No after reviewing the draft: neither invalidates it.
     const signedOff = {
       ...substanceForm,
       managerSignOff: "J Smith",
@@ -97,7 +92,6 @@ describe("prepare then submit prepared return", () => {
       portalReference: resolution.draft.portalReference,
       contactName: "NSM Filings Team",
       contactEmail: "filings@nsm.example",
-      noticeOfAssessment: getGuernseyNoticeOfAssessment(signedOff),
     });
     expect(prompt).toContain("https://revenueservice.gov.gg/company-tax-ui/abc/reviewAndSubmit/summary");
     expect(prompt).toContain("**ESR-42**");
@@ -119,32 +113,26 @@ describe("prepare then submit prepared return", () => {
     });
   });
 
-  it("cannot submit the prepared draft until the reviewer answers the notice of assessment", () => {
+  it("submits the prepared draft with the default Yes when no answer is saved", () => {
     const prepared = prepareRun(READY_OUTPUT);
-    // The draft itself stays valid without the answer...
+    const signedOff = { ...substanceForm, managerSignOff: "J Smith" };
     const resolution = resolvePreparedDraft({
       jobs: [prepared],
-      currentFingerprint: fingerprintPreparedInputs({ ...taxReturn, substanceForm }),
+      currentFingerprint: fingerprintPreparedInputs({ ...taxReturn, substanceForm: signedOff }),
     });
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) return;
-    // ...but the submit is refused before any browser run, and the agent is
-    // never handed a prompt that leaves the choice to it.
-    expect(getGuernseyNoticeOfAssessmentBlocker(substanceForm)).toBe(
-      GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
-    );
-    expect(() =>
-      buildSubmitPreparedReturnPrompt({
-        taxReturn,
-        substanceForm,
-        portalUrl: "https://my.gov.gg",
-        reviewUrl: resolution.draft.reviewUrl,
-        portalReference: resolution.draft.portalReference,
-        contactName: "NSM Filings Team",
-        contactEmail: "filings@nsm.example",
-        noticeOfAssessment: getGuernseyNoticeOfAssessment(substanceForm),
-      }),
-    ).toThrow("notice of assessment");
+    const prompt = buildSubmitPreparedReturnPrompt({
+      taxReturn,
+      substanceForm: signedOff,
+      portalUrl: "https://my.gov.gg",
+      reviewUrl: resolution.draft.reviewUrl,
+      portalReference: resolution.draft.portalReference,
+      contactName: "NSM Filings Team",
+      contactEmail: "filings@nsm.example",
+    });
+    expect(prompt).toContain("select **Yes** for the notice of assessment question");
+    expect(prompt).toContain("LTS's default answer for this return");
   });
 
   it("pauses instead of submitting when the draft cannot be verified", () => {

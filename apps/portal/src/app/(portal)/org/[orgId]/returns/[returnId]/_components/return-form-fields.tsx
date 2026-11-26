@@ -4,6 +4,9 @@ import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { format, parse } from "date-fns";
 import { AlertCircle, CalendarIcon } from "lucide-react";
 import {
+  describeGuernseyNoticeOfAssessment,
+  getGuernseyNoticeOfAssessmentChoice,
+  GUERNSEY_NOTICE_OF_ASSESSMENT_FIELD,
   GUERNSEY_OPERATING_EXPENDITURE_FIELD,
   isGuernseyFormValueSupplied,
 } from "@repo/database/guernsey-filing";
@@ -117,8 +120,6 @@ const YES_NO_FIELDS = new Set([
   "hasFailedEconomicSubstance",
   "isPillar2InScope",
   "expectConstituentEntityNextPeriod",
-  // Declaration-page answer for the submit; set per return by a reviewer.
-  "noticeOfAssessment",
 ]);
 
 const YES_NO_NA_FIELDS = new Set([
@@ -415,6 +416,45 @@ export function ReturnFormFields({
               );
             })}
           </div>
+        </FieldShell>
+      );
+    }
+
+    // Declaration-page answer given when the return is submitted. Unset
+    // means Yes, so it shows the effective answer rather than a blank.
+    if (field === GUERNSEY_NOTICE_OF_ASSESSMENT_FIELD) {
+      return (
+        <FieldShell
+          key={field}
+          label={label}
+          fieldId={fieldId}
+          required={false}
+          surface={surface}
+        >
+          <SelectField
+            fieldId={fieldId}
+            value={
+              getGuernseyNoticeOfAssessmentChoice({
+                noticeOfAssessment: value as string | null | undefined,
+              }) ?? undefined
+            }
+            options={YES_NO}
+            placeholder={describeGuernseyNoticeOfAssessment({
+              noticeOfAssessment: null,
+            })}
+            onChange={(v) =>
+              setDraftForm((prev) => ({
+                ...prev,
+                noticeOfAssessment: (v ?? undefined) as
+                  | SubstanceFormData["noticeOfAssessment"]
+                  | undefined,
+              }))
+            }
+          />
+          <p className="text-xs text-muted-foreground">
+            The Guernsey Tax Portal asks this when the return is submitted.
+            LTS answers Yes unless you choose No.
+          </p>
         </FieldShell>
       );
     }

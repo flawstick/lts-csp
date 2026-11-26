@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE } from "@repo/database/guernsey-filing";
 import {
   fingerprintPreparedInputs,
   SUBMIT_PREPARED_DISPATCHED_KEY,
@@ -192,16 +191,24 @@ describe("getSubmitReadiness", () => {
     const readiness = getSubmitReadinessByOperation({
       taxReturn: {
         ...signedOffReturn,
+        substanceForm: { ...substanceForm, managerSignOff: null },
+      },
+      returnJobs: [preparedJob(currentFingerprint)],
+    });
+    expect(readiness.submit.blocker).toContain("manager has not signed off");
+    expect(readiness.submitPrepared.blocker).toContain("manager has not signed off");
+  });
+
+  it("is ready for both operations with no notice of assessment answer saved (defaults to Yes)", () => {
+    const readiness = getSubmitReadinessByOperation({
+      taxReturn: {
+        ...signedOffReturn,
         substanceForm: { ...substanceForm, noticeOfAssessment: null },
       },
       returnJobs: [preparedJob(currentFingerprint)],
     });
-    expect(readiness.submit.blocker).toBe(
-      GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
-    );
-    expect(readiness.submitPrepared.blocker).toBe(
-      GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE,
-    );
+    expect(readiness.submit).toEqual({ ready: true, blocker: null });
+    expect(readiness.submitPrepared).toEqual({ ready: true, blocker: null });
   });
 
   it("reports the dispatch lock for both operations", () => {

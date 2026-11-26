@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { buildSubmissionSignoffRevocation } from "@repo/database/return-readiness";
-import { GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE } from "@repo/database/guernsey-filing";
 import { getFilingStartBlocker, getPossibleFilingEvidence } from "./filing-start-guard";
 
 const guernseyReturn = {
@@ -35,7 +34,6 @@ describe("getFilingStartBlocker", () => {
           substanceForm: {
             managerSignOff: null,
             managerSignOffDate: null,
-            noticeOfAssessment: "No",
           },
         },
         submissionMode: "submit_and_capture_pdf",
@@ -71,48 +69,34 @@ describe("getFilingStartBlocker", () => {
   });
 
   describe("notice of assessment answer", () => {
-    const signedOffWithout = (noticeOfAssessment: string | null) => ({
+    const signedOffWith = (noticeOfAssessment: string | null) => ({
       ...guernseyReturn,
       readyForSubmissionAt: new Date(),
       substanceForm: { ...guernseyReturn.substanceForm, noticeOfAssessment },
     });
 
-    it.each([null, "", "maybe"])(
-      "blocks every submission while it is %j, even when fully signed off",
+    it.each([null, "", "maybe", "Yes", "No"])(
+      "never blocks a signed-off submission (%j; unset means Yes)",
       (noticeOfAssessment) => {
         // Both submit operations (full submit and Submit prepared return)
         // start in submit_and_capture_pdf mode and go through this check.
         expect(
           getFilingStartBlocker({
-            taxReturn: signedOffWithout(noticeOfAssessment),
+            taxReturn: signedOffWith(noticeOfAssessment),
             submissionMode: "submit_and_capture_pdf",
           }),
-        ).toBe(GUERNSEY_NOTICE_OF_ASSESSMENT_REQUIRED_MESSAGE);
+        ).toBeNull();
       },
     );
 
-    it("does not require it to prepare a draft", () => {
+    it("does not block a submission whose form has no answer field at all", () => {
       expect(
         getFilingStartBlocker({
-          taxReturn: signedOffWithout(null),
-          submissionMode: "prepare_only",
-        }),
-      ).toBeNull();
-    });
-
-    it.each(["Yes", "No"])("allows submission with %s", (noticeOfAssessment) => {
-      expect(
-        getFilingStartBlocker({
-          taxReturn: signedOffWithout(noticeOfAssessment),
-          submissionMode: "submit_and_capture_pdf",
-        }),
-      ).toBeNull();
-    });
-
-    it("does not apply outside Guernsey ESR returns", () => {
-      expect(
-        getFilingStartBlocker({
-          taxReturn: { ...signedOffWithout(null), jurisdiction: { code: "JE" } },
+          taxReturn: {
+            ...guernseyReturn,
+            readyForSubmissionAt: new Date(),
+            substanceForm: { managerSignOff: "J Smith", managerSignOffDate: "2026-11-01" },
+          },
           submissionMode: "submit_and_capture_pdf",
         }),
       ).toBeNull();

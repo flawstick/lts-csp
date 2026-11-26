@@ -22,8 +22,10 @@ import {
 } from "@/components/ui/select"
 import { Loader2 } from "@/lib/icons"
 import {
+  describeGuernseyNoticeOfAssessment,
+  getGuernseyNoticeOfAssessment,
+  GUERNSEY_FORM_EDIT_RESIGNOFF_WARNING,
   GUERNSEY_NOTICE_OF_ASSESSMENT_FIELD,
-  GUERNSEY_NOTICE_OF_ASSESSMENT_RESIGNOFF_WARNING,
   GUERNSEY_OPERATING_EXPENDITURE_FIELD,
   isGuernseyFormValueSupplied,
   isGuernseyOperatingExpenditureRequired,
@@ -51,9 +53,6 @@ interface SubstanceFormEditorProps {
    */
   isClientSignedOff?: boolean
 }
-
-/** Select value for "no answer"; Radix Select items cannot use "". */
-const UNSET_VALUE = "__unset__"
 
 const ENTITY_TYPES = ["Company", "Partnership"] as const
 const YES_NO = ["Yes", "No"] as const
@@ -118,20 +117,31 @@ export function SubstanceFormEditor({
     const label = FIELD_LABELS[field] ?? field
     const value = localData[field as keyof SubstanceFormData]
 
-    // Declaration-page answer the filing agent must never choose itself.
+    // Declaration-page answer given at submission. Unset means Yes, so the
+    // select shows the effective answer ("Yes (default)" when unset).
     if (field === GUERNSEY_NOTICE_OF_ASSESSMENT_FIELD) {
+      const current = { noticeOfAssessment: value as string | null | undefined }
+      const savedValue = (formData ?? {})[GUERNSEY_NOTICE_OF_ASSESSMENT_FIELD]
       return (
         <div key={field} className="space-y-2">
           <Label htmlFor={field}>{label}</Label>
           <Select
-            value={(value as string) || UNSET_VALUE}
-            onValueChange={(v) => updateField(field, v === UNSET_VALUE ? null : v)}
+            value={getGuernseyNoticeOfAssessment(current)}
+            onValueChange={(v) =>
+              // Choosing the saved effective answer again restores the saved
+              // value, so switching to No and back is not a change.
+              updateField(
+                field,
+                v === getGuernseyNoticeOfAssessment({ noticeOfAssessment: savedValue })
+                  ? savedValue
+                  : v,
+              )
+            }
           >
             <SelectTrigger id={field}>
-              <SelectValue placeholder="Not set" />
+              <SelectValue>{describeGuernseyNoticeOfAssessment(current)}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={UNSET_VALUE}>Not set</SelectItem>
               {YES_NO.map((opt) => (
                 <SelectItem key={opt} value={opt}>
                   {opt}
@@ -141,9 +151,7 @@ export function SubstanceFormEditor({
           </Select>
           <p className="text-xs text-muted-foreground">
             The Guernsey portal asks this on its declaration page when the return is submitted.
-            Required before the client signs off and before submitting; Prepare only does not
-            need it. Set it before the client signs off: changing it afterwards clears the
-            client&apos;s sign-off.
+            LTS answers Yes unless you choose No.
           </p>
         </div>
       )
@@ -408,7 +416,7 @@ export function SubstanceFormEditor({
             role="note"
             className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200"
           >
-            {GUERNSEY_NOTICE_OF_ASSESSMENT_RESIGNOFF_WARNING}
+            {GUERNSEY_FORM_EDIT_RESIGNOFF_WARNING}
           </div>
         ) : null}
 

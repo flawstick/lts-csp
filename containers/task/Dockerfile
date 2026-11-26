@@ -5,6 +5,8 @@ WORKDIR /app
 
 # Copy workspace config
 COPY bun.lock package.json turbo.json ./
+# Every literal entry in the root "workspaces" list must exist for bun install
+COPY e2e/package.json e2e/package.json
 
 # Copy package sources
 COPY packages/database ./packages/database
