@@ -87,7 +87,7 @@ like production rows.
 | --- | --- |
 | `a_ready_default` | prepared draft ready (completed prepare run with `prepareOnlyReadyAt` and a matching `preparedDraft`), notice of assessment unset, client signed off |
 | `b_failed_prepare` | an older ready prepare, then a prepare run that timed out (latest) |
-| `c_locked` | Submit prepared return run that reached the portal (only the older `submitPreparedDispatchedAt` key; new submit runs also write `submitDispatchedAt`), failed with `PREPARED_DRAFT_NOT_VERIFIED`, no receipt, no browser session, 30h ago (nothing is locked, and it ended long before the 2-minute quiet period that holds a new submit run after a run with no browser session) |
+| `c_locked` | Submit prepared return run that reached the portal (only the older `submitPreparedDispatchedAt` key; new submit runs also write `submitDispatchedAt`), failed with `PREPARED_DRAFT_NOT_VERIFIED`, no receipt, no browser session, 30h ago (nothing is locked, and it is older than the 24-hour window in which a new run first stops, or finds and stops, an earlier submit run's browser) |
 | `d_noa_no` | like `a`, notice of assessment explicitly "No" |
 | `e_awaiting_signoff` | complete, manager signed off, waiting for the client; notice of assessment unset; no runs |
 | `f_edit_noa` | like `a`, used to save No / Yes from the staff editor |

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getBrowserUseApiVersion,
   getBrowserUseSessionStatus,
+  listBrowserUseSessions,
   stopBrowserUseSession,
 } from "./browser-use-control";
 
@@ -119,5 +120,24 @@ describe("Browser Use dashboard controls", () => {
     expect(await getBrowserUseSessionStatus("session", 4, "key")).toBe(
       expected,
     );
+  });
+});
+
+describe("listBrowserUseSessions", () => {
+  it("reads one V4 session page by cursor", async () => {
+    const mock = mockApi((path) => {
+      if (path === "/api/v4/sessions?limit=100&cursor=c-2")
+        return { sessions: [{ sessionId: "s", workspaceId: "w", createdAt: "2026-11-27T10:00:00Z" }], hasMore: false };
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    await expect(listBrowserUseSessions("c-2", "test-key")).resolves.toEqual({
+      sessions: [{ sessionId: "s", workspaceId: "w", createdAt: "2026-11-27T10:00:00Z" }],
+      hasMore: false,
+    });
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("never reports an empty list when it cannot search", async () => {
+    await expect(listBrowserUseSessions(null, "")).rejects.toThrow(/not configured/);
   });
 });

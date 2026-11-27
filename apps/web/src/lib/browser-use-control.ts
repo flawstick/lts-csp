@@ -172,3 +172,35 @@ export async function waitForBrowserUseSessionToPause(
   }
   return status;
 }
+
+/** One page of the account's V4 sessions, most recent first. */
+export async function listBrowserUseSessions(
+  cursor: string | null,
+  apiKey = process.env.BROWSER_USE_API_KEY?.trim(),
+): Promise<{
+  sessions: {
+    sessionId: string;
+    workspaceId: string | null;
+    createdAt: string;
+    updatedAt?: string | null;
+  }[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
+}> {
+  // Without a key nothing can be searched: the caller must not read that as
+  // "no sessions".
+  if (!apiKey) throw new Error("Browser Use API key is not configured");
+  const query = new URLSearchParams({ limit: "100" });
+  if (cursor) query.set("cursor", cursor);
+  const page = await api<{
+    sessions: {
+      sessionId: string;
+      workspaceId: string | null;
+      createdAt: string;
+      updatedAt?: string | null;
+    }[];
+    nextCursor?: string | null;
+    hasMore?: boolean;
+  }>(apiKey, 4, `/sessions?${query}`);
+  return page ?? { sessions: [], hasMore: false };
+}

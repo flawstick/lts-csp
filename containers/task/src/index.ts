@@ -29,8 +29,13 @@ import {
   PORTAL_NET_BOOK_VALUE_KEY,
   resolvePreparedDraft,
   isBrowserSessionStoppedStatus,
+  EARLIER_SUBMIT_SESSION_SEARCH_SKEW_MS,
+  findWorkspaceSessionIds,
   planEarlierSubmitBrowserCheck,
+  SUBMIT_DISPATCH_REJECTED_KEY,
+  SUBMIT_DISPATCH_SESSION_SEARCH_KEY,
   SUBMIT_DISPATCHED_KEY,
+  type SubmitDispatchSessionSearch,
   SUBMIT_PREPARED_DISPATCHED_KEY,
   SUBMIT_PREPARED_OPERATION,
   type FilingOperation,
@@ -52,11 +57,13 @@ import {
 } from "@repo/database/operator-messages";
 import {
   markOperatorMessagesDeliveredSql,
+  mergeResultDataPatchSql,
   preserveWebOwnedResultDataSql,
   setAgentReplySql,
 } from "@repo/database/operator-messages-sql";
 import {
   BrowserUseClient,
+  BrowserUseRunCreateError,
   type BrowserUseSessionStatus,
   type BrowserUseFileInfo,
   type BrowserUseSession,
@@ -1058,68 +1065,131 @@ async function listReturnJobs(taxReturnId: string) {
 }
 
 /**
- * Defence in depth for the web start check: stop the Browser Use session of
- * every earlier dispatched submit run on the return, and refuse this run
- * unless each one reads back as stopped (or recorded no session and has been
- * quiet long enough). Two agents on one return could both file it. Runs
- * still active are never touched.
+ * Stops one Browser Use session and reads it back. True only for a status
+ * that means the agent can no longer act.
+ */
+async function stopAndConfirmBrowserSession(
+  client: BrowserUseClient,
+  sessionId: string,
+  context: Record<string, unknown>,
+): Promise<{ stopped: boolean; status: string | null }> {
+  try {
+    await client.stopSession(sessionId, "session");
+  } catch (error) {
+    // The read-back below decides; a partial stop may still have worked.
+    await log("Stopping an earlier submit run's browser failed", {
+      ...context,
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  let status: string | null = null;
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      status = await client.getSessionStatus(sessionId);
+    } catch (error) {
+      status = null;
+      await log("Reading an earlier submit run's browser status failed", {
+        ...context,
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      break;
+    }
+    if (status !== "running") break;
+    await sleep(250);
+  }
+  return { stopped: isBrowserSessionStoppedStatus(status), status };
+}
+
+/** Records a completed search of a job's workspace for Browser Use sessions. */
+async function recordSubmitDispatchSessionSearch(
+  jobId: string,
+  search: SubmitDispatchSessionSearch,
+) {
+  await db
+    .update(jobs)
+    .set({
+      resultData: mergeResultDataPatchSql({
+        [SUBMIT_DISPATCH_SESSION_SEARCH_KEY]: search,
+      }),
+    })
+    .where(eq(jobs.id, jobId));
+}
+
+/**
+ * Defence in depth for the web start check, for a run of any mode: stop the
+ * Browser Use sessions of every earlier dispatched submit run on the return
+ * (searching its workspace when it recorded none), and refuse this run
+ * unless each one reads back as stopped. An orphaned submit agent could file
+ * the return alongside a new submit run, or in the middle of a Prepare only
+ * run's edits. Runs still active are never touched.
  */
 async function stopEarlierSubmitRunBrowsers(
   client: BrowserUseClient,
   returnJobs: Awaited<ReturnType<typeof listReturnJobs>>,
   currentJobId: string,
+  refusalPrefix: string,
 ) {
   const now = Date.now();
+  const refuse = () =>
+    new Error(`${refusalPrefix}: ${EARLIER_SUBMIT_BROWSER_STOPPING_MESSAGE}`);
   for (const job of returnJobs) {
     if (job.id === currentJobId) continue;
     const plan = planEarlierSubmitBrowserCheck(job, now);
     if (plan.kind === "none") continue;
+    const context = { phase: "startup", earlierJobId: job.id };
     if (plan.kind === "wait") {
-      throw new Error(
-        `Submission refused: ${EARLIER_SUBMIT_BROWSER_STOPPING_MESSAGE}`,
-      );
-    }
-    try {
-      await client.stopSession(plan.sessionId, "session");
-    } catch (error) {
-      // The read-back below decides; a partial stop may still have worked.
-      await log("Stopping an earlier submit run's browser failed", {
-        phase: "startup",
-        earlierJobId: job.id,
-        error: error instanceof Error ? error.message : String(error),
+      await log("An earlier submit run's browser cannot be confirmed stopped yet - refusing", {
+        ...context,
+        reason: "quiet_period",
       });
+      throw refuse();
     }
-    let status: string | null = null;
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
+    let sessionIds: string[];
+    if (plan.kind === "find_sessions") {
+      let found: string[] | null = null;
       try {
-        status = await client.getSessionStatus(plan.sessionId);
+        found = await findWorkspaceSessionIds(
+          (cursor) => client.listSessions(cursor),
+          { workspaceId: plan.workspaceId, createdAfter: plan.createdAfter },
+        );
       } catch (error) {
-        status = null;
-        await log("Reading an earlier submit run's browser status failed", {
-          phase: "startup",
-          earlierJobId: job.id,
+        await log("Searching an earlier submit run's workspace for sessions failed", {
+          ...context,
           error: error instanceof Error ? error.message : String(error),
         });
-        break;
       }
-      if (status !== "running") break;
-      await sleep(250);
+      if (!found) throw refuse();
+      sessionIds = found;
+    } else {
+      sessionIds = plan.sessionIds;
     }
-    if (!isBrowserSessionStoppedStatus(status)) {
-      await log("An earlier submit run's browser is not confirmed stopped - refusing", {
-        phase: "startup",
-        earlierJobId: job.id,
-        status,
-      });
-      throw new Error(
-        `Submission refused: ${EARLIER_SUBMIT_BROWSER_STOPPING_MESSAGE}`,
+    for (const sessionId of sessionIds) {
+      const { stopped, status } = await stopAndConfirmBrowserSession(
+        client,
+        sessionId,
+        context,
       );
+      if (!stopped) {
+        await log("An earlier submit run's browser is not confirmed stopped - refusing", {
+          ...context,
+          sessionId,
+          status,
+        });
+        throw refuse();
+      }
+    }
+    if (plan.kind === "find_sessions") {
+      await recordSubmitDispatchSessionSearch(job.id, {
+        searchedAt: now,
+        sessionIds,
+      }).catch(() => {});
     }
     await log("Earlier submit run's browser confirmed stopped", {
-      phase: "startup",
-      earlierJobId: job.id,
-      status,
+      ...context,
+      sessionIds,
     });
   }
 }
@@ -1127,26 +1197,31 @@ async function stopEarlierSubmitRunBrowsers(
 /**
  * Earlier submit runs (full submit or Submit prepared return) on the return
  * that reached the portal and saved no receipt, for a submit-mode run, after
- * stopping every earlier submit run's browser. They never stop this run: its
- * prompt names them and its first check confirms on the portal that the
- * return is not already submitted.
+ * stopping every earlier submit run's browser (for a run of any mode). They
+ * never stop this run: its prompt names them and its first check confirms
+ * on the portal that the return is not already submitted.
  */
 async function findEarlierUnreceiptedSubmitRuns(
   runtime: ActiveJobRuntime,
   client: BrowserUseClient,
 ) {
-  if (runtime.submissionMode !== "submit_and_capture_pdf") {
-    return { earlier: [], currentTaskName: null };
-  }
   const returnJobs = await listReturnJobs(runtime.taxReturnId);
-  await stopEarlierSubmitRunBrowsers(client, returnJobs, runtime.jobId);
+  const isSubmit = runtime.submissionMode === "submit_and_capture_pdf";
+  await stopEarlierSubmitRunBrowsers(
+    client,
+    returnJobs,
+    runtime.jobId,
+    isSubmit ? "Submission refused" : "Run refused",
+  );
+  const currentTaskName =
+    returnJobs.find((job) => job.id === runtime.jobId)?.taskName ?? null;
+  if (!isSubmit) return { earlier: [], currentTaskName };
   return {
     earlier: getEarlierUnreceiptedSubmitJobs({
       jobs: returnJobs,
       excludeJobId: runtime.jobId,
     }),
-    currentTaskName:
-      returnJobs.find((job) => job.id === runtime.jobId)?.taskName ?? null,
+    currentTaskName,
   };
 }
 
@@ -1887,6 +1962,66 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     // Browser tasks this job has dispatched (first run, then continuations).
     let browserTaskDispatchCount = 0;
 
+    /**
+     * The first run of a submit-mode dispatch failed to create, so no session
+     * id was recorded. Browser Use may still have accepted it (a timeout,
+     * reset or 5xx after creation; the SDK never retries the POST), leaving
+     * an agent live on the portal with the full submit prompt. Unless
+     * Browser Use definitely refused it, find any session it created in
+     * this job's workspace and stop it, and record what was found so later
+     * runs stop it too (they search again once the quiet period has passed).
+     */
+    async function handleSubmitCreateFailure(
+      error: unknown,
+      createRequestedAt: number,
+    ) {
+      try {
+        if (error instanceof BrowserUseRunCreateError && error.definitelyNotCreated) {
+          await updateActiveJobRecord({
+            resultDataPatch: { [SUBMIT_DISPATCH_REJECTED_KEY]: Date.now() },
+          });
+          return;
+        }
+        if (!workspaceId) return;
+        const found = await findWorkspaceSessionIds(
+          (cursor) => client.listSessions(cursor),
+          {
+            workspaceId,
+            createdAfter:
+              createRequestedAt - EARLIER_SUBMIT_SESSION_SEARCH_SKEW_MS,
+          },
+        );
+        if (!found) return;
+        for (const orphanId of found) {
+          const { stopped, status } = await stopAndConfirmBrowserSession(
+            client,
+            orphanId,
+            { phase: "dispatch" },
+          );
+          await log("Stopped a Browser Use session created by a failed submit dispatch", {
+            phase: "dispatch",
+            sessionId: orphanId,
+            stopped,
+            status,
+          });
+        }
+        await updateActiveJobRecord({
+          resultDataPatch: {
+            [SUBMIT_DISPATCH_SESSION_SEARCH_KEY]: {
+              searchedAt: Date.now(),
+              sessionIds: found,
+            },
+          },
+        });
+      } catch (searchError) {
+        // Later runs search the workspace again before they start.
+        await log("Checking for a session created by a failed submit dispatch failed", {
+          phase: "dispatch",
+          error: searchError instanceof Error ? searchError.message : String(searchError),
+        });
+      }
+    }
+
     async function dispatchBrowserTask(
       task: string,
       sessionId?: string,
@@ -1941,16 +2076,25 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       // recovery): its prompt and outcome must not treat a submission this
       // run may already have made as someone else's.
       browserTaskDispatchCount += 1;
-      const started = await client.runTask(task, {
-        sessionId,
-        profile: runProfile,
-        workspaceId: workspaceId ?? undefined,
-        proxyCountryCode: useProxy ? "uk" : null,
-        extensionIds:
-          submissionMode === "prepare_only" && PREPARE_ONLY_GUARD_EXTENSION_ID
-            ? [PREPARE_ONLY_GUARD_EXTENSION_ID]
-            : undefined,
-      });
+      const createRequestedAt = Date.now();
+      let started: BrowserUseSession;
+      try {
+        started = await client.runTask(task, {
+          sessionId,
+          profile: runProfile,
+          workspaceId: workspaceId ?? undefined,
+          proxyCountryCode: useProxy ? "uk" : null,
+          extensionIds:
+            submissionMode === "prepare_only" && PREPARE_ONLY_GUARD_EXTENSION_ID
+              ? [PREPARE_ONLY_GUARD_EXTENSION_ID]
+              : undefined,
+        });
+      } catch (error) {
+        if (!sessionId && submissionMode === "submit_and_capture_pdf") {
+          await handleSubmitCreateFailure(error, createRequestedAt);
+        }
+        throw error;
+      }
       if (prepareOnlyGuardStatus === "requested") {
         guardVerificationStartedAt = Date.now();
       }

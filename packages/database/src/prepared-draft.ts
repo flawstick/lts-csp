@@ -364,12 +364,14 @@ function joinWithAnd(parts: string[]): string {
 /**
  * Unambiguous names for earlier runs on a return, or null when they cannot
  * be named safely (then use generic wording). Run numbers count per task,
- * while the runs come from every task on the return, so a run on another
- * task is named with its task: "Run #3", "Runs #2 and #3",
- * "Run #3 and Run #2 of task “Acme 2025”". Runs with no task recorded are
- * named by number only, and only when no run has a task. Null when a number
- * is missing, two runs would read the same, or two tasks (or another task
- * and the current one) share a name.
+ * while the runs come from every task on the return. When every run is on
+ * the current task they are named by number ("Run #3", "Runs #2 and #3");
+ * otherwise every run is named with its task, the current one included
+ * ("Run #3 of task “Acme 2025” and Run #3 of task “Acme 2025 (rerun)”"), so
+ * the same number never appears once bare and once qualified. Runs with no
+ * task recorded are named by number only, and only when no run has a task.
+ * Null when a number is missing, two runs would read the same, or a task
+ * that must be named has no name or shares one with another task.
  */
 export function describeEarlierSubmitRuns(
   runs: EarlierSubmitRunRef[],
@@ -390,29 +392,38 @@ export function describeEarlierSubmitRuns(
     const key = run.taskId as string;
     groups.set(key, [...(groups.get(key) ?? []), run]);
   }
+  // Every run on the current task: the compact form ("Runs #2 and #3").
+  if (currentTaskId && groups.size === 1 && groups.has(currentTaskId)) {
+    return formatRunNumbers(runs);
+  }
+
   const namesByTask = new Map<string, string>();
   for (const [taskId, group] of groups) {
-    if (taskId === currentTaskId) continue;
-    const name = group[0]?.taskName?.trim();
+    const name =
+      group[0]?.taskName?.trim() ||
+      (taskId === currentTaskId ? current?.taskName?.trim() : undefined);
     if (!name) return null;
     namesByTask.set(taskId, name);
   }
   const names = [...namesByTask.values()].map((name) => name.toLowerCase());
   if (new Set(names).size !== names.length) return null;
+  // Another task named like the current one (whose runs are not listed).
   const currentName = current?.taskName?.trim().toLowerCase();
-  if (currentName && names.includes(currentName)) return null;
+  if (
+    currentName &&
+    [...namesByTask].some(
+      ([taskId, name]) => taskId !== currentTaskId && name.toLowerCase() === currentName,
+    )
+  ) {
+    return null;
+  }
 
   const parts: string[] = [];
   for (const [taskId, group] of groups) {
     const numbers = formatRunNumbers(group);
     if (!numbers) return null;
-    parts.push(
-      taskId === currentTaskId
-        ? numbers
-        : `${numbers} of task \u201c${namesByTask.get(taskId)}\u201d`,
-    );
+    parts.push(`${numbers} of task \u201c${namesByTask.get(taskId)}\u201d`);
   }
-  // Every run on the current task: the compact form ("Runs #2 and #3").
   return joinWithAnd(parts);
 }
 
@@ -467,11 +478,59 @@ export function getSubmitRunBrowserSessionId(resultData: unknown): string | null
 }
 
 /**
- * A dispatched run that recorded no Browser Use session (so the app cannot
- * stop it or read its state) only stops holding a new submit run once it has
- * been quiet this long.
+ * Worker-written `resultData` key: Browser Use refused to create the first
+ * run of a submit-mode dispatch with a definite client error (4xx), so no
+ * agent was started and none can be orphaned.
+ */
+export const SUBMIT_DISPATCH_REJECTED_KEY = "submitDispatchRejectedAt" as const;
+
+/**
+ * `resultData` key (worker or web): a completed search of the Browser Use
+ * sessions in a dispatched run's own workspace, for a run that recorded no
+ * session id (its create request timed out or failed after Browser Use may
+ * have accepted it, or its worker died mid-dispatch). Lists the sessions
+ * found, which are stopped like a recorded session.
+ */
+export const SUBMIT_DISPATCH_SESSION_SEARCH_KEY = "submitDispatchSessionSearch" as const;
+
+export type SubmitDispatchSessionSearch = {
+  searchedAt: number;
+  sessionIds: string[];
+};
+
+export function getSubmitDispatchSessionSearch(
+  resultData: unknown,
+): SubmitDispatchSessionSearch | null {
+  if (!isRecord(resultData)) return null;
+  const value = resultData[SUBMIT_DISPATCH_SESSION_SEARCH_KEY];
+  if (!isRecord(value)) return null;
+  const searchedAt = value.searchedAt;
+  if (typeof searchedAt !== "number" || !Number.isFinite(searchedAt)) return null;
+  const sessionIds = Array.isArray(value.sessionIds)
+    ? value.sessionIds.filter(
+        (id): id is string => typeof id === "string" && id.trim().length > 0,
+      )
+    : [];
+  return { searchedAt, sessionIds };
+}
+
+/**
+ * A dispatched run that recorded no Browser Use session holds a new run for
+ * at least this long: a create request still in flight at Browser Use has
+ * produced its session by then, so a search of the run's workspace after it
+ * is complete.
  */
 export const EARLIER_SUBMIT_QUIET_PERIOD_MS = 2 * 60_000;
+
+/** Clock skew allowed when matching sessions to a dispatch by creation time. */
+export const EARLIER_SUBMIT_SESSION_SEARCH_SKEW_MS = 5 * 60_000;
+
+/**
+ * The longest a Browser Use agent can act unattended: the maximum session
+ * timeout (4 hours) plus the worker's keep-alive window. A dispatched run
+ * whose session can be neither read nor found holds new runs this long.
+ */
+export const EARLIER_SUBMIT_MAX_AGENT_LIFETIME_MS = (240 + 15) * 60_000;
 
 /**
  * A dispatched run quiet for longer than this is not checked: no Browser Use
@@ -479,7 +538,7 @@ export const EARLIER_SUBMIT_QUIET_PERIOD_MS = 2 * 60_000;
  */
 export const EARLIER_SUBMIT_BROWSER_CHECK_WINDOW_MS = 24 * 60 * 60_000;
 
-/** Why a new submit run may not start yet (never a manual procedure). */
+/** Why a new run may not start yet (never a manual procedure). */
 export const EARLIER_SUBMIT_BROWSER_STOPPING_MESSAGE =
   "The previous submit run's browser is still shutting down. Try again in a minute.";
 
@@ -514,17 +573,30 @@ export function getRunLastActivityAt(job: EarlierSubmitRunJob): number {
 export type EarlierSubmitBrowserCheck =
   /** Nothing to do: never dispatched, still active (blocked elsewhere), or long quiet. */
   | { kind: "none" }
-  /** Stop this session and read back a stopped status before the new run starts. */
-  | { kind: "stop_session"; sessionId: string }
-  /** No session recorded and ended too recently: the new run must wait. */
+  /** Stop these sessions and read back a stopped status before the new run starts. */
+  | { kind: "stop_sessions"; sessionIds: string[] }
+  /**
+   * No session recorded: find the sessions Browser Use created in the run's
+   * own workspace since the dispatch, stop them, read them back as stopped
+   * and record the search (SUBMIT_DISPATCH_SESSION_SEARCH_KEY).
+   */
+  | { kind: "find_sessions"; workspaceId: string; createdAfter: number }
+  /** No session recorded and it cannot be found yet: the new run must wait. */
   | { kind: "wait" };
 
 /**
- * What must happen to an earlier submit run's browser before a new submit run
- * (full submit or Submit prepared return) on the same return may start: a
- * dispatched, ended run's Browser Use agent may still be driving the portal
- * (its worker was killed, or a stop failed), and two agents on one draft
- * could both file it. Shared by the web start (startJob) and the worker.
+ * What must happen to an earlier submit run's browser before a new browser
+ * run (of any mode) on the same return may start: a dispatched, ended run's
+ * Browser Use agent may still be driving the portal (its worker was killed,
+ * its create request failed after Browser Use accepted it, or a stop
+ * failed), and it could file the return alongside, or in the middle of, the
+ * new run. Shared by the web start (startJob) and the worker.
+ *
+ * A run that recorded no session id is never assumed quiet: it is cleared
+ * only by a definite Browser Use rejection of the create request, or a
+ * search of its workspace made after the quiet period (its sessions then
+ * stopped). With no workspace to search it holds new runs for the longest an
+ * agent can act.
  */
 export function planEarlierSubmitBrowserCheck(
   job: EarlierSubmitRunJob,
@@ -534,13 +606,96 @@ export function planEarlierSubmitBrowserCheck(
   const data = jobData(job);
   if (!hasSubmitDispatch(data)) return { kind: "none" };
   const quietFor = now - getRunLastActivityAt(job);
-  const sessionId = getSubmitRunBrowserSessionId(data);
-  if (sessionId) {
-    return quietFor > EARLIER_SUBMIT_BROWSER_CHECK_WINDOW_MS
-      ? { kind: "none" }
-      : { kind: "stop_session", sessionId };
+  if (quietFor > EARLIER_SUBMIT_BROWSER_CHECK_WINDOW_MS) return { kind: "none" };
+
+  const recorded = getSubmitRunBrowserSessionId(data);
+  const search = getSubmitDispatchSessionSearch(data);
+  const found = search?.sessionIds ?? [];
+  const stopFound = (): EarlierSubmitBrowserCheck =>
+    found.length > 0 ? { kind: "stop_sessions", sessionIds: found } : { kind: "none" };
+  if (recorded) {
+    return {
+      kind: "stop_sessions",
+      sessionIds: [...new Set([recorded, ...found])],
+    };
   }
-  return quietFor >= EARLIER_SUBMIT_QUIET_PERIOD_MS ? { kind: "none" } : { kind: "wait" };
+
+  const rejectedAt = data[SUBMIT_DISPATCH_REJECTED_KEY];
+  if (typeof rejectedAt === "number" && Number.isFinite(rejectedAt)) return stopFound();
+
+  const dispatchedAt = Math.max(
+    getSubmitDispatchedAt(data) ?? 0,
+    toMillis(job.createdAt) ?? 0,
+  );
+  if (search && search.searchedAt >= dispatchedAt + EARLIER_SUBMIT_QUIET_PERIOD_MS) {
+    return stopFound();
+  }
+  if (quietFor < EARLIER_SUBMIT_QUIET_PERIOD_MS) return { kind: "wait" };
+
+  const workspaceId =
+    typeof data.workspaceId === "string" && data.workspaceId.trim()
+      ? data.workspaceId.trim()
+      : null;
+  if (workspaceId) {
+    return {
+      kind: "find_sessions",
+      workspaceId,
+      createdAfter: dispatchedAt - EARLIER_SUBMIT_SESSION_SEARCH_SKEW_MS,
+    };
+  }
+  return quietFor < EARLIER_SUBMIT_MAX_AGENT_LIFETIME_MS ? { kind: "wait" } : stopFound();
+}
+
+/** One Browser Use V4 session as listed (most recent first). */
+export type ListedBrowserUseSession = {
+  sessionId: string;
+  workspaceId: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+};
+
+/** How many session pages a workspace search reads before giving up. */
+export const SESSION_SEARCH_MAX_PAGES = 20;
+
+/**
+ * The Browser Use sessions in `workspaceId` (a worker creates one workspace
+ * per job, so they are that job's), read from the account's session list
+ * (most recent first) until a page reaches sessions last active before
+ * `createdAfter`. Null when the search could not reach that point (too many
+ * pages): then it is not complete.
+ */
+export async function findWorkspaceSessionIds(
+  listPage: (cursor: string | null) => Promise<{
+    sessions: ListedBrowserUseSession[];
+    nextCursor?: string | null;
+    hasMore?: boolean;
+  }>,
+  input: { workspaceId: string; createdAfter: number; maxPages?: number },
+): Promise<string[] | null> {
+  const maxPages = input.maxPages ?? SESSION_SEARCH_MAX_PAGES;
+  const found: string[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < maxPages; page += 1) {
+    const result = await listPage(cursor);
+    let reachedOlder = false;
+    for (const session of result.sessions) {
+      if (session.workspaceId === input.workspaceId && !found.includes(session.sessionId)) {
+        found.push(session.sessionId);
+      }
+      // Ordered by creation or by latest run: either way, a session last
+      // active before the dispatch means every later one is older still.
+      const times = [session.createdAt, session.updatedAt]
+        .map((value) => (value ? Date.parse(value) : Number.NaN))
+        .filter((value) => Number.isFinite(value));
+      const lastActive = times.length > 0 ? Math.max(...times) : null;
+      if (lastActive !== null && lastActive < input.createdAfter) {
+        reachedOlder = true;
+      }
+    }
+    if (reachedOlder || !result.hasMore || !result.nextCursor) return found;
+    cursor = result.nextCursor;
+  }
+  return null;
 }
 
 /**

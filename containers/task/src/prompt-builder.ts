@@ -186,11 +186,16 @@ function buildEarlierRunsCaution(options: {
  * with ALREADY_SUBMITTED, unless the agent is certain it never clicked it.
  */
 export function buildSubmitContinuationCheck(options: {
+  entityName: string;
+  taxYear: number | string;
+  /** The case to open (its view page when known); null: none recorded. */
+  caseUrl: string | null;
   submitPrepared: boolean;
   earlierRuns?: EarlierUnreceiptedSubmitRun[];
   currentTask?: CurrentTaskRef;
 }): string {
-  const unsureStop = options.submitPrepared
+  const { entityName, taxYear, caseUrl, submitPrepared } = options;
+  const unsureStop = submitPrepared
     ? `**REQUIRES_ATTENTION: ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}:**`
     : "**REQUIRES_ATTENTION:**";
   const caution = buildEarlierRunsCaution({
@@ -202,6 +207,14 @@ export function buildSubmitContinuationCheck(options: {
 ## ${SUBMISSION_STATUS_CONTINUATION_HEADING}
 This message continues this LTS submit run in the same browser session; it is not a new run. Earlier in this run you may already have clicked **${FINAL_FILING_BUTTON_LABEL}**. Before you change anything, check whether the portal now shows this return as submitted: a submission confirmation or receipt, the case/return shown as **Submitted** / **Received** (or similar), or the declaration step no longer offering **${FINAL_FILING_BUTTON_LABEL}**.
 ${caution}
+**Read the case status if you have not yet done so in this run** (for example the run stopped at login before it could): open the case${caseUrl ? `: ${caseUrl}` : " for this return"} and read, without changing anything, the case status and the status of the ${taxYear} return for **${entityName}**.${
+    submitPrepared
+      ? ` Only read the case page: do not use its links to reach the return (section 1 below opens the prepared draft by its exact URL).${
+          caseUrl ? "" : " If no case URL is given, read the status on the review page in section 2."
+        }`
+      : ""
+  } The return is still a draft only when the case/return status is a draft status such as **Pending** or **In progress**, and nothing on the case or return shows a submitted return, a submission receipt or confirmation, or a **Submitted** / **Received** (or similar filed) status for tax year ${taxYear}. If the status is not a draft status, or you cannot see it at all, do **NOT** submit: apply the rules below if it shows submitted, otherwise stop with ${unsureStop} quoting the status (or saying the submission status could not be confirmed).
+
 - **It shows submitted, and you clicked ${FINAL_FILING_BUTTON_LABEL} earlier in this run (or may have, for example the page changed or the browser broke right after a click):** this run submitted it. Do **NOT** click anything to submit again and change nothing. Download the portal's filed-return / completion PDF into the Browser Use session if it is offered, and finish with the final output the task below asks for after a submission (the confirmation and reference shown, and the PDF file name). Do not start that output with REQUIRES_ATTENTION.
 - **It shows submitted, and you are certain you have not clicked ${FINAL_FILING_BUTTON_LABEL} at any point in this run:** do **NOT** submit and change nothing. Download the filed return or its receipt as a PDF if the portal offers it. Your final output MUST start with exactly: **${ALREADY_SUBMITTED_OUTPUT}** followed by what the portal shows, and say that this run never clicked the final button.
 - **It does not show submitted:** continue the task below. Click **${FINAL_FILING_BUTTON_LABEL}** at most once in this whole run, counting any click earlier in the run.
@@ -388,6 +401,9 @@ ${PORTAL_LOGIN_SECTION}${
           currentTask,
         })
       : buildSubmitContinuationCheck({
+          entityName: taxReturn.entityName,
+          taxYear: taxReturn.taxYear,
+          caseUrl: caseViewUrl ?? returnLink ?? portalUrl,
           submitPrepared: false,
           earlierRuns: earlierUnreceiptedSubmitRuns,
           currentTask,
@@ -1317,6 +1333,9 @@ ${PORTAL_LOGIN_SECTION}${
           currentTask,
         })
       : buildSubmitContinuationCheck({
+          entityName: taxReturn.entityName,
+          taxYear: taxReturn.taxYear,
+          caseUrl: getCaseViewUrl(returnLink) ?? returnLink ?? null,
           submitPrepared: true,
           earlierRuns: earlierUnreceiptedSubmitRuns,
           currentTask,

@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   describeEarlierSubmitRuns,
   EARLIER_SUBMIT_BROWSER_CHECK_WINDOW_MS,
+  EARLIER_SUBMIT_MAX_AGENT_LIFETIME_MS,
   EARLIER_SUBMIT_QUIET_PERIOD_MS,
+  EARLIER_SUBMIT_SESSION_SEARCH_SKEW_MS,
+  findWorkspaceSessionIds,
+  SUBMIT_DISPATCH_REJECTED_KEY,
+  SUBMIT_DISPATCH_SESSION_SEARCH_KEY,
   EARLIER_UNRECEIPTED_SUBMIT_JOBS_KEY,
   fingerprintPreparedInputs,
   getSubmitDispatchedAt,
@@ -533,7 +538,7 @@ describe("describeEarlierSubmitRuns (run numbers count per task)", () => {
     expect(describeEarlierSubmitRuns([{ jobNumber: 2, taskId: "task-a", taskName: "Acme 2025" }], current)).toBe(
       "Run #2 of task \u201cAcme 2025\u201d",
     );
-    // Both tasks hold a Run #3: still unambiguous.
+    // Both tasks hold a Run #3: every run is named with its task.
     expect(
       describeEarlierSubmitRuns(
         [
@@ -542,7 +547,27 @@ describe("describeEarlierSubmitRuns (run numbers count per task)", () => {
         ],
         current,
       ),
-    ).toBe("Run #3 of task \u201cAcme 2025\u201d and Run #3");
+    ).toBe("Run #3 of task \u201cAcme 2025\u201d and Run #3 of task \u201cAcme 2025 (rerun)\u201d");
+    // The current task's name comes from the caller when its rows lack it.
+    expect(
+      describeEarlierSubmitRuns(
+        [
+          { jobNumber: 3, taskId: "task-a", taskName: "Acme 2025" },
+          { jobNumber: 2, taskId: "task-b" },
+        ],
+        current,
+      ),
+    ).toBe("Run #3 of task \u201cAcme 2025\u201d and Run #2 of task \u201cAcme 2025 (rerun)\u201d");
+    // Mixed tasks and no name for the current one: generic wording, never a bare number.
+    expect(
+      describeEarlierSubmitRuns(
+        [
+          { jobNumber: 3, taskId: "task-a", taskName: "Acme 2025" },
+          { jobNumber: 3, taskId: "task-b" },
+        ],
+        { taskId: "task-b" },
+      ),
+    ).toBeNull();
     expect(
       getEarlierUnreceiptedSubmitCaution([{ jobNumber: 2, taskId: "task-a", taskName: "Acme 2025" }], current),
     ).toMatch(/^Run #2 of task \u201cAcme 2025\u201d reached the portal/);
@@ -589,8 +614,8 @@ describe("planEarlierSubmitBrowserCheck (before a new submit run starts)", () =>
   it("stops the session of an ended dispatched run", () => {
     for (const status of ["failed", "cancelled", "completed"]) {
       expect(planEarlierSubmitBrowserCheck(run(status, { browserUseSessionId: "s-1" }), now)).toEqual({
-        kind: "stop_session",
-        sessionId: "s-1",
+        kind: "stop_sessions",
+        sessionIds: ["s-1"],
       });
     }
     // Legacy key and the plain sessionId key.
@@ -602,7 +627,7 @@ describe("planEarlierSubmitBrowserCheck (before a new submit run starts)", () =>
         },
         now,
       ),
-    ).toEqual({ kind: "stop_session", sessionId: "s-2" });
+    ).toEqual({ kind: "stop_sessions", sessionIds: ["s-2"] });
   });
 
   it("never touches a run that is still active (the active-run guard blocks instead)", () => {
@@ -629,12 +654,106 @@ describe("planEarlierSubmitBrowserCheck (before a new submit run starts)", () =>
 
   it("waits a quiet period for a run that recorded no session", () => {
     const justEnded = new Date(now - 30_000);
-    expect(planEarlierSubmitBrowserCheck(run("failed", {}, justEnded), now)).toEqual({ kind: "wait" });
+    expect(planEarlierSubmitBrowserCheck(run("failed", { workspaceId: "w-1" }, justEnded), now)).toEqual({ kind: "wait" });
     // A recent heartbeat counts as activity even with an older end time.
-    expect(planEarlierSubmitBrowserCheck(run("failed", { lastHeartbeatAt: now - 10_000 }), now)).toEqual({ kind: "wait" });
     expect(
-      planEarlierSubmitBrowserCheck(run("failed", {}, new Date(now - EARLIER_SUBMIT_QUIET_PERIOD_MS - 1)), now),
+      planEarlierSubmitBrowserCheck(run("failed", { workspaceId: "w-1", lastHeartbeatAt: now - 10_000 }), now),
+    ).toEqual({ kind: "wait" });
+  });
+
+  it("never treats a dispatch with no recorded session as quiet: it searches the run's workspace", () => {
+    // runs.create timed out (or the worker died) after Browser Use may have accepted it.
+    const dispatchedAt = now - 90 * 60_000;
+    expect(planEarlierSubmitBrowserCheck(run("failed", { workspaceId: "w-1" }), now)).toEqual({
+      kind: "find_sessions",
+      workspaceId: "w-1",
+      createdAfter: dispatchedAt - EARLIER_SUBMIT_SESSION_SEARCH_SKEW_MS,
+    });
+    // A search made right after the failed create may have missed a late session: search again.
+    const early = { searchedAt: dispatchedAt + 30_000, sessionIds: [] };
+    expect(
+      planEarlierSubmitBrowserCheck(run("failed", { workspaceId: "w-1", [SUBMIT_DISPATCH_SESSION_SEARCH_KEY]: early }), now).kind,
+    ).toBe("find_sessions");
+    // A search after the quiet period is complete: nothing found, nothing to do; found sessions are stopped.
+    const complete = (sessionIds: string[]) => ({
+      workspaceId: "w-1",
+      [SUBMIT_DISPATCH_SESSION_SEARCH_KEY]: { searchedAt: dispatchedAt + EARLIER_SUBMIT_QUIET_PERIOD_MS, sessionIds },
+    });
+    expect(planEarlierSubmitBrowserCheck(run("failed", complete([])), now)).toEqual({ kind: "none" });
+    expect(planEarlierSubmitBrowserCheck(run("failed", complete(["orphan"])), now)).toEqual({
+      kind: "stop_sessions",
+      sessionIds: ["orphan"],
+    });
+    // Found sessions are stopped alongside a recorded one.
+    expect(
+      planEarlierSubmitBrowserCheck(run("failed", { ...complete(["orphan"]), browserUseSessionId: "s-1" }), now),
+    ).toEqual({ kind: "stop_sessions", sessionIds: ["s-1", "orphan"] });
+  });
+
+  it("clears a run whose create request Browser Use definitely rejected", () => {
+    expect(
+      planEarlierSubmitBrowserCheck(run("failed", { [SUBMIT_DISPATCH_REJECTED_KEY]: now - 89 * 60_000 }, new Date(now - 10_000)), now),
     ).toEqual({ kind: "none" });
+  });
+
+  it("holds new runs for an agent's whole lifetime when the session can be neither read nor found", () => {
+    expect(planEarlierSubmitBrowserCheck(run("failed", {}), now)).toEqual({ kind: "wait" });
+    const longAgo = now - EARLIER_SUBMIT_MAX_AGENT_LIFETIME_MS - 60_000;
+    expect(
+      planEarlierSubmitBrowserCheck(
+        { ...run("failed", {}, new Date(longAgo)), resultData: { [SUBMIT_DISPATCHED_KEY]: longAgo - 1 } },
+        now,
+      ),
+    ).toEqual({ kind: "none" });
+  });
+});
+
+describe("findWorkspaceSessionIds", () => {
+  const page = (sessions: Array<[string, string | null, string]>, nextCursor: string | null = null) => ({
+    sessions: sessions.map(([sessionId, workspaceId, createdAt]) => ({ sessionId, workspaceId, createdAt })),
+    nextCursor,
+    hasMore: nextCursor !== null,
+  });
+  const cutoff = Date.parse("2026-11-27T10:00:00Z");
+
+  it("reads pages until sessions older than the dispatch, keeping only the workspace's", async () => {
+    const pages: Record<string, ReturnType<typeof page>> = {
+      first: page(
+        [
+          ["other", "w-2", "2026-11-27T11:30:00Z"],
+          ["mine-2", "w-1", "2026-11-27T11:00:00Z"],
+        ],
+        "p2",
+      ),
+      p2: page(
+        [
+          ["mine-1", "w-1", "2026-11-27T10:01:00Z"],
+          ["old", "w-3", "2026-11-27T09:00:00Z"],
+        ],
+        "p3",
+      ),
+    };
+    const cursors: Array<string | null> = [];
+    const found = await findWorkspaceSessionIds(
+      async (cursor) => {
+        cursors.push(cursor);
+        return pages[cursor ?? "first"] ?? page([]);
+      },
+      { workspaceId: "w-1", createdAfter: cutoff },
+    );
+    expect(found).toEqual(["mine-2", "mine-1"]);
+    expect(cursors).toEqual([null, "p2"]);
+  });
+
+  it("is incomplete (null) when it cannot reach the dispatch time", async () => {
+    const found = await findWorkspaceSessionIds(
+      async (cursor) => page([["s", "w-2", "2026-11-27T11:00:00Z"]], `${cursor ?? ""}x`),
+      { workspaceId: "w-1", createdAfter: cutoff, maxPages: 3 },
+    );
+    expect(found).toBeNull();
+    expect(
+      await findWorkspaceSessionIds(async () => page([]), { workspaceId: "w-1", createdAfter: cutoff }),
+    ).toEqual([]);
   });
 });
 

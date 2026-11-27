@@ -1032,6 +1032,18 @@ describe("first check: the return is not already submitted", () => {
     });
     expect(ambiguous).toContain("**CAUTION:** earlier LTS submit runs on this return reached the portal");
     expect(ambiguous).not.toContain("#3");
+    // The same number on this task and another: both named with their task, never one bare.
+    const collide = buildSubmitPreparedReturnPrompt({
+      ...preparedBase,
+      earlierUnreceiptedSubmitRuns: [
+        { jobNumber: 3, taskId: "task-a", taskName: "Pudleston 2025" },
+        { jobNumber: 3, taskId: "task-b", taskName: "Pudleston 2025 rerun" },
+      ],
+      currentTask: { taskId: "task-b", taskName: "Pudleston 2025 rerun" },
+    });
+    expect(collide).toContain(
+      "earlier LTS submit runs (Run #3 of task \u201cPudleston 2025\u201d and Run #3 of task \u201cPudleston 2025 rerun\u201d)",
+    );
   });
 });
 
@@ -1077,6 +1089,23 @@ describe("continuations of a submit run (resume, recovery)", () => {
       );
       expect(prompt).toContain("Click **Complete submission to Revenue Service** at most once in this whole run");
     }
+  });
+
+  it("still reads the case status on the portal (a run can pause at login before FIRST CHECK)", () => {
+    const prepared = buildSubmitPreparedReturnPrompt({ ...preparedBase, firstDispatch: false });
+    expect(prepared).toContain(
+      "**Read the case status if you have not yet done so in this run** (for example the run stopped at login before it could): open the case: https://my.gov.gg/revenue/case/abc/view",
+    );
+    expect(prepared).toContain("Only read the case page: do not use its links to reach the return");
+    const full = fullSubmit({ firstDispatch: false });
+    expect(full).toMatch(/open the case: https:\/\/\S+\/revenue\/case\/\S+\/view and read/);
+    for (const prompt of [prepared, full]) {
+      expect(prompt).toContain(
+        "The return is still a draft only when the case/return status is a draft status such as **Pending** or **In progress**",
+      );
+      expect(prompt).toContain("If the status is not a draft status, or you cannot see it at all, do **NOT** submit");
+    }
+    expect(prepared).toContain("**REQUIRES_ATTENTION: PREPARED_DRAFT_NOT_VERIFIED:** quoting the status");
   });
 
   it("drops the contradictory ALREADY_SUBMITTED rule from the Submit prepared return verify step", () => {
