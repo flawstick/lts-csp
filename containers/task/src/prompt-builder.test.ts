@@ -685,7 +685,8 @@ describe("notice of assessment in the filling prompt", () => {
       expect(prompt).toContain(
         "The answer for this return is **Yes** (LTS's default answer for this return). Select **Yes**.",
       );
-      expect(prompt).not.toContain("**No**");
+      expect(prompt).not.toContain("Select **No**");
+      expect(prompt).not.toContain("notice of assessment question with **No**");
     },
   );
 
@@ -1136,5 +1137,41 @@ describe("continuations of a submit run (resume, recovery)", () => {
     expect(fullSubmit({ submissionMode: "prepare_only", firstDispatch: false })).toBe(
       fullSubmit({ submissionMode: "prepare_only" }),
     );
+  });
+});
+
+describe("LTS standing answers", () => {
+  const build = (form: Record<string, unknown>) =>
+    buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: {
+        certificateType: "Certificate 3",
+        entityName: "Porte Des Granges Limited",
+        relevantActivity: "None of the above",
+        ...form,
+      } as any,
+      portalUrl: "https://my.gov.gg",
+      submissionMode: "prepare_only",
+    });
+
+  it("answers non-residents and benefits in kind No without asking", () => {
+    const prompt = build({ isConstituentEntity: "No" });
+    expect(prompt).toContain("LTS STANDING ANSWERS");
+    expect(prompt).toMatch(/non-resident individual or entity[^\n]*→ \*\*No\*\*/);
+    expect(prompt).toMatch(/benefits in kind[^\n]*→ \*\*No\*\*/);
+  });
+
+  it("answers both Pillar Two questions No when CbCR is No or unsaved", () => {
+    for (const isConstituentEntity of ["No", null]) {
+      const prompt = build({ isConstituentEntity });
+      expect(prompt).toContain("so answer **No** to both");
+      expect(prompt).toContain("next accounting period");
+    }
+  });
+
+  it("has no Pillar Two standing answer when CbCR is Yes", () => {
+    const prompt = build({ isConstituentEntity: "Yes" });
+    expect(prompt).not.toContain("so answer **No** to both");
+    expect(prompt).toContain("no standing answer for the Pillar Two questions");
   });
 });
