@@ -21,6 +21,7 @@ import {
 import {
   DECLARATION_INCOMPLETE_MARKER,
   NEEDS_FILING_CONTACT_MARKER,
+  PREPARED_DRAFT_NOT_VERIFIED_MARKER,
 } from "./run-outcome";
 
 /** Labels a prepare run reports, parsed by @repo/database/prepared-draft. */
@@ -1084,8 +1085,7 @@ Please provide the missing information to continue with the form submission.
 `;
 }
 
-/** Output marker for a submit_prepared run that refused to submit. */
-export const PREPARED_DRAFT_NOT_VERIFIED_MARKER = "PREPARED_DRAFT_NOT_VERIFIED";
+export { PREPARED_DRAFT_NOT_VERIFIED_MARKER };
 
 /**
  * Prompt for "Submit prepared return": open the exact draft an earlier
