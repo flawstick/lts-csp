@@ -21,8 +21,9 @@ export type PreparedDraftRecord = {
   /** Fingerprint of the form data, files and case the draft was filled from. */
   inputFingerprint: string;
   /**
-   * Canonical review/submit page URL of this draft
-   * (https://revenueservice.gov.gg/company-tax-ui/<draftId>/reviewAndSubmit/summary).
+   * Canonical review/submit page URL of this draft: the review summary or the
+   * declaration step after it, where a prepare run with a filing contact stops
+   * (https://revenueservice.gov.gg/company-tax-ui/[company-tax/tax-returns/]<draftId>/reviewAndSubmit/{summary,declaration}).
    */
   reviewUrl: string | null;
   /** Return/case reference the agent read on the review page, if shown. */
@@ -49,10 +50,11 @@ const NON_PORTAL_FORM_KEYS = new Set([
   "lastEditedBy",
   "managerSignOff",
   "managerSignOffDate",
-  // Answered only on the declaration page during the submit itself, after
-  // the prepared review page: a prepare run never enters it, so setting it
-  // after Prepare only leaves the prepared draft valid. The submit prompt
-  // carries the current answer.
+  // Answered on the declaration page after the review summary. A prepare run
+  // selects it there, but the portal keeps declaration-page state in the
+  // browser session only (it is sent with the final submitDeclaration), so a
+  // Submit prepared return run re-applies the current answer in its own
+  // session: changing it after Prepare only leaves the prepared draft valid.
   "noticeOfAssessment",
 ]);
 
@@ -127,19 +129,32 @@ export function isGuernseyPortalUrl(value: string): boolean {
   return Boolean(host && (host === "gov.gg" || host.endsWith(".gov.gg")));
 }
 
-// The Guernsey Revenue Service company-tax-ui review/submit page of one draft
-// (see prepare-only-guard/guard-core.js: the draft id in this path is the id
-// the submit API posts to, /company-tax-api/v1/draftTaxReturn/<id>/...).
+// The Guernsey Revenue Service company-tax-ui review/submit pages of one
+// draft: the review summary and the declaration step after it (see
+// prepare-only-guard/guard-core.js: the draft id in this path is the id the
+// submit API posts to, /company-tax-api/v1/draftTaxReturn/<id>/...).
 // Exact host and path only: a generic gov.gg page does not identify a draft.
 const REVIEW_URL_PATTERN =
-  /^https:\/\/revenueservice\.gov\.gg\/company-tax-ui\/(?:company-tax\/tax-returns\/)?([A-Za-z0-9_-]{1,128})\/reviewAndSubmit\/summary\/?$/;
+  /^https:\/\/revenueservice\.gov\.gg(\/company-tax-ui\/(?:company-tax\/tax-returns\/)?([A-Za-z0-9_-]{1,128})\/reviewAndSubmit)\/(?:summary|declaration)\/?$/;
 
 /**
- * The draft id when `value` is the canonical review/submit page URL of a
- * specific draft, otherwise null (other hosts, paths, query or fragment).
+ * The draft id when `value` is the canonical review summary or declaration
+ * page URL of a specific draft, otherwise null (other hosts, paths, query or
+ * fragment).
  */
 export function getGuernseyReviewDraftId(value: string): string | null {
-  return value.trim().match(REVIEW_URL_PATTERN)?.[1] ?? null;
+  return value.trim().match(REVIEW_URL_PATTERN)?.[2] ?? null;
+}
+
+/**
+ * The review summary page of the draft a canonical review summary or
+ * declaration URL names, keeping its exact path, or null when `value` is not
+ * one. A Submit prepared return run verifies the draft there before it moves
+ * on to the declaration step.
+ */
+export function getGuernseyReviewSummaryUrl(value: string): string | null {
+  const base = value.trim().match(REVIEW_URL_PATTERN)?.[1];
+  return base ? `https://revenueservice.gov.gg${base}/summary` : null;
 }
 
 /**

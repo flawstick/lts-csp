@@ -49,15 +49,32 @@ export const REQUIRES_ATTENTION_KEYWORDS = [
   "need to login",
 ];
 
-const NEGATION_PATTERN =
-  /\b(not|never|no|without|before|until|didn't|did not|haven't|has not|have not|hasn't|wasn't|was not|isn't|is not|won't|will not|do not|don't|nothing)\b[^.!?\n]*$/;
+const NEGATION_WORDS =
+  "not|never|no|without|before|until|didn't|did not|haven't|has not|have not|hasn't|wasn't|was not|isn't|is not|won't|will not|do not|don't|nothing";
+
+const NEGATION_PATTERN = new RegExp(
+  `\\b(${NEGATION_WORDS})\\b[^.!?\\n]*$`,
+);
+
+// Weak markers are also how an agent describes a step it could not or did not
+// take ("cannot move on to the confirmation page", "clicking it would show the
+// confirmation page"), so modal and inability words also negate them. They are
+// not applied to strong markers: "I cannot find the receipt link, but the
+// return was submitted successfully" must still count as a filing.
+const WEAK_NEGATION_PATTERN = new RegExp(
+  `\\b(${NEGATION_WORDS}|cannot|can['\u2019]t|could not|couldn['\u2019]t|unable|would|will|could)\\b[^.!?\\n]*$`,
+);
 
 function normalize(output: string) {
   return output.toLowerCase();
 }
 
 /** True when `marker` appears in `text` without a negation earlier in the same sentence. */
-function hasAffirmedMarker(text: string, marker: string) {
+function hasAffirmedMarker(
+  text: string,
+  marker: string,
+  negation: RegExp = NEGATION_PATTERN,
+) {
   let index = text.indexOf(marker);
   while (index !== -1) {
     const sentenceStart = Math.max(
@@ -67,7 +84,7 @@ function hasAffirmedMarker(text: string, marker: string) {
       text.lastIndexOf("\n", index - 1),
     );
     const prefix = text.slice(sentenceStart + 1, index);
-    if (!NEGATION_PATTERN.test(prefix)) {
+    if (!negation.test(prefix)) {
       return true;
     }
     index = text.indexOf(marker, index + marker.length);
@@ -82,18 +99,48 @@ export function isPrepareOnlyReadyOutput(output: string): boolean {
   );
 }
 
+/** The output opens with the REQUIRES_ATTENTION marker (optionally bold). */
+function startsWithRequiresAttention(output: string): boolean {
+  return /^\**\s*requires_attention\b/.test(normalize(output).trimStart());
+}
+
+/**
+ * The output is one of the "stopped before the final button" reports
+ * (REQUIRES_ATTENTION: DECLARATION_INCOMPLETE / PREPARED_DRAFT_NOT_VERIFIED).
+ * Both contracts mean the final filing action was not clicked, and both ask
+ * the agent to describe the page and the button, so they are judged on
+ * strong markers only, like a READY output.
+ */
+function isStoppedBeforeFilingOutput(output: string): boolean {
+  if (!startsWithRequiresAttention(output)) return false;
+  const normalized = normalize(output);
+  return STOPPED_BEFORE_FILING_MARKERS.some((marker) =>
+    normalized.includes(marker.toLowerCase()),
+  );
+}
+
 export function isLikelySubmittedOutput(output: string): boolean {
   const normalized = normalize(output);
-  const ready = isPrepareOnlyReadyOutput(output);
-  const markers = ready
-    ? STRONG_SUBMISSION_MARKERS
-    : [...STRONG_SUBMISSION_MARKERS, ...WEAK_SUBMISSION_MARKERS];
-  return markers.some((marker) => hasAffirmedMarker(normalized, marker));
+  const strongOnly =
+    isPrepareOnlyReadyOutput(output) || isStoppedBeforeFilingOutput(output);
+  if (
+    STRONG_SUBMISSION_MARKERS.some((marker) =>
+      hasAffirmedMarker(normalized, marker),
+    )
+  ) {
+    return true;
+  }
+  return (
+    !strongOnly &&
+    WEAK_SUBMISSION_MARKERS.some((marker) =>
+      hasAffirmedMarker(normalized, marker, WEAK_NEGATION_PATTERN),
+    )
+  );
 }
 
 export function hasRequiresAttentionOutputMarker(output: string): boolean {
-  const normalized = normalize(output).trimStart();
-  if (normalized.startsWith("**requires_attention") || normalized.startsWith("requires_attention")) {
+  const normalized = normalize(output);
+  if (startsWithRequiresAttention(output)) {
     return true;
   }
   return REQUIRES_ATTENTION_OUTPUT_MARKERS.some((marker) =>
@@ -119,6 +166,23 @@ export type RunOutcome = {
 /** Agent output marker for a run that stopped at the GRS contact step. */
 export const NEEDS_FILING_CONTACT_MARKER = "NEEDS_FILING_CONTACT";
 
+/**
+ * Agent output marker for a prepare run that reached the declaration step but
+ * could not leave it complete (notice of assessment answer not selectable, a
+ * declaration box that will not tick, or the final button still disabled).
+ * Always reported as "REQUIRES_ATTENTION: DECLARATION_INCOMPLETE: ...", which
+ * pauses the run and records no prepared draft.
+ */
+export const DECLARATION_INCOMPLETE_MARKER = "DECLARATION_INCOMPLETE";
+
+/** Output marker for a submit_prepared run that refused to submit. */
+export const PREPARED_DRAFT_NOT_VERIFIED_MARKER = "PREPARED_DRAFT_NOT_VERIFIED";
+
+const STOPPED_BEFORE_FILING_MARKERS = [
+  DECLARATION_INCOMPLETE_MARKER,
+  PREPARED_DRAFT_NOT_VERIFIED_MARKER,
+];
+
 export function classifyRunOutcome(input: {
   submissionMode: SubmissionMode;
   sessionStatus: string;
@@ -127,8 +191,12 @@ export function classifyRunOutcome(input: {
 }): RunOutcome {
   const { submissionMode, output } = input;
   const lowerOutput = normalize(output);
+  // An output that opens with REQUIRES_ATTENTION is a stop, even if it also
+  // mentions the READY marker (e.g. "not READY_FOR_MANUAL_SUBMISSION").
   const prepareOnlyReady =
-    submissionMode === "prepare_only" && isPrepareOnlyReadyOutput(output);
+    submissionMode === "prepare_only" &&
+    isPrepareOnlyReadyOutput(output) &&
+    !startsWithRequiresAttention(output);
   const likelySubmitted = isLikelySubmittedOutput(output);
   const prepareOnlyLikelySubmitted =
     submissionMode === "prepare_only" && likelySubmitted;

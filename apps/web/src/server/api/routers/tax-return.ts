@@ -1932,7 +1932,8 @@ export const taxReturnRouter = createTRPCRouter({
           .optional()
           .default("prepare_only"),
         // "submit_prepared" files the exact draft the latest Prepare only run
-        // left on the review page, without filling or reviewing it again.
+        // left ready on the review/declaration step, without filling or
+        // reviewing it again.
         filingOperation: z
           .enum(["fill", SUBMIT_PREPARED_OPERATION])
           .optional()

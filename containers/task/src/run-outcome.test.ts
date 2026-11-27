@@ -164,6 +164,146 @@ describe("classifyRunOutcome", () => {
   });
 });
 
+describe("prepare run that completed the declaration step", () => {
+  // Shape of the Pudleston (2026-11-27) prepare output once the declaration
+  // step is completed in the prepare run.
+  const declarationReady = `READY_FOR_MANUAL_SUBMISSION: The return is prepared and on the final declaration/submit page. Notice of assessment: selected "Yes" (LTS's default answer). All three declaration confirmations are ticked: "I declare that the information given in this return is correct and complete", "I confirm that I am authorised to submit this return on behalf of the company" and the third declaration box. The final button "Complete submission to Revenue Service" is now enabled and was not clicked; it is the only remaining portal action.
+REVIEW_PAGE_URL: https://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/0b6f3c1e-8f7d-4b39-9a51-2f1c7d6e4a10/reviewAndSubmit/declaration
+PORTAL_REFERENCE: NONE`;
+
+  it("is a prepared draft, not a submission", () => {
+    expect(isLikelySubmittedOutput(declarationReady)).toBe(false);
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output: declarationReady,
+      isTaskSuccessful: false,
+    });
+    expect(outcome).toMatchObject({
+      success: true,
+      prepareOnlyReady: true,
+      likelySubmitted: false,
+      prepareOnlyLikelySubmitted: false,
+      needsAttention: false,
+      needsFilingContact: false,
+    });
+    expect(shouldCaptureFiledReturnPdf("prepare_only", outcome)).toBe(false);
+    expect(getTaxReturnStatusForOutcome("prepare_only", outcome)).toBe("review_required");
+  });
+
+  it.each([
+    "**REQUIRES_ATTENTION: DECLARATION_INCOMPLETE:** The second declaration box would not stay ticked; \"Complete submission to Revenue Service\" is still disabled. I did not click it.",
+    "REQUIRES_ATTENTION: DECLARATION_INCOMPLETE: 'Please indicate if you wish to receive a notice of assessment' shows no 'Yes' option (options: 'Paper', 'Email'). This is not READY_FOR_MANUAL_SUBMISSION; nothing was submitted.",
+  ])("pauses when the declaration could not be completed: %s", (output) => {
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output,
+      isTaskSuccessful: true,
+    });
+    expect(outcome).toMatchObject({
+      prepareOnlyReady: false,
+      likelySubmitted: false,
+      prepareOnlyLikelySubmitted: false,
+      needsAttention: true,
+      needsFilingContact: false,
+    });
+  });
+
+  // Reports that describe the button or the next page in weak-marker terms
+  // (review finding: these were classified as a prepare run that filed).
+  it.each([
+    'REQUIRES_ATTENTION: DECLARATION_INCOMPLETE: Selected "Yes" and ticked all three declaration boxes, but "Complete submission to Revenue Service" is still greyed out, so the return cannot move on to the confirmation page. URL: https://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/d-1/reviewAndSubmit/declaration',
+    "REQUIRES_ATTENTION: DECLARATION_INCOMPLETE: box 2 will not stay ticked. Clicking the final button would show the confirmation page.",
+    "**REQUIRES_ATTENTION: DECLARATION_INCOMPLETE:** Box 3 keeps un-ticking. The confirmation page is only shown after \"Complete submission to Revenue Service\", which I did not click.",
+    "REQUIRES_ATTENTION: DECLARATION_INCOMPLETE: The notice of assessment radio can't be selected; the return couldn't reach the confirmation page.",
+  ])("does not treat a DECLARATION_INCOMPLETE report as a filing: %s", (output) => {
+    expect(isLikelySubmittedOutput(output)).toBe(false);
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output,
+      isTaskSuccessful: true,
+    });
+    expect(outcome).toMatchObject({
+      prepareOnlyReady: false,
+      likelySubmitted: false,
+      prepareOnlyLikelySubmitted: false,
+      needsAttention: true,
+    });
+    expect(shouldCaptureFiledReturnPdf("prepare_only", outcome)).toBe(false);
+  });
+
+  it("does not treat a PREPARED_DRAFT_NOT_VERIFIED report as a filing", () => {
+    const output =
+      "REQUIRES_ATTENTION: PREPARED_DRAFT_NOT_VERIFIED: The entity name on the declaration page differs. I did not click the final button, so the portal never showed the confirmation page.";
+    const outcome = classifyRunOutcome({
+      submissionMode: "submit_and_capture_pdf",
+      sessionStatus: "idle",
+      output,
+      isTaskSuccessful: true,
+    });
+    expect(outcome.likelySubmitted).toBe(false);
+    expect(outcome.needsAttention).toBe(true);
+  });
+
+  it("still treats a stopped-before-filing report with a strong marker as a filing", () => {
+    const output =
+      "REQUIRES_ATTENTION: DECLARATION_INCOMPLETE: The return was submitted successfully after the third box was ticked.";
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output,
+      isTaskSuccessful: true,
+    });
+    expect(outcome.prepareOnlyLikelySubmitted).toBe(true);
+  });
+
+  it("keeps weak markers for other REQUIRES_ATTENTION outputs (a submit run that filed but lost the receipt)", () => {
+    const output =
+      "REQUIRES_ATTENTION: I reached the confirmation page but the receipt download failed.";
+    expect(isLikelySubmittedOutput(output)).toBe(true);
+    const outcome = classifyRunOutcome({
+      submissionMode: "submit_and_capture_pdf",
+      sessionStatus: "idle",
+      output,
+      isTaskSuccessful: false,
+    });
+    expect(getTaxReturnStatusForOutcome("submit_and_capture_pdf", outcome)).toBe(
+      "review_required",
+    );
+  });
+
+  it("negates weak markers with modal and inability words, but not strong markers", () => {
+    expect(
+      isLikelySubmittedOutput("Clicking the final button would show the confirmation page."),
+    ).toBe(false);
+    expect(
+      isLikelySubmittedOutput("The return cannot reach the confirmation page yet."),
+    ).toBe(false);
+    expect(
+      isLikelySubmittedOutput(
+        "I cannot find the receipt link, but the return was submitted successfully.",
+      ),
+    ).toBe(true);
+    expect(
+      isLikelySubmittedOutput("The portal showed the confirmation page with reference GRS-1."),
+    ).toBe(true);
+  });
+
+  it("lets a leading REQUIRES_ATTENTION win over a later READY marker", () => {
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output: `REQUIRES_ATTENTION: a box will not tick.\n${declarationReady}`,
+      isTaskSuccessful: true,
+    });
+    expect(outcome.prepareOnlyReady).toBe(false);
+    expect(outcome.needsAttention).toBe(true);
+    expect(outcome.prepareOnlyLikelySubmitted).toBe(false);
+  });
+});
+
 describe("receipt-gated completion", () => {
   const submitted = classifyRunOutcome({
     submissionMode: "submit_and_capture_pdf",

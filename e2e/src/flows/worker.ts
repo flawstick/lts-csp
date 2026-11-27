@@ -98,4 +98,56 @@ const workerPrompts: Flow = {
   },
 };
 
-export const workerFlows: Flow[] = [workerPrompts];
+/**
+ * Prepare only with a filing contact completes the declaration step (notice
+ * of assessment answer and every declaration box) and stops before the final
+ * button; the draft it reports on the declaration page is a valid draft.
+ */
+const workerPreparePrompt: Flow = {
+  name: "worker: prepare_only completes the declaration step and stops before the final button",
+  async run(ctx, c) {
+    const { buildSubstanceFormPrompt, buildSubmitPreparedReturnPrompt } = await import("@repo/task/src/prompt-builder");
+    const { parsePreparedDraftOutput } = await import("@repo/database/prepared-draft");
+    for (const [key, answer] of [
+      ["a_ready_default", "Yes"],
+      ["d_noa_no", "No"],
+    ] as const) {
+      const taxReturn = await loadReturn(ctx.seeded.returns[key]!.taxReturnId);
+      const prompt = buildSubstanceFormPrompt({
+        taxReturn,
+        substanceForm: taxReturn.substanceForm,
+        portalUrl: taxReturn.jurisdiction?.portalUrl || "https://my.gov.gg",
+        returnLink: taxReturn.link || undefined,
+        submissionMode: "prepare_only",
+        contactName: "E2E Filing Contact",
+        contactEmail: "filing@client-e2e.test",
+      });
+      c.ok(`(${key}) prepare prompt: selects **${answer}** on the declaration step`, prompt.includes(`On the declaration step, select **${answer}** for the notice of assessment question`));
+      c.ok(`(${key}) prepare prompt: ticks every declaration box`, prompt.includes("Tick every declaration confirmation box (the portal shows three"));
+      c.ok(`(${key}) prepare prompt: warns a ticked box un-ticks`, prompt.includes("clicking a box that is already ticked UN-TICKS it"));
+      c.ok(`(${key}) prepare prompt: stops before the final button`, prompt.includes("Do NOT click **Complete submission to Revenue Service**"));
+      c.ok(`(${key}) prepare prompt: never says to click the final submit`, !prompt.includes("Click the final submit/confirm action"));
+      c.ok(`(${key}) prepare prompt: reports the declaration page URL`, prompt.includes("REVIEW_PAGE_URL: <the full URL of the declaration page currently open>"));
+    }
+
+    const declarationUrl = "https://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/e2eDraftA001/reviewAndSubmit/declaration";
+    const parsed = parsePreparedDraftOutput(`READY_FOR_MANUAL_SUBMISSION: declaration complete.\nREVIEW_PAGE_URL: ${declarationUrl}\nPORTAL_REFERENCE: NONE`);
+    c.eq("a declaration page URL is recorded as the prepared draft", parsed.reviewUrl, declarationUrl);
+    const a = await loadReturn(ctx.seeded.returns.a_ready_default!.taxReturnId);
+    const submit = buildSubmitPreparedReturnPrompt({
+      taxReturn: a,
+      substanceForm: a.substanceForm,
+      portalUrl: "https://my.gov.gg",
+      reviewUrl: declarationUrl,
+      portalReference: null,
+      contactName: "E2E Filing Contact",
+      contactEmail: "filing@client-e2e.test",
+    });
+    c.ok(
+      "submit_prepared from a declaration URL verifies on the same draft's summary",
+      submit.includes("its path must be **/company-tax-ui/company-tax/tax-returns/e2eDraftA001/reviewAndSubmit/summary**"),
+    );
+  },
+};
+
+export const workerFlows: Flow[] = [workerPrompts, workerPreparePrompt];
