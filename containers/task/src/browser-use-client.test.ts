@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BrowserUseClient } from "./browser-use-client";
+import { BrowserUseClient, BrowserUseRunCreateError } from "./browser-use-client";
 import {
   BROWSER_SCREEN_SIZE,
   DEFAULT_FINAL_PROFILE,
@@ -17,7 +17,7 @@ const sdk = vi.hoisted(() => ({
     events: vi.fn(),
     cancel: vi.fn(),
   },
-  sessions: { get: vi.fn(), queue: vi.fn(), removeMessage: vi.fn() },
+  sessions: { get: vi.fn(), queue: vi.fn(), removeMessage: vi.fn(), list: vi.fn() },
   browsers: { list: vi.fn(), stop: vi.fn(), downloads: vi.fn() },
   workspaces: {
     create: vi.fn(),
@@ -473,5 +473,55 @@ describe("bu-ultrafast prepare profile", () => {
       new BrowserUseClient("key").runTask("Prepare only", { profile: ultrafast }),
     ).rejects.toThrow("unexpected model");
     expect(sdk.runs.cancel).toHaveBeenCalledWith("swapped");
+  });
+});
+
+describe("getSessionStatus", () => {
+  it("reads another job's session fresh, never from the cache", async () => {
+    const client = new BrowserUseClient("key");
+    sdk.sessions.get.mockResolvedValueOnce({ sessionId: "other", latestRunId: "r", status: "running" });
+    expect(await client.getSessionStatus("other")).toBe("running");
+    sdk.sessions.get.mockResolvedValueOnce({ sessionId: "other", latestRunId: "r", status: "cancelled" });
+    expect(await client.getSessionStatus("other")).toBe("stopped");
+    expect(sdk.sessions.get).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a failed create request (submit dispatch with no session id)", () => {
+  const httpError = (statusCode: number) => Object.assign(new Error(`HTTP ${statusCode}`), { statusCode });
+
+  it("is a definite refusal only for a client error Browser Use answered", async () => {
+    const client = new BrowserUseClient("key");
+    for (const [cause, definite] of [
+      [httpError(400), true],
+      [httpError(422), true],
+      [httpError(402), true],
+      [httpError(408), false],
+      [httpError(429), false],
+      [httpError(500), false],
+      [httpError(503), false],
+      // The SDK's 30 s abort or a connection reset: Browser Use may have created the run.
+      [new Error("The operation was aborted"), false],
+    ] as const) {
+      sdk.runs.create.mockRejectedValueOnce(cause);
+      const error = await client.runTask("task", { profile }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BrowserUseRunCreateError);
+      expect((error as BrowserUseRunCreateError).definitelyNotCreated).toBe(definite);
+      expect((error as Error).message).toBe(cause.message);
+    }
+  });
+
+  it("does not wrap failures after the run was created", async () => {
+    const client = new BrowserUseClient("key");
+    sdk.runs.create.mockResolvedValueOnce({ ...createdRun(), model: "other-model" });
+    const error = await client.runTask("task", { profile }).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(BrowserUseRunCreateError);
+  });
+
+  it("lists session pages to find a session the failed request created", async () => {
+    const client = new BrowserUseClient("key");
+    sdk.sessions.list.mockResolvedValueOnce({ sessions: [], hasMore: false });
+    await client.listSessions("cursor-2");
+    expect(sdk.sessions.list).toHaveBeenCalledWith({ cursor: "cursor-2", limit: 100 });
   });
 });

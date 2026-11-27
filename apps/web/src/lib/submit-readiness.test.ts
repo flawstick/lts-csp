@@ -15,6 +15,7 @@ import {
   SUBMIT_PREPARED_GUERNSEY_ONLY_MESSAGE,
   UNRESOLVED_CERTIFICATE_MESSAGE,
 } from "./submit-readiness";
+import { ACTIVE_JOB_STATUSES } from "./manual-completion";
 
 const substanceForm = {
   id: "form-1",
@@ -262,6 +263,33 @@ describe("getSubmitReadiness", () => {
         ],
       }),
     ).toEqual({ ready: false, blocker: ACTIVE_JOB_ON_RETURN_MESSAGE });
+  });
+
+  it("a paused submit run that reached the portal blocks both submit operations", () => {
+    // Its browser may still be live: it is never stopped by a new start; the
+    // active-run guard refuses the start instead.
+    const pausedSubmit = { ...dispatchedSubmit, status: "paused" };
+    const readiness = getSubmitReadinessByOperation({
+      taxReturn: signedOffReturn,
+      returnJobs: [preparedJob(currentFingerprint), pausedSubmit],
+    });
+    expect(readiness.submit).toEqual({ ready: false, blocker: ACTIVE_JOB_ON_RETURN_MESSAGE });
+    expect(readiness.submitPrepared).toEqual({ ready: false, blocker: ACTIVE_JOB_ON_RETURN_MESSAGE });
+    expect(ACTIVE_JOB_STATUSES).toContain("paused");
+  });
+
+  it("names an earlier run on another task of the return with its task", () => {
+    const readiness = getSubmitReadinessByOperation({
+      taxReturn: signedOffReturn,
+      returnJobs: [
+        preparedJob(currentFingerprint),
+        { ...dispatchedSubmit, jobNumber: 2, taskId: "task-a", taskName: "Example 2025" },
+      ],
+      currentTask: { taskId: "task-b", taskName: "Example 2025 resubmit" },
+    });
+    expect(readiness.caution).toBe(
+      "Run #2 of task \u201cExample 2025\u201d reached the portal and saved no receipt. This run first checks the portal shows the return as not yet submitted.",
+    );
   });
 
   it("puts filing maintenance first", () => {

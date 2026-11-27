@@ -357,6 +357,11 @@ const earlierUnreceiptedSubmit: Flow = {
       c.ok("prompt names the earlier run", prompt.includes(`(Run #${earlier?.job_number}) on this return reached the portal and saved no filed-return receipt`));
       c.ok("prompt stops with ALREADY_SUBMITTED if filed", prompt.includes("**REQUIRES_ATTENTION: ALREADY_SUBMITTED:**"));
       c.ok("prompt checks for a draft status", prompt.includes("**Pending** or **In progress**"));
+      // A resume/recovery continuation of the same run does not repeat the
+      // first check: the run may already have submitted the return itself.
+      const continued = (await buildPrompt(ctx, "c_locked", created.id, { firstDispatch: false })).prompt ?? "";
+      c.ok("continuation has no FIRST CHECK", !continued.includes("## FIRST CHECK"));
+      c.ok("continuation reports its own submission", continued.includes("## SUBMISSION STATUS") && continued.includes("this run submitted it"));
     }
     c.ok("no start error shown", (await page.getByText("did not start").count()) === 0);
     await page.waitForTimeout(1000);

@@ -447,6 +447,60 @@ describe("submit run that finds the return already submitted", () => {
     expect(prepare.prepareOnlyLikelySubmitted).toBe(true);
   });
 
+  it("after a continuation, never writes off a submission this run may have made", () => {
+    // The job had dispatched an earlier browser task (resume or recovery),
+    // which may have clicked the final button.
+    const continued = classifyRunOutcome({
+      submissionMode: "submit_and_capture_pdf",
+      sessionStatus: "idle",
+      output,
+      isTaskSuccessful: true,
+      browserTaskCount: 2,
+    });
+    expect(continued).toMatchObject({
+      alreadySubmitted: false,
+      portalReportsSubmitted: true,
+      success: false,
+      likelySubmitted: true,
+      needsAttention: true,
+      needsFilingContact: false,
+    });
+    expect(shouldCaptureFiledReturnPdf("submit_and_capture_pdf", continued)).toBe(true);
+    // Held for review whatever was downloaded, never "failed" as not filed.
+    for (const receipt of ["uploaded", "missing", "failed", "not_attempted"] as const) {
+      expect(resolveFinalRunStatuses("submit_and_capture_pdf", continued, receipt)).toEqual({
+        taxReturnStatus: "review_required",
+        jobStatus: "failed",
+        taskStatus: "failed",
+        receiptGate: PORTAL_ALREADY_SUBMITTED_GATE,
+      });
+    }
+    expect(getTaxReturnStatusForOutcome("submit_and_capture_pdf", continued)).toBe("review_required");
+    // The first browser task: the portal's filing is not this run's.
+    expect(classify()).toMatchObject({ alreadySubmitted: true, portalReportsSubmitted: true, likelySubmitted: false });
+    expect(
+      classifyRunOutcome({ submissionMode: "submit_and_capture_pdf", sessionStatus: "idle", output, browserTaskCount: 1 })
+        .alreadySubmitted,
+    ).toBe(true);
+  });
+
+  it("a continuation that reports its own submission completes as before", () => {
+    const filed = classifyRunOutcome({
+      submissionMode: "submit_and_capture_pdf",
+      sessionStatus: "idle",
+      output:
+        "The case now shows the return as Submitted after my earlier click; submitted successfully, downloaded the receipt company-tax-submitted.pdf.",
+      isTaskSuccessful: true,
+      browserTaskCount: 3,
+    });
+    expect(filed).toMatchObject({ success: true, likelySubmitted: true, alreadySubmitted: false, portalReportsSubmitted: false });
+    expect(resolveFinalRunStatuses("submit_and_capture_pdf", filed, "uploaded")).toMatchObject({
+      taxReturnStatus: "completed",
+      jobStatus: "completed",
+      receiptGate: null,
+    });
+  });
+
   it("does not affect other submit outcomes", () => {
     const filed = classifyRunOutcome({
       submissionMode: "submit_and_capture_pdf",

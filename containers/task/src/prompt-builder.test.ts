@@ -8,6 +8,7 @@ import {
   buildResumePrompt,
   buildSubmitPreparedReturnPrompt,
   buildSubstanceFormPrompt,
+  SUBMISSION_STATUS_CONTINUATION_HEADING,
 } from "./prompt-builder";
 
 const baseTaxReturn = {
@@ -1011,5 +1012,129 @@ describe("first check: the return is not already submitted", () => {
       isTaskSuccessful: true,
     });
     expect(outcome).toMatchObject({ alreadySubmitted: true, success: false, likelySubmitted: false, needsAttention: true });
+  });
+
+  it("names an earlier run on another task with its task", () => {
+    const prompt = buildSubmitPreparedReturnPrompt({
+      ...preparedBase,
+      earlierUnreceiptedSubmitRuns: [{ jobNumber: 2, taskId: "task-a", taskName: "Pudleston 2025" }],
+      currentTask: { taskId: "task-b", taskName: "Pudleston 2025 rerun" },
+    });
+    expect(prompt).toContain("an earlier LTS submit run (Run #2 of task \u201cPudleston 2025\u201d) on this return");
+    // Not distinguishable: generic wording, never a misleading number.
+    const ambiguous = buildSubmitPreparedReturnPrompt({
+      ...preparedBase,
+      earlierUnreceiptedSubmitRuns: [
+        { jobNumber: 3, taskId: "task-a", taskName: "Pudleston" },
+        { jobNumber: 3, taskId: "task-c", taskName: "Pudleston" },
+      ],
+      currentTask: { taskId: "task-b", taskName: "Pudleston rerun" },
+    });
+    expect(ambiguous).toContain("**CAUTION:** earlier LTS submit runs on this return reached the portal");
+    expect(ambiguous).not.toContain("#3");
+    // The same number on this task and another: both named with their task, never one bare.
+    const collide = buildSubmitPreparedReturnPrompt({
+      ...preparedBase,
+      earlierUnreceiptedSubmitRuns: [
+        { jobNumber: 3, taskId: "task-a", taskName: "Pudleston 2025" },
+        { jobNumber: 3, taskId: "task-b", taskName: "Pudleston 2025 rerun" },
+      ],
+      currentTask: { taskId: "task-b", taskName: "Pudleston 2025 rerun" },
+    });
+    expect(collide).toContain(
+      "earlier LTS submit runs (Run #3 of task \u201cPudleston 2025\u201d and Run #3 of task \u201cPudleston 2025 rerun\u201d)",
+    );
+  });
+});
+
+describe("continuations of a submit run (resume, recovery)", () => {
+  const preparedBase = {
+    taxReturn: { entityName: "Pudleston Farm Limited", taxYear: 2025 } as any,
+    substanceForm: { companyNumber: "12345" } as any,
+    portalUrl: "https://my.gov.gg",
+    returnLink: "https://my.gov.gg/revenue/case/abc/process",
+    reviewUrl: "https://revenueservice.gov.gg/company-tax-ui/a/reviewAndSubmit/summary",
+    portalReference: null,
+    contactName: "NSM Filings Team",
+    contactEmail: "filings@nsm.example",
+  };
+  const fullSubmit = (extra: Record<string, unknown> = {}) =>
+    buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: { certificateType: "Certificate 2" } as any,
+      portalUrl: "https://my.gov.gg",
+      returnLink: baseTaxReturn.link,
+      submissionMode: "submit_and_capture_pdf",
+      contactName: "NSM Filings Team",
+      contactEmail: "filings@nsm.example",
+      ...extra,
+    });
+
+  it("replaces FIRST CHECK: the run may already have submitted the return itself", () => {
+    for (const prompt of [
+      buildSubmitPreparedReturnPrompt({ ...preparedBase, firstDispatch: false }),
+      fullSubmit({ firstDispatch: false }),
+    ]) {
+      expect(prompt).not.toContain("## FIRST CHECK");
+      expect(prompt).toContain(`## ${SUBMISSION_STATUS_CONTINUATION_HEADING}`);
+      expect(prompt).toContain("it is not a new run");
+      expect(prompt).toContain(
+        "**It shows submitted, and you clicked Complete submission to Revenue Service earlier in this run (or may have",
+      );
+      expect(prompt).toContain("this run submitted it");
+      expect(prompt).toContain("Do not start that output with REQUIRES_ATTENTION.");
+      // The marker only when the run is certain it never clicked the button.
+      expect(prompt).toContain(
+        "**It shows submitted, and you are certain you have not clicked Complete submission to Revenue Service at any point in this run:**",
+      );
+      expect(prompt).toContain("Click **Complete submission to Revenue Service** at most once in this whole run");
+    }
+  });
+
+  it("still reads the case status on the portal (a run can pause at login before FIRST CHECK)", () => {
+    const prepared = buildSubmitPreparedReturnPrompt({ ...preparedBase, firstDispatch: false });
+    expect(prepared).toContain(
+      "**Read the case status if you have not yet done so in this run** (for example the run stopped at login before it could): open the case: https://my.gov.gg/revenue/case/abc/view",
+    );
+    expect(prepared).toContain("Only read the case page: do not use its links to reach the return");
+    const full = fullSubmit({ firstDispatch: false });
+    expect(full).toMatch(/open the case: https:\/\/\S+\/revenue\/case\/\S+\/view and read/);
+    for (const prompt of [prepared, full]) {
+      expect(prompt).toContain(
+        "The return is still a draft only when the case/return status is a draft status such as **Pending** or **In progress**",
+      );
+      expect(prompt).toContain("If the status is not a draft status, or you cannot see it at all, do **NOT** submit");
+    }
+    expect(prepared).toContain("**REQUIRES_ATTENTION: PREPARED_DRAFT_NOT_VERIFIED:** quoting the status");
+  });
+
+  it("drops the contradictory ALREADY_SUBMITTED rule from the Submit prepared return verify step", () => {
+    const prompt = buildSubmitPreparedReturnPrompt({ ...preparedBase, firstDispatch: false });
+    expect(prompt).toContain("The return still shows as not submitted (see **SUBMISSION STATUS**).");
+    expect(prompt).toContain("follow **SUBMISSION STATUS** above, not the marker above");
+    expect(prompt).not.toContain("as **FIRST CHECK** says");
+    expect(prompt).not.toContain("see **FIRST CHECK**");
+  });
+
+  it("keeps the earlier-run caution", () => {
+    const prompt = buildSubmitPreparedReturnPrompt({
+      ...preparedBase,
+      firstDispatch: false,
+      earlierUnreceiptedSubmitRuns: [{ jobNumber: 3 }],
+    });
+    expect(prompt).toContain("**CAUTION:** an earlier LTS submit run (Run #3) on this return");
+  });
+
+  it("the first dispatch keeps FIRST CHECK (the default)", () => {
+    expect(buildSubmitPreparedReturnPrompt({ ...preparedBase, firstDispatch: true })).toBe(
+      buildSubmitPreparedReturnPrompt(preparedBase),
+    );
+    expect(buildSubmitPreparedReturnPrompt(preparedBase)).not.toContain(SUBMISSION_STATUS_CONTINUATION_HEADING);
+  });
+
+  it("does not change a prepare-only run", () => {
+    expect(fullSubmit({ submissionMode: "prepare_only", firstDispatch: false })).toBe(
+      fullSubmit({ submissionMode: "prepare_only" }),
+    );
   });
 });

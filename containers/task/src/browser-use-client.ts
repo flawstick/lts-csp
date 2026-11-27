@@ -16,6 +16,29 @@ import {
 } from "./browser-use-config";
 
 export type BrowserUseSessionStatus = "running" | "idle" | "stopped" | "error";
+
+/** HTTP statuses that may be retried or resolved later: not a definite refusal. */
+const NON_DEFINITIVE_CLIENT_STATUSES = new Set([408, 409, 425, 429]);
+
+/**
+ * `runs.create` failed. `definitelyNotCreated` only when Browser Use answered
+ * with a definite client error (4xx, not a timeout/conflict/rate limit): a
+ * timeout, reset or 5xx may come after Browser Use already accepted the run,
+ * so its agent may be live with no session id recorded.
+ */
+export class BrowserUseRunCreateError extends Error {
+  readonly definitelyNotCreated: boolean;
+  constructor(readonly cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "BrowserUseRunCreateError";
+    const statusCode = (cause as { statusCode?: unknown } | null)?.statusCode;
+    this.definitelyNotCreated =
+      typeof statusCode === "number" &&
+      statusCode >= 400 &&
+      statusCode < 500 &&
+      !NON_DEFINITIVE_CLIENT_STATUSES.has(statusCode);
+  }
+}
 export type BrowserUseFileInfo = WorkspaceFileInfo;
 export type StopStrategy = "task" | "session";
 
@@ -182,7 +205,12 @@ export class BrowserUseClient {
           }
         : {}),
     };
-    const run = await this.client.runs.create(body);
+    let run: Awaited<ReturnType<typeof this.client.runs.create>>;
+    try {
+      run = await this.client.runs.create(body);
+    } catch (error) {
+      throw new BrowserUseRunCreateError(error);
+    }
     if (run.model !== request.profile.model) {
       await this.client.runs.cancel(run.id);
       throw new Error(`Browser Use selected an unexpected model: ${run.model}`);
@@ -313,6 +341,29 @@ export class BrowserUseClient {
   async getBrowserExtensionIds(browserId: string): Promise<string[]> {
     const browser = await this.client.browsers.get(browserId);
     return (browser.extensions ?? []).map((extension) => extension.id);
+  }
+
+  /**
+   * The session's current status read fresh from Browser Use (never the
+   * cached state), e.g. for another job's session.
+   */
+  async getSessionStatus(sessionId: string): Promise<BrowserUseSessionStatus> {
+    const info = await this.client.sessions.get(sessionId);
+    return normalizeRunStatus(info.status);
+  }
+
+  /** One page of the account's sessions, most recent first. */
+  async listSessions(cursor: string | null): Promise<{
+    sessions: {
+      sessionId: string;
+      workspaceId: string | null;
+      createdAt: string;
+      updatedAt?: string | null;
+    }[];
+    nextCursor?: string | null;
+    hasMore?: boolean;
+  }> {
+    return this.client.sessions.list({ cursor, limit: 100 });
   }
 
   async stopSession(
