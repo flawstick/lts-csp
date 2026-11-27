@@ -161,6 +161,14 @@ export type RunOutcome = {
    * contact is configured. Always also `needsAttention`.
    */
   needsFilingContact: boolean;
+  /**
+   * A submit run's first check found the return already submitted on the
+   * portal (REQUIRES_ATTENTION: ALREADY_SUBMITTED:), so it did not submit.
+   * Always also `needsAttention`, never `success` or `likelySubmitted`: the
+   * filing is not this run's, and the run is held for review rather than
+   * paused and re-driven.
+   */
+  alreadySubmitted: boolean;
 };
 
 /** Agent output marker for a run that stopped at the GRS contact step. */
@@ -178,10 +186,27 @@ export const DECLARATION_INCOMPLETE_MARKER = "DECLARATION_INCOMPLETE";
 /** Output marker for a submit_prepared run that refused to submit. */
 export const PREPARED_DRAFT_NOT_VERIFIED_MARKER = "PREPARED_DRAFT_NOT_VERIFIED";
 
+/**
+ * Output marker for a submit run whose first check found the return already
+ * submitted on the portal (an earlier run, or a person, filed it). Reported
+ * as "REQUIRES_ATTENTION: ALREADY_SUBMITTED: ..." before anything is changed.
+ */
+export const ALREADY_SUBMITTED_MARKER = "ALREADY_SUBMITTED";
+
 const STOPPED_BEFORE_FILING_MARKERS = [
   DECLARATION_INCOMPLETE_MARKER,
   PREPARED_DRAFT_NOT_VERIFIED_MARKER,
+  ALREADY_SUBMITTED_MARKER,
 ];
+
+/**
+ * The output opens with "REQUIRES_ATTENTION: ALREADY_SUBMITTED:" (bold
+ * markers anywhere in it allowed, e.g. "**REQUIRES_ATTENTION: ALREADY_SUBMITTED:**").
+ */
+export function isAlreadySubmittedOutput(output: string): boolean {
+  const lead = normalize(output).trimStart().replace(/\*+|__/g, "");
+  return /^\s*requires_attention\s*:\s*already_submitted\b/.test(lead);
+}
 
 export function classifyRunOutcome(input: {
   submissionMode: SubmissionMode;
@@ -197,7 +222,12 @@ export function classifyRunOutcome(input: {
     submissionMode === "prepare_only" &&
     isPrepareOnlyReadyOutput(output) &&
     !startsWithRequiresAttention(output);
-  const likelySubmitted = isLikelySubmittedOutput(output);
+  // Only submit runs are asked for the check; the portal's own "Submitted"
+  // status it quotes is not a filing by this run.
+  const alreadySubmitted =
+    submissionMode === "submit_and_capture_pdf" &&
+    isAlreadySubmittedOutput(output);
+  const likelySubmitted = !alreadySubmitted && isLikelySubmittedOutput(output);
   const prepareOnlyLikelySubmitted =
     submissionMode === "prepare_only" && likelySubmitted;
 
@@ -213,7 +243,7 @@ export function classifyRunOutcome(input: {
     success = true;
   }
 
-  if (prepareOnlyLikelySubmitted) {
+  if (prepareOnlyLikelySubmitted || alreadySubmitted) {
     success = false;
   }
 
@@ -240,8 +270,9 @@ export function classifyRunOutcome(input: {
     prepareOnlyReady,
     likelySubmitted,
     prepareOnlyLikelySubmitted,
-    needsAttention,
-    needsFilingContact,
+    needsAttention: needsAttention || alreadySubmitted,
+    needsFilingContact: needsFilingContact && !alreadySubmitted,
+    alreadySubmitted,
   };
 }
 
@@ -253,9 +284,12 @@ export function classifyRunOutcome(input: {
 export function getTaxReturnStatusForOutcome(
   submissionMode: SubmissionMode,
   outcome: Pick<RunOutcome, "success" | "prepareOnlyLikelySubmitted"> &
-    Partial<Pick<RunOutcome, "likelySubmitted">>,
+    Partial<Pick<RunOutcome, "likelySubmitted" | "alreadySubmitted">>,
 ): "completed" | "review_required" | "failed" {
   if (outcome.prepareOnlyLikelySubmitted) return "review_required";
+  // The portal shows it filed (not by this run): a person confirms it and
+  // records the filed return; it is never "failed" and never completed here.
+  if (outcome.alreadySubmitted) return "review_required";
   // A run can error out after the portal accepted the filing (e.g. while
   // downloading the receipt). It may be filed with GRS: never mark it failed.
   if (!outcome.success && outcome.likelySubmitted) return "review_required";
@@ -291,8 +325,19 @@ export type FinalRunStatuses = {
    * Why a run that otherwise looked filed was held back from "completed".
    * Null when no receipt gate applied.
    */
-  receiptGate: "receipt_missing" | "receipt_from_unsuccessful_run" | null;
+  receiptGate:
+    | "receipt_missing"
+    | "receipt_from_unsuccessful_run"
+    | typeof PORTAL_ALREADY_SUBMITTED_GATE
+    | null;
 };
+
+/**
+ * Receipt gate for a submit run that found the return already submitted on
+ * the portal. Recorded on the return (metadata.filedReturnPdf), where it
+ * refuses any new submission until staff record the filed return.
+ */
+export const PORTAL_ALREADY_SUBMITTED_GATE = "portal_reports_already_submitted";
 
 /**
  * Receipt-gated final statuses. A return is only "completed" by the worker
@@ -305,11 +350,24 @@ export function resolveFinalRunStatuses(
   outcome: Pick<
     RunOutcome,
     "success" | "prepareOnlyLikelySubmitted" | "likelySubmitted"
-  >,
+  > &
+    Partial<Pick<RunOutcome, "alreadySubmitted">>,
   receiptStatus: ReceiptStatus,
 ): FinalRunStatuses {
   let taxReturnStatus = getTaxReturnStatusForOutcome(submissionMode, outcome);
   let receiptGate: FinalRunStatuses["receiptGate"] = null;
+
+  // Held for review whatever was downloaded: a filed-return PDF the agent
+  // found is attached to the return (as for any receipt), but the return is
+  // only completed once a person confirms it on the portal.
+  if (outcome.alreadySubmitted) {
+    return {
+      taxReturnStatus: "review_required",
+      jobStatus: "failed",
+      taskStatus: "failed",
+      receiptGate: PORTAL_ALREADY_SUBMITTED_GATE,
+    };
+  }
 
   if (taxReturnStatus === "completed" && receiptStatus !== "uploaded") {
     taxReturnStatus = "review_required";

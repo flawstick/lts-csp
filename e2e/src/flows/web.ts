@@ -4,6 +4,7 @@ import { shot } from "../browser";
 import { formRow, jobsForTask, returnRow } from "../db";
 import type { Flow, FlowContext } from "./index";
 import { staffPage } from "./session";
+import { buildPrompt } from "./worker";
 
 const PREPARE_AGAIN = "Run Prepare only again, then submit the new draft.";
 
@@ -292,73 +293,74 @@ const submitPreparedFailedPrepare: Flow = {
 };
 
 /**
- * (c) Locked return: the toolbar's "Submit locked" indicator opens the lock
- * dialog; confirm-not-filed (a second view of that dialog) needs a note,
- * then the lock is released.
+ * (c) A Submit prepared return run reached the portal and failed without a
+ * receipt. Nothing is locked: Submit prepared return (and the full submit)
+ * stay enabled, the confirmation shows one caution line naming that run, and
+ * the queued run's prompt first checks the portal that the return is not
+ * already submitted, naming the earlier run.
  */
-const lockedReturn: Flow = {
-  name: "web: task (c) dispatch lock and confirm not filed",
+const earlierUnreceiptedSubmit: Flow = {
+  name: "web: task (c) earlier dispatched submit is a caution, not a lock",
   async run(ctx, c) {
     const page = await staffPage(ctx.webUrl);
     const r = await openTask(page, ctx, "c_locked");
-    const indicator = page.getByRole("button", { name: "Submit locked" });
-    await indicator.waitFor();
-    c.ok("no inline lock banner", (await page.getByText("Submitting is locked for this return").count()) === 0);
-    await indicator.click();
-    const dialog = page.getByRole("dialog").filter({ hasText: "Submitting is locked for this return" });
+    const before = await jobsForTask(r.taskId);
+    const earlier = before.find((j) => j.result_data?.filingOperation === "submit_prepared");
+    const prepared = before.find((j) => j.status === "completed");
+    c.ok("seeded earlier submit run exists", !!earlier, JSON.stringify(before.map((j) => [j.job_number, j.status])));
+    c.eq("no Submit locked indicator", await page.getByRole("button", { name: "Submit locked" }).count(), 0);
+    c.eq("no lock banner or dialog text", await page.getByText("Submitting is locked for this return").count(), 0);
+    await shot(page, "c1-task-no-lock");
+
+    await openMoreMenu(page);
+    c.ok("Submit prepared return enabled", !(await isDisabled(submitPreparedItem(page))));
+    c.ok("full submit enabled", !(await isDisabled(fullSubmitItem(page))));
+    const menuText = await page.getByRole("menu").innerText();
+    c.ok("no submit lock menu item", (await page.getByRole("menuitem", { name: /submit lock/i }).count()) === 0, menuText);
+    c.ok("no lock reason in the menu", !menuText.includes("may have accepted the filing"), menuText);
+    await shot(page, "c2-menu-enabled");
+
+    await submitPreparedItem(page).click();
+    const dialog = page.getByRole("alertdialog");
     await dialog.waitFor();
-    c.ok("agent report collapsed by default", !(await dialog.innerText()).includes("PREPARED_DRAFT_NOT_VERIFIED"));
-    await dialog.getByRole("button", { name: "Show agent report" }).click();
-    const dialogText = await dialog.innerText();
-    c.ok("dialog shows the agent report", dialogText.includes("PREPARED_DRAFT_NOT_VERIFIED"), dialogText);
-    c.ok("dialog explains no browser session / 24h rule", dialogText.includes("recorded no browser session"), dialogText);
-    await shot(page, "c1-lock-banner");
-    await page.keyboard.press("Escape");
+    const text = await dialog.innerText();
+    const caution = `Run #${earlier?.job_number} reached the portal and saved no receipt. This run first checks the portal shows the return as not yet submitted.`;
+    c.ok("dialog shows the caution line naming the earlier run", text.includes(caution), text);
+    c.eq("caution shown once", (text.match(/saved no receipt/g) ?? []).length, 1);
+    await dialog.getByRole("checkbox").check();
+    const confirm = dialog.getByRole("button", { name: "Submit prepared return" });
+    c.ok("confirm enabled (caution does not block)", await confirm.isEnabled());
+    await shot(page, "c3-caution-dialog");
+    await confirm.click();
     await dialog.waitFor({ state: "hidden" });
 
-    await openMoreMenu(page);
-    c.ok("Submit prepared return disabled while locked", await isDisabled(submitPreparedItem(page)));
-    c.ok("full submit disabled while locked", await isDisabled(fullSubmitItem(page)));
-    c.ok("lock reason shown in menu", (await page.getByRole("menu").innerText()).includes("may have accepted the filing"));
-    // The menu offers the lock dialog next to the reason.
-    await page.getByRole("menuitem", { name: /Review the submit lock/ }).click();
-    await dialog.waitFor();
+    let created: Awaited<ReturnType<typeof jobsForTask>>[number] | undefined;
+    for (let i = 0; i < 40 && !created; i++) {
+      created = (await jobsForTask(r.taskId)).find((j) => !before.some((b) => b.id === j.id));
+      if (!created) await page.waitForTimeout(250);
+    }
+    c.ok("a new job was created", !!created);
+    if (created) {
+      const data = created.result_data ?? {};
+      c.eq("job is queued", created.status, "queued");
+      c.eq("filingOperation", data.filingOperation, "submit_prepared");
+      c.eq("preparedJobId is the prepared run", data.preparedJobId, prepared?.id);
+      c.eq("earlier run recorded for traceability", data.earlierUnreceiptedSubmitJobIds, [earlier?.id]);
 
-    await dialog.getByRole("button", { name: /I checked the portal: not submitted/ }).click();
-    // Same dialog, second view: no dialog stacked on top.
-    const form = page.getByRole("dialog").filter({ hasText: "did not submit?" });
-    await form.waitFor();
-    c.eq("one dialog open", await page.getByRole("dialog").count(), 1);
-    const record = form.getByRole("button", { name: "Record not submitted" });
-    c.ok("record disabled with nothing filled in", await record.isDisabled());
-    await form.getByRole("checkbox").click();
-    c.ok("record disabled without a note", await record.isDisabled());
-    await form.getByRole("textbox").fill("too short");
-    c.ok("record disabled with a note under 10 characters", await record.isDisabled());
-    await form.getByRole("textbox").fill("E2E check: the 2025 return is still a draft on the portal; no submitted return or receipt.");
-    c.ok("record enabled with a note and the box ticked", await record.isEnabled());
-    await shot(page, "c2-confirm-dialog");
-    await record.click();
-    // The lock lifts, so the dialog closes and the indicator goes.
-    await page.getByRole("dialog").waitFor({ state: "hidden" });
-    await indicator.waitFor({ state: "hidden" });
-    c.ok("lock indicator gone", (await page.getByText("Submitting is locked for this return").count()) === 0);
-    await shot(page, "c3-lock-released");
-
-    const jobs = await jobsForTask(r.taskId);
-    const submitJob = jobs.find((j) => j.result_data?.filingOperation === "submit_prepared");
-    c.ok("confirmation stored on the run", !!submitJob?.result_data?.submitNotFiledConfirmation);
-    const ret = await returnRow(r.taxReturnId);
-    const history = (ret.metadata?.submitNotFiledConfirmations ?? []) as unknown[];
-    c.eq("audit entry on the return", history.length, 1);
-
-    await openMoreMenu(page);
-    const menuText = await page.getByRole("menu").innerText();
-    c.ok("full submit available again", !(await isDisabled(fullSubmitItem(page))), menuText);
-    c.ok("Submit prepared return now asks for a fresh Prepare only", await isDisabled(submitPreparedItem(page)));
-    c.ok("reason mentions the confirmed run", menuText.includes("staff confirmed it did not submit"), menuText);
-    await shot(page, "c4-menu-after-release");
-    await page.keyboard.press("Escape");
+      // What the worker would send: its prepared-draft re-check accepts the
+      // job, and the prompt's first check names the earlier run.
+      const built = await buildPrompt(ctx, "c_locked", created.id);
+      c.ok("worker accepts the queued job", built.resolution.ok, JSON.stringify(built.resolution));
+      const prompt = built.prompt ?? "";
+      const check = prompt.indexOf("## FIRST CHECK");
+      c.ok("prompt starts with the not-already-submitted check", check > -1 && check < prompt.indexOf("## 1. OPEN THE PREPARED DRAFT"));
+      c.ok("prompt names the earlier run", prompt.includes(`(Run #${earlier?.job_number}) on this return reached the portal and saved no filed-return receipt`));
+      c.ok("prompt stops with ALREADY_SUBMITTED if filed", prompt.includes("**REQUIRES_ATTENTION: ALREADY_SUBMITTED:**"));
+      c.ok("prompt checks for a draft status", prompt.includes("**Pending** or **In progress**"));
+    }
+    c.ok("no start error shown", (await page.getByText("did not start").count()) === 0);
+    await page.waitForTimeout(1000);
+    await shot(page, "c4-queued-with-check");
     await page.close();
   },
 };
@@ -391,7 +393,7 @@ export const webFlows: Flow[] = [
   submitPreparedReady,
   cancelQueuedSubmit,
   submitPreparedFailedPrepare,
-  lockedReturn,
+  earlierUnreceiptedSubmit,
   submitPreparedNo,
   editorSave,
 ];

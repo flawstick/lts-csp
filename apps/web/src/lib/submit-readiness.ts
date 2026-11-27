@@ -1,7 +1,8 @@
 import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing";
 import {
   fingerprintPreparedInputs,
-  getUnconfirmedSubmitBlocker,
+  getEarlierUnreceiptedSubmitCaution,
+  getEarlierUnreceiptedSubmitJobs,
   resolvePreparedDraft,
   type PreparedDraftJob,
 } from "@repo/database/prepared-draft";
@@ -78,10 +79,12 @@ export type SubmitDraftGate =
   | { ok: false; blocker: string };
 
 /**
- * The job-evidence gates for a submit run: no earlier Submit prepared return
- * run that may have filed, and, for Submit prepared return, a prepared draft
- * that still matches the current return. `returnJobs` must be every job on
- * the return (all of its tasks), not only the task being started.
+ * The job-evidence gate for a submit run: for Submit prepared return, a
+ * prepared draft that still matches the current return. `returnJobs` must be
+ * every job on the return (all of its tasks), not only the task being
+ * started. An earlier submit run that reached the portal without a receipt
+ * does not block (see getEarlierSubmitCaution): the new run checks the
+ * portal first.
  */
 export function getSubmitDraftGate(input: {
   isSubmitPrepared: boolean;
@@ -94,12 +97,6 @@ export function getSubmitDraftGate(input: {
   };
   substanceForm: Record<string, unknown> | null | undefined;
 }): SubmitDraftGate {
-  // A Submit prepared return run that reached the browser may have filed
-  // without a receipt: no new submission of any kind.
-  const unconfirmedSubmit = getUnconfirmedSubmitBlocker({
-    jobs: input.returnJobs,
-  });
-  if (unconfirmedSubmit) return { ok: false, blocker: unconfirmedSubmit };
   if (!input.isSubmitPrepared) return { ok: true, preparedJobId: null };
 
   const form = input.substanceForm ?? null;
@@ -118,6 +115,25 @@ export function getSubmitDraftGate(input: {
   return { ok: true, preparedJobId: resolution.preparedJob.id };
 }
 
+/** A return job with its run number, as getTask and startJob read it. */
+export type ReturnJob = PreparedDraftJob & { jobNumber?: number | null };
+
+/**
+ * Ids of the earlier submit runs on the return that reached the portal and
+ * saved no receipt, and the one-line caution shown before a new submission
+ * (null when there are none). Never a blocker.
+ */
+export function getEarlierSubmitCaution(returnJobs: ReturnJob[]): {
+  jobIds: string[];
+  caution: string | null;
+} {
+  const earlier = getEarlierUnreceiptedSubmitJobs({ jobs: returnJobs });
+  return {
+    jobIds: earlier.map((job) => job.id),
+    caution: getEarlierUnreceiptedSubmitCaution(earlier),
+  };
+}
+
 export type SubmitReadiness = { ready: boolean; blocker: string | null };
 
 export type SubmitReadinessByOperation = {
@@ -125,6 +141,11 @@ export type SubmitReadinessByOperation = {
   submit: SubmitReadiness;
   /** Submit prepared return: file the last Prepare only draft unchanged. */
   submitPrepared: SubmitReadiness;
+  /**
+   * Shown in both submit confirmations when earlier submit runs reached the
+   * portal without a receipt; null otherwise. Advisory only.
+   */
+  caution: string | null;
 };
 
 type ReadinessTaxReturn = Parameters<typeof getFilingStartBlocker>[0]["taxReturn"] &
@@ -143,7 +164,7 @@ type ReadinessTaxReturn = Parameters<typeof getFilingStartBlocker>[0]["taxReturn
 export function getSubmitReadiness(input: {
   isSubmitPrepared: boolean;
   taxReturn: ReadinessTaxReturn;
-  returnJobs: PreparedDraftJob[];
+  returnJobs: ReturnJob[];
   maintenanceBlocker?: string | null;
 }): SubmitReadiness {
   const blocker =
@@ -183,5 +204,6 @@ export function getSubmitReadinessByOperation(
   return {
     submit: getSubmitReadiness({ ...input, isSubmitPrepared: false }),
     submitPrepared: getSubmitReadiness({ ...input, isSubmitPrepared: true }),
+    caution: getEarlierSubmitCaution(input.returnJobs).caution,
   };
 }

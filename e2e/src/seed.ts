@@ -338,11 +338,12 @@ export async function seed(): Promise<SeedResult> {
     });
   }
 
-  // (c) Submit prepared return reached the portal and failed without a receipt.
+  // (c) Submit prepared return reached the portal and failed without a
+  // receipt (key kept from when this locked the return; it no longer does).
   {
     const r = await createReturn({
       key: "c_locked",
-      entityName: "Locked Submit E2E Limited",
+      entityName: "Earlier Submit E2E Limited",
       companyNumber: "61003",
       status: "failed",
       signedOff: true,

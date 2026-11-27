@@ -20,9 +20,10 @@ import {
 } from "@repo/database";
 import { publishJobEvent } from "@repo/redis";
 import {
+  EARLIER_UNRECEIPTED_SUBMIT_JOBS_KEY,
   fingerprintPreparedInputs,
+  getEarlierUnreceiptedSubmitJobs,
   getFilingOperation,
-  getUnconfirmedSubmitBlocker,
   parsePreparedDraftOutput,
   PORTAL_NET_BOOK_VALUE_KEY,
   resolvePreparedDraft,
@@ -100,6 +101,10 @@ import {
   shouldCaptureFiledReturnPdf,
   type SubmissionMode,
 } from "./run-outcome";
+
+/** Job error for a submit run that found the return already submitted. */
+const ALREADY_SUBMITTED_JOB_MESSAGE =
+  "The Guernsey Tax Portal shows this return as already submitted, so this run did not submit it. Check the portal and record the filed return (any filed-return PDF the run found is attached to the return).";
 
 // ============================================================================
 // Configuration
@@ -1026,6 +1031,7 @@ async function listReturnJobs(taxReturnId: string) {
   return db
     .select({
       id: jobs.id,
+      jobNumber: jobs.jobNumber,
       status: jobs.status,
       createdAt: jobs.createdAt,
       resultData: jobs.resultData,
@@ -1036,18 +1042,17 @@ async function listReturnJobs(taxReturnId: string) {
 }
 
 /**
- * Every submit-mode run (full submit or Submit prepared return) refuses to
- * start, before any browser run, once an earlier Submit prepared return run
- * reached the browser: that run may have filed without a saved receipt.
+ * Earlier Submit prepared return runs on the return that reached the portal
+ * and saved no receipt, for a submit-mode run (full submit or Submit
+ * prepared return). They never stop it: its prompt names them and its first
+ * check confirms on the portal that the return is not already submitted.
  */
-async function refuseAfterUnconfirmedSubmit(runtime: ActiveJobRuntime) {
-  if (runtime.submissionMode !== "submit_and_capture_pdf") return;
-  const blocker = getUnconfirmedSubmitBlocker({
+async function findEarlierUnreceiptedSubmitRuns(runtime: ActiveJobRuntime) {
+  if (runtime.submissionMode !== "submit_and_capture_pdf") return [];
+  return getEarlierUnreceiptedSubmitJobs({
     jobs: await listReturnJobs(runtime.taxReturnId),
+    excludeJobId: runtime.jobId,
   });
-  if (blocker) {
-    throw new Error(`Submission refused: ${blocker}`);
-  }
 }
 
 async function verifyPreparedDraftForSubmission(params: {
@@ -1526,7 +1531,31 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
         },
       });
     }
-    await refuseAfterUnconfirmedSubmit(runtime);
+    const earlierUnreceiptedSubmitJobs =
+      await findEarlierUnreceiptedSubmitRuns(runtime);
+    if (earlierUnreceiptedSubmitJobs.length > 0) {
+      // Traceability: the runs this run's prompt cautions about.
+      await updateActiveJobRecord({
+        resultDataPatch: {
+          [EARLIER_UNRECEIPTED_SUBMIT_JOBS_KEY]: earlierUnreceiptedSubmitJobs.map(
+            (job) => job.id,
+          ),
+        },
+      });
+      await log(
+        "Earlier submit runs reached the portal without a receipt - the run first checks the return is not already submitted",
+        {
+          phase: "startup",
+          earlierJobIds: earlierUnreceiptedSubmitJobs.map((job) => job.id),
+          earlierJobNumbers: earlierUnreceiptedSubmitJobs.map(
+            (job) => job.jobNumber,
+          ),
+        },
+      );
+    }
+    const earlierUnreceiptedSubmitRuns = earlierUnreceiptedSubmitJobs.map(
+      (job) => ({ jobNumber: job.jobNumber }),
+    );
     const preparedDraft = isSubmitPrepared
       ? await verifyPreparedDraftForSubmission({
           runtime,
@@ -1663,6 +1692,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
         contactName: filingContactInfo?.name ?? null,
         contactEmail: filingContactInfo?.email ?? null,
         contactPhone: filingContactInfo?.phone ?? null,
+        earlierUnreceiptedSubmitRuns,
         netBookValue: netBookValueDecision
           ? {
               decision: netBookValueDecision,
@@ -1683,6 +1713,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
           // Submit mode only starts with a configured contact (refused above).
           contactName: filingContactInfo?.name ?? "",
           contactEmail: filingContactInfo?.email ?? "",
+          earlierUnreceiptedSubmitRuns,
         })
       : buildFillPrompt();
     // Restated in every recovery/resume continuation of a run that reaches
@@ -1759,7 +1790,8 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
         typeof runtime.resultData[SUBMIT_PREPARED_DISPATCHED_KEY] !== "number"
       ) {
         // Durable before dispatch (a failed write aborts it): from here the
-        // run may reach Submit, so no later run may submit this return.
+        // run may reach Submit, so a later submit run is cautioned about it
+        // (and checks the portal first) unless it saves a receipt.
         await updateActiveJobRecord({
           resultDataPatch: { [SUBMIT_PREPARED_DISPATCHED_KEY]: Date.now() },
         });
@@ -2678,7 +2710,12 @@ ${prompt}
             budgetSpentUsd: sessionSpend?.budgetSpentUsd ?? null,
             maxCostUsd: runProfile.maxCostUsd,
           });
-        const needsAttention = outcome.needsAttention && !budgetExhausted;
+        // A run that found the return already submitted on the portal is
+        // never paused for a reply (resuming would re-drive a submit run on a
+        // filed return): it ends now, any filed-return PDF it downloaded is
+        // captured, and the return is held for review.
+        const needsAttention =
+          outcome.needsAttention && !budgetExhausted && !outcome.alreadySubmitted;
         await updateActiveJobRecord({
           resultDataPatch: {
             browserUseSessionBudgetSpentUsd:
@@ -2711,6 +2748,12 @@ ${prompt}
             phase: "guardrail",
             output,
           });
+        }
+        if (outcome.alreadySubmitted) {
+          await log(
+            "Portal shows the return already submitted - not submitting; holding the return for review",
+            { phase: "guardrail", output },
+          );
         }
 
         // A reviewer reply can land as the run stops (e.g. pause then reply
@@ -2949,11 +2992,13 @@ ${prompt}
             set: {
               status: finalStatuses.jobStatus,
               completedAt: new Date(),
-              ...(budgetExhausted
-                ? {
-                    errorMessage: `Browser Use session budget (USD ${runProfile.maxCostUsd}) reached; the run was stopped and not retried. Review the return before starting a new run.`,
-                  }
-                : {}),
+              ...(outcome.alreadySubmitted
+                ? { errorMessage: ALREADY_SUBMITTED_JOB_MESSAGE }
+                : budgetExhausted
+                  ? {
+                      errorMessage: `Browser Use session budget (USD ${runProfile.maxCostUsd}) reached; the run was stopped and not retried. Review the return before starting a new run.`,
+                    }
+                  : {}),
             },
             resultDataPatch: {
               output,

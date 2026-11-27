@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   fingerprintPreparedInputs,
   SUBMIT_PREPARED_DISPATCHED_KEY,
-  UNCONFIRMED_SUBMIT_BLOCKER,
   type PreparedDraftJob,
 } from "@repo/database/prepared-draft";
 import {
   ACTIVE_JOB_ON_RETURN_MESSAGE,
   getStartTargetBlocker,
+  getEarlierSubmitCaution,
   getSubmitDraftGate,
   getSubmitReadiness,
   getSubmitReadinessByOperation,
@@ -69,8 +69,9 @@ const currentFingerprint = fingerprintPreparedInputs({
   substanceForm,
 });
 
-const dispatchedSubmit: PreparedDraftJob = {
+const dispatchedSubmit: PreparedDraftJob & { jobNumber: number } = {
   id: "submit-1",
+  jobNumber: 3,
   status: "failed",
   createdAt: "2026-11-24T22:49:00Z",
   resultData: {
@@ -144,17 +145,23 @@ describe("getSubmitDraftGate", () => {
     ).toEqual({ ok: true, preparedJobId: "prep" });
   });
 
-  it("blocks every submission after an unconfirmed dispatch", () => {
-    for (const isSubmitPrepared of [true, false]) {
-      expect(
-        getSubmitDraftGate({
-          isSubmitPrepared,
-          returnJobs: [preparedJob(currentFingerprint), dispatchedSubmit],
-          taxReturn: signedOffReturn,
-          substanceForm,
-        }),
-      ).toEqual({ ok: false, blocker: UNCONFIRMED_SUBMIT_BLOCKER });
-    }
+  it("does not block either submission after a dispatched run without a receipt (Pudleston)", () => {
+    expect(
+      getSubmitDraftGate({
+        isSubmitPrepared: true,
+        returnJobs: [preparedJob(currentFingerprint), dispatchedSubmit],
+        taxReturn: signedOffReturn,
+        substanceForm,
+      }),
+    ).toEqual({ ok: true, preparedJobId: "prep" });
+    expect(
+      getSubmitDraftGate({
+        isSubmitPrepared: false,
+        returnJobs: [preparedJob(currentFingerprint), dispatchedSubmit],
+        taxReturn: signedOffReturn,
+        substanceForm,
+      }),
+    ).toEqual({ ok: true, preparedJobId: null });
   });
 });
 
@@ -168,6 +175,7 @@ describe("getSubmitReadiness", () => {
     ).toEqual({
       submit: { ready: true, blocker: null },
       submitPrepared: { ready: true, blocker: null },
+      caution: null,
     });
   });
 
@@ -211,13 +219,37 @@ describe("getSubmitReadiness", () => {
     expect(readiness.submitPrepared).toEqual({ ready: true, blocker: null });
   });
 
-  it("reports the dispatch lock for both operations", () => {
-    const readiness = getSubmitReadinessByOperation({
-      taxReturn: signedOffReturn,
-      returnJobs: [preparedJob(currentFingerprint), dispatchedSubmit],
+  it("is ready with a caution after a dispatched run without a receipt", () => {
+    const caution =
+      "Run #3 reached the portal and saved no receipt. This run first checks the portal shows the return as not yet submitted.";
+    expect(
+      getSubmitReadinessByOperation({
+        taxReturn: signedOffReturn,
+        returnJobs: [preparedJob(currentFingerprint), dispatchedSubmit],
+      }),
+    ).toEqual({
+      submit: { ready: true, blocker: null },
+      submitPrepared: { ready: true, blocker: null },
+      caution,
     });
-    expect(readiness.submit.blocker).toBe(UNCONFIRMED_SUBMIT_BLOCKER);
-    expect(readiness.submitPrepared.blocker).toBe(UNCONFIRMED_SUBMIT_BLOCKER);
+    expect(getEarlierSubmitCaution([preparedJob(currentFingerprint), dispatchedSubmit])).toEqual({
+      jobIds: ["submit-1"],
+      caution,
+    });
+  });
+
+  it("keeps the other gates after a dispatched run: a receipt or the portal's own report refuses", () => {
+    for (const metadata of [
+      { filedReturnPdf: { status: "uploaded", jobId: "submit-1" } },
+      { filedReturnPdf: { status: "missing", receiptGate: "portal_reports_already_submitted" } },
+    ]) {
+      const readiness = getSubmitReadinessByOperation({
+        taxReturn: { ...signedOffReturn, metadata },
+        returnJobs: [preparedJob(currentFingerprint), dispatchedSubmit],
+      });
+      expect(readiness.submit.ready).toBe(false);
+      expect(readiness.submitPrepared.blocker).toContain("may already have filed this return");
+    }
   });
 
   it("reports an active run anywhere on the return", () => {
