@@ -17,6 +17,7 @@ if (process.env.DATABASE_URL !== DATABASE_URL) {
 
 const database = await import("@repo/database");
 const preparedDraft = await import("@repo/database/prepared-draft");
+const { extractAgentQuestionText } = await import("@repo/database/operator-messages");
 const {
   db,
   accounts,
@@ -412,6 +413,59 @@ export async function seed(): Promise<SeedResult> {
       taskStatus: "completed",
     });
     await addPreparedJob(r.taskId, r.taxReturnId, 1, 6, "e2eDraftF001", "ESR-2025-61006");
+  }
+
+  // (g) The latest Prepare only run is paused on an agent question (the
+  // worker's agent_question pause: status paused, pendingQuestion, pauseReason).
+  // No worker runs here, so the heartbeat goes stale after a minute: the
+  // tasks-attention flow refreshes it (rearmPausedJob in db.ts) before checking.
+  {
+    const r = await createReturn({
+      key: "g_needs_input",
+      entityName: "Question Pending E2E Limited",
+      companyNumber: "61007",
+      status: "in_progress",
+      signedOff: true,
+      noticeOfAssessment: null,
+      taskStatus: "in_progress",
+    });
+    await addPreparedJob(r.taskId, r.taxReturnId, 1, 30, "e2eDraftG001", "ESR-2025-61007");
+    const askedAt = now - 20 * 60_000;
+    const output = [
+      `**REQUIRES_ATTENTION:** ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}: The draft isn't fully ready for submission. On the **Review & Submit** summary:`,
+      "",
+      "- **Entity Details** shows `COMPLETE`",
+      "- **Entity Accounts** shows *IN PROGRESS*: the Net Book Value field is blank on the portal.",
+      "",
+      "Should I enter the saved Net Book Value (0) and continue, or leave the draft for you to check?",
+    ].join("\n");
+    await db.insert(jobs).values({
+      taskId: r.taskId,
+      jobNumber: 2,
+      status: "paused",
+      startedAt: at(40 * 60_000),
+      createdBy: staff!.id,
+      createdAt: at(41 * 60_000),
+      resultData: {
+        submissionMode: "prepare_only",
+        overrideSaved: false,
+        startupTimeoutMs: 45_000,
+        browserUseApiVersion: 4,
+        browserUseModel: "e2e-seeded",
+        output,
+        pausedAt: askedAt,
+        pauseReason: output,
+        pendingQuestion: {
+          id: `q-${askedAt}-e2e001`,
+          // As the worker stores it (drops the leading REQUIRES_ATTENTION only).
+          text: extractAgentQuestionText(output),
+          reason: "agent_question",
+          askedAt,
+          expiresAt: askedAt + 24 * HOUR,
+        },
+        lastHeartbeatAt: now,
+      },
+    });
   }
 
   return { orgId: org.id, staffAccountId: staff.id, clientAccountId: client.id, returns };

@@ -15,13 +15,39 @@ import {
 
 import {
   getGuernseyReviewDraftId,
+  getGuernseyReviewSummaryUrl,
   normalizePortalReference,
 } from "@repo/database/prepared-draft";
-import { NEEDS_FILING_CONTACT_MARKER } from "./run-outcome";
+import {
+  DECLARATION_INCOMPLETE_MARKER,
+  NEEDS_FILING_CONTACT_MARKER,
+  PREPARED_DRAFT_NOT_VERIFIED_MARKER,
+} from "./run-outcome";
 
 /** Labels a prepare run reports, parsed by @repo/database/prepared-draft. */
 export const PREPARED_DRAFT_URL_LABEL = "REVIEW_PAGE_URL";
 export const PREPARED_DRAFT_REFERENCE_LABEL = "PORTAL_REFERENCE";
+
+/** The GRS company-tax-ui final filing button on the declaration step. */
+export const FINAL_FILING_BUTTON_LABEL = "Complete submission to Revenue Service";
+
+/**
+ * The organisation filing contact is all-or-nothing: without both a name and
+ * an email the agent gets no contact values and stops at the contact step.
+ */
+export function hasConfiguredFilingContact(
+  contactName?: string | null,
+  contactEmail?: string | null,
+): boolean {
+  return Boolean(contactName?.trim() && contactEmail?.trim());
+}
+
+/**
+ * How to tick the declaration step's confirmation boxes. Shared by every
+ * prompt that sets them: clicking a box that is already ticked un-ticks it,
+ * and a run in the same live session may find them ticked already.
+ */
+const DECLARATION_BOXES_RULE = `Tick **every** declaration confirmation checkbox on the declaration step (the portal shows **three**, for example "I declare that the information given in this return is correct and complete"). Ticking these boxes is not filing; only the final button files. **Before clicking a box, read whether it is already ticked, and click only a box that is NOT ticked: clicking a box that is already ticked UN-TICKS it.** Click the checkbox or its label once (do not press Enter), then re-read every box and confirm each one now shows ticked. If a box is already ticked, leave it ticked`;
 import { formatPortalFte } from "./portal-fte";
 import {
   decidePortalNetBookValue,
@@ -181,10 +207,11 @@ export function buildSubstanceFormPrompt(
   const isPrepareOnly = submissionMode === "prepare_only";
   // The contact is all-or-nothing: without both a configured name and email
   // the agent gets no contact values at all and must not touch the fields.
-  const hasFilingContact = Boolean(contactName?.trim() && contactEmail?.trim());
-  // Only a submit-mode run with a contact goes on to the declaration step and
-  // files; every other run stops earlier (review page or contact step).
-  const willFile = !isPrepareOnly && hasFilingContact;
+  const hasFilingContact = hasConfiguredFilingContact(contactName, contactEmail);
+  // Every run with a contact goes on to the declaration step: a submit run
+  // completes it and files, a prepare run completes it and stops before the
+  // final button. Without a contact a run stops at the contact step.
+  const reachesDeclaration = hasFilingContact;
   // Resolved for the agent (the reviewer's "No", otherwise the default
   // "Yes"); the agent never chooses it.
   const noticeOfAssessment = getGuernseyNoticeOfAssessment(substanceForm);
@@ -210,7 +237,9 @@ export function buildSubstanceFormPrompt(
 
 ${
   isPrepareOnly
-    ? `Fill the Guernsey Economic Substance Register return for **${taxReturn.entityName}** (tax year ${taxReturn.taxYear}) from the data in this task and stop on the final review/submit page. This run must not file the return.`
+    ? hasFilingContact
+      ? `Fill the Guernsey Economic Substance Register return for **${taxReturn.entityName}** (tax year ${taxReturn.taxYear}) from the data in this task, complete the declaration step (notice of assessment answer and every declaration box), and stop with the final **${FINAL_FILING_BUTTON_LABEL}** button enabled but NOT clicked. This run must not file the return.`
+      : `Fill the Guernsey Economic Substance Register return for **${taxReturn.entityName}** (tax year ${taxReturn.taxYear}) from the data in this task and stop on the final review/submit page. This run must not file the return.`
     : `Fill and file the Guernsey Economic Substance Register return for **${taxReturn.entityName}** (tax year ${taxReturn.taxYear}) from the data in this task, then save the portal's completion PDF.`
 }
 
@@ -244,7 +273,9 @@ ${PORTAL_LOGIN_SECTION}
 **PREPARE-ONLY SAFETY:** ${
   submissionMode === "submit_and_capture_pdf"
     ? "This run is allowed to fully submit once every section has been validated in this run."
-    : 'This run is **PREPARE ONLY**. You are **NOT** allowed to legally file the return in this mode. Reaching the final review/submit page with the submit button visible is success. Clicking **Submit**, **Confirm**, **Print**, **Download**, or any final filing action is a task failure.'
+    : hasFilingContact
+      ? `This run is **PREPARE ONLY**. You are **NOT** allowed to legally file the return in this mode. Success is the final declaration step with the notice of assessment answered, every declaration box ticked and the final **${FINAL_FILING_BUTTON_LABEL}** button enabled but NOT clicked. Selecting the notice of assessment answer and ticking the declaration boxes are part of preparing and do not file anything. Clicking **${FINAL_FILING_BUTTON_LABEL}**, a **Submit** or **Confirm** button, **Print**, **Download**, or any final filing action is a task failure.`
+      : 'This run is **PREPARE ONLY**. You are **NOT** allowed to legally file the return in this mode. Reaching the final review/submit page with the submit button visible is success. Clicking **Submit**, **Confirm**, **Print**, **Download**, or any final filing action is a task failure.'
 }
 ${
   isPrepareOnly
@@ -281,8 +312,12 @@ ${buildFilingContactSection({
   contactPhone,
 })}
 ${buildNoticeOfAssessmentSection(
-  willFile
-    ? { answer: noticeOfAssessment, defaulted: noticeOfAssessmentDefaulted }
+  reachesDeclaration
+    ? {
+        answer: noticeOfAssessment,
+        defaulted: noticeOfAssessmentDefaulted,
+        prepareOnly: isPrepareOnly,
+      }
     : null,
 )}
 ${
@@ -413,22 +448,26 @@ After filling all sections:
 ${
   submissionMode === "submit_and_capture_pdf"
     ? `3. Resolve every validation error shown on the portal before continuing
-4. On the declaration step, answer the notice of assessment question with **${noticeOfAssessment}** (${describeNoticeOfAssessmentSource(noticeOfAssessmentDefaulted)}; see **DECLARATION STEP — NOTICE OF ASSESSMENT**) and tick the portal's declaration
-5. Click the final submit/confirm action and complete the filing
+4. On the declaration step, answer the notice of assessment question with **${noticeOfAssessment}** (${describeNoticeOfAssessmentSource(noticeOfAssessmentDefaulted)}; see **DECLARATION STEP — NOTICE OF ASSESSMENT**) and tick every declaration confirmation box (the portal shows three; see **DECLARATION STEP — DECLARATION BOXES**). Read each box first: clicking a box that is already ticked UN-TICKS it. Confirm the final **${FINAL_FILING_BUTTON_LABEL}** button is enabled; if it stays disabled, do not force it: report **REQUIRES_ATTENTION** quoting what the page shows
+5. Click the final submit/confirm action once and complete the filing
 6. Wait for the post-submission confirmation page or confirmation state
 7. Find the portal-generated completion/receipt/return PDF and download it into the Browser Use session
 8. Do not finish the task until the PDF download has completed, or you have explicitly reported that no downloadable completion PDF exists
 9. If there are validation errors or the portal blocks submission, report them exactly as shown
 10. In your final output, also state the notice of assessment answer you selected`
-    : `3. **STOP BEFORE CLICKING SUBMIT** - Do NOT click the final submit button
-4. Leave the portal on the final review/submit page with the submit button visible and ready
-5. Your final output MUST start with exactly: **READY_FOR_MANUAL_SUBMISSION:**
-6. Then state that the return is ready for manual submission and name the exact remaining button/action
-7. Then add these two lines, so a later run can reopen this exact draft:
-   ${PREPARED_DRAFT_URL_LABEL}: <the full URL of the review/submit page currently open>
+    : `3. Resolve every validation error shown on the portal. Then continue from the review page to the **declaration step** (usually **reviewAndSubmit/declaration**) using the portal's normal navigation. Never use **${FINAL_FILING_BUTTON_LABEL}**, a **Submit** or **Confirm** button, or any final filing action to get there
+4. On the declaration step, select **${noticeOfAssessment}** for the notice of assessment question (${describeNoticeOfAssessmentSource(noticeOfAssessmentDefaulted)}; see **DECLARATION STEP — NOTICE OF ASSESSMENT**)
+5. Tick every declaration confirmation box (the portal shows three; see **DECLARATION STEP — DECLARATION BOXES**). Read each box first and click only boxes that are not ticked: clicking a box that is already ticked UN-TICKS it. Change nothing else on this step
+6. Re-read the whole step: the notice of assessment shows **${noticeOfAssessment}**, every declaration box shows ticked, and the final **${FINAL_FILING_BUTTON_LABEL}** button is now enabled (not greyed out). Check its state by reading the page; do NOT click it to test it
+7. **STOP BEFORE CLICKING THE FINAL BUTTON** - Do NOT click **${FINAL_FILING_BUTTON_LABEL}**. Leave the portal on the declaration step with the answer selected, the boxes ticked and the button ready for a person
+8. Your final output MUST start with exactly: **READY_FOR_MANUAL_SUBMISSION:**
+9. Then state the notice of assessment answer you selected, that every declaration box is ticked (say how many), that **${FINAL_FILING_BUTTON_LABEL}** is enabled and was not clicked, and that it is the only remaining action
+10. Then add these two lines, so a later run can reopen this exact draft:
+   ${PREPARED_DRAFT_URL_LABEL}: <the full URL of the declaration page currently open>
    ${PREPARED_DRAFT_REFERENCE_LABEL}: <the return or case reference shown on the page, or NONE>
-8. Do **NOT** click Submit, Confirm, Print, Download, or any final filing action under any circumstances
-9. If there are validation errors, report them exactly as shown`
+11. If **${noticeOfAssessment}** cannot be selected, a declaration box cannot be ticked or will not stay ticked, the step asks for anything else, or **${FINAL_FILING_BUTTON_LABEL}** stays disabled once every box is ticked: do NOT click it and do not try other controls. Your final output MUST instead start with exactly: **REQUIRES_ATTENTION: ${DECLARATION_INCOMPLETE_MARKER}:** followed by what the page shows (the question and its options, each declaration box's label and whether it is ticked, the button's state and any message) and the URL of the page. Do not use the ready marker in that case
+12. Do **NOT** click **${FINAL_FILING_BUTTON_LABEL}**, a **Submit** or **Confirm** button, **Print**, **Download**, or any final filing action under any circumstances
+13. If there are validation errors, report them exactly as shown`
 }${isCertificateTwo ? "" : `\n\n${ENTITY_ACCOUNTS_INCOMPLETE_RULE}`}
 `
       : `
@@ -456,52 +495,89 @@ function describeNoticeOfAssessmentSource(defaulted: boolean): string {
 }
 
 /**
- * The declaration step's notice-of-assessment question. A run that files is
- * told the answer resolved for this return (the reviewer's saved "No",
- * otherwise the default "Yes"); any other run must leave the question alone.
- * The agent never decides it.
+ * The declaration step: the notice-of-assessment question and the
+ * declaration confirmation boxes. Every run that reaches it (one with a
+ * filing contact) is told the answer resolved for this return (the
+ * reviewer's saved "No", otherwise the default "Yes") and to tick every box;
+ * a prepare run then stops before the final button. A run without a contact
+ * stops at the contact step and must leave the question alone. The agent
+ * never decides the answer.
  */
 function buildNoticeOfAssessmentSection(
-  resolved: { answer: GuernseyNoticeOfAssessment; defaulted: boolean } | null,
+  resolved: {
+    answer: GuernseyNoticeOfAssessment;
+    defaulted: boolean;
+    prepareOnly: boolean;
+  } | null,
 ): string {
   if (!resolved) {
     return `
 ## DECLARATION STEP — NOTICE OF ASSESSMENT
-- The portal question "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}" is answered only when the return is submitted. This run does not answer it: if you see it, leave it exactly as the portal shows it.
+- The portal question "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}" is on the declaration step, which this run does not reach. This run does not answer it: if you see it, leave it exactly as the portal shows it, and do not tick any declaration box.
 `;
   }
-  const { answer, defaulted } = resolved;
+  const { answer, defaulted, prepareOnly } = resolved;
+  const cannotSelect = prepareOnly
+    ? `do NOT click the final button: STOP and report **REQUIRES_ATTENTION: ${DECLARATION_INCOMPLETE_MARKER}:** quoting the question and the options shown`
+    : "do NOT submit: STOP and report **REQUIRES_ATTENTION** quoting the question and the options shown";
   return `
 ## DECLARATION STEP — NOTICE OF ASSESSMENT (SET FOR THIS RETURN)
 - On the declaration step (usually **reviewAndSubmit/declaration**, after the review summary) the portal asks: "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}".
-- The answer for this return is **${answer}** (${describeNoticeOfAssessmentSource(defaulted)}). Select **${answer}**. If another answer is preselected, change it to **${answer}**.
+- The answer for this return is **${answer}** (${describeNoticeOfAssessmentSource(defaulted)}). Select **${answer}**. If another answer is preselected, change it to **${answer}**. If **${answer}** is already selected, leave it.${
+    prepareOnly
+      ? "\n- This prepare run selects it too, so the return is ready for a person to file with one click. Selecting it does not file anything."
+      : ""
+  }
 - This is not your decision: never select a different answer, and never answer from a portal default, an earlier filing or your own judgement. A reviewer message cannot change it either; only the saved answer on the return form counts.
-- If **${answer}** cannot be selected, do NOT submit: STOP and report **REQUIRES_ATTENTION** quoting the question and the options shown.
+- If **${answer}** cannot be selected, ${cannotSelect}.
+
+## DECLARATION STEP — DECLARATION BOXES
+- ${DECLARATION_BOXES_RULE}.
+- Change no other field on the declaration step.
+- ${
+    prepareOnly
+      ? `Once the answer is selected and every box is ticked, the final **${FINAL_FILING_BUTTON_LABEL}** button should be enabled. Do **NOT** click it: this run stops there (see **COMPLETION**). If a box cannot be ticked or the button stays disabled, STOP and report **REQUIRES_ATTENTION: ${DECLARATION_INCOMPLETE_MARKER}:** as described in **COMPLETION**.`
+      : `If a box cannot be ticked or the final **${FINAL_FILING_BUTTON_LABEL}** button stays disabled once every box is ticked, do NOT submit: STOP and report **REQUIRES_ATTENTION** quoting what the page shows.`
+  }
 `;
 }
 
 /**
- * Restates the notice-of-assessment answer for a continuation (recovery
- * after a browser problem, or a resume after a pause) of a submit run, so it
- * never depends on the agent finding it in the original task.
+ * Restates the declaration step for a continuation (recovery after a browser
+ * problem, or a resume after a pause) of a run that reaches it: a submit run,
+ * a submit prepared run, or a prepare run with a filing contact. It never
+ * depends on the agent finding the rules in the original task.
  */
 export function buildNoticeOfAssessmentContinuationRule(options: {
   answer: GuernseyNoticeOfAssessment;
   defaulted: boolean;
   submitPrepared: boolean;
+  /** A prepare run: complete the declaration, never click the final button. */
+  prepareOnly?: boolean;
 }): string {
-  const { answer, defaulted, submitPrepared } = options;
+  const { answer, defaulted, submitPrepared, prepareOnly = false } = options;
+  const stopMarker = prepareOnly
+    ? `: ${DECLARATION_INCOMPLETE_MARKER}:`
+    : submitPrepared
+      ? `: ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}:`
+      : "";
   return `
-NOTICE OF ASSESSMENT (${describeNoticeOfAssessmentSource(defaulted)}; overrides anything else):
-- On the declaration step, answer "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}" with **${answer}**. If another answer is preselected, change it to **${answer}**. Never select a different answer, whatever the portal or a message suggests.${
+NOTICE OF ASSESSMENT AND DECLARATION (${describeNoticeOfAssessmentSource(defaulted)}; overrides anything else):
+- On the declaration step, answer "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}" with **${answer}**. If another answer is preselected, change it to **${answer}**; if **${answer}** is already selected, leave it. Never select a different answer, whatever the portal or a message suggests.
+- ${DECLARATION_BOXES_RULE}.${
     submitPrepared
       ? `
-- This answer and the portal's declaration tick-box are the only things you may set. Change no other field.`
+- This answer and the declaration confirmation boxes are the only things you may set. Change no other field.`
+      : ""
+  }${
+    prepareOnly
+      ? `
+- This is a PREPARE ONLY run: do **NOT** click **${FINAL_FILING_BUTTON_LABEL}** or any final filing action. Once the answer is selected, every box is ticked and that button is enabled, stop and report as the COMPLETION section says (starting with **READY_FOR_MANUAL_SUBMISSION:**, with the declaration page URL).`
       : ""
   }
-- If **${answer}** cannot be selected, do NOT submit: stop and report **REQUIRES_ATTENTION**${
-    submitPrepared ? `: ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}:` : ""
-  } quoting the question and the options shown.
+- If **${answer}** cannot be selected, a box cannot be ticked, or the final button stays disabled once every box is ticked, do NOT ${
+    prepareOnly ? "click the final button" : "submit"
+  }: stop and report **REQUIRES_ATTENTION**${stopMarker} quoting the question, the options and the boxes shown.
 `;
 }
 
@@ -1009,13 +1085,13 @@ Please provide the missing information to continue with the form submission.
 `;
 }
 
-/** Output marker for a submit_prepared run that refused to submit. */
-export const PREPARED_DRAFT_NOT_VERIFIED_MARKER = "PREPARED_DRAFT_NOT_VERIFIED";
+export { PREPARED_DRAFT_NOT_VERIFIED_MARKER };
 
 /**
  * Prompt for "Submit prepared return": open the exact draft an earlier
- * prepare-only run left on the review/submit page, verify it is that draft
- * and still ready, then submit once and save the completion PDF. No filling,
+ * prepare-only run left on the review/submit (declaration) step, verify it is
+ * that draft and still ready, re-apply the declaration step (the portal keeps
+ * it in the browser session only), then submit once and save the PDF. No filling,
  * editing or section-by-section review: the draft was already prepared and
  * approved. Any failed check stops the run before Submit.
  */
@@ -1051,15 +1127,21 @@ export function buildSubmitPreparedReturnPrompt(options: {
   const notVerified = `REQUIRES_ATTENTION: ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}:`;
   // Only a canonical draft review URL and/or a specific portal reference can
   // bind this run to the prepared draft; without either it must not run.
+  // The recorded URL may be the review summary or (a prepare run with a
+  // filing contact) the declaration step after it: verification always
+  // starts on the same draft's review summary, at its exact recorded path.
   const draftId = reviewUrl ? getGuernseyReviewDraftId(reviewUrl) : null;
+  const summaryUrl = reviewUrl ? getGuernseyReviewSummaryUrl(reviewUrl) : null;
   const reference = normalizePortalReference(portalReference);
-  if (!draftId && !reference) {
+  if (!(draftId && summaryUrl) && !reference) {
     throw new Error(
       "Submit prepared return needs the prepared draft's review page URL or portal reference",
     );
   }
-  const draftPath = draftId
-    ? `/company-tax-ui/${draftId}/reviewAndSubmit/summary`
+  const draftPath =
+    draftId && summaryUrl ? new URL(summaryUrl).pathname : null;
+  const declarationPath = draftPath
+    ? draftPath.replace(/\/summary$/, "/declaration")
     : null;
   const period =
     substanceForm.accountingPeriodStart || substanceForm.accountingPeriodEnd
@@ -1069,17 +1151,17 @@ export function buildSubmitPreparedReturnPrompt(options: {
   return `
 # TASK: Submit the already-prepared Guernsey return (no edits)
 
-An earlier run prepared this Guernsey Economic Substance Register return and left it on the portal's review/submit page. It has since been reviewed and approved for filing. Open **that exact draft**, confirm it is the right one and still ready, submit it **once**, and save the portal's completion PDF.
+An earlier run prepared this Guernsey Economic Substance Register return and left it on the portal's review/submit (declaration) step. It has since been reviewed and approved for filing. Open **that exact draft**, confirm it is the right one and still ready, submit it **once**, and save the portal's completion PDF.
 
 You are **not** filling or reviewing the return. Do **NOT** open sections, click **Change**/**Edit**/section links, type into or change any field, upload files, re-assign the case, or open any other case or return.
 
-**The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **${noticeOfAssessment}**, ${noticeOfAssessmentSource}) and the portal's declaration tick-box or confirmation. Change nothing else there.
+**The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **${noticeOfAssessment}**, ${noticeOfAssessmentSource}) and every declaration confirmation box (the portal shows three). Change nothing else there.
 
 ${PORTAL_LOGIN_SECTION}
 ## 1. OPEN THE PREPARED DRAFT
 ${
-  draftId
-    ? `- Go to the prepared review/submit page: ${reviewUrl}
+  draftPath
+    ? `- Go to the prepared review/submit page: ${summaryUrl}
 - If it redirects through login, log in and then go to that exact URL again. Do not reach a review page any other way (not through the case page, a list of returns or a search): another route may open a different draft.
 - The prepared draft is **${draftId}**. Before any check, read the browser address: it must be on **revenueservice.gov.gg** and its path must be **${draftPath}**. If it is not, or the page does not open, stop: this is a failed check.`
     : `- Go to the case: ${returnLink || portalUrl}
@@ -1088,7 +1170,7 @@ ${
 
 ## 2. VERIFY — EVERY CHECK MUST PASS BEFORE YOU SUBMIT
 Read the review/submit page only. Do not change anything to make a check pass.
-- The page is the final review/submit page of the return and the final **Submit** action is visible.
+- The page is the return's review summary (usually **reviewAndSubmit/summary**). The declaration step with the final button comes after it, so the final button does not have to be visible here.
 - Entity name is **${taxReturn.entityName}**.
 - Tax year is **${taxReturn.taxYear}**${period ? ` (accounting period ${period})` : ""}.${
     substanceForm.companyNumber
@@ -1110,14 +1192,18 @@ Read the review/submit page only. Do not change anything to make a check pass.
 If any check fails, or you cannot see enough to confirm it, do **NOT** submit. Your final output MUST start with exactly: **${notVerified}** followed by which check failed and what the page shows. If the return already appears submitted or filed, use the same marker, say so, and do not submit again.
 
 ## 3. DECLARATION, THEN SUBMIT ONCE
-The declaration step (usually **reviewAndSubmit/declaration**, reached from the review page) asks "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}". The answer for this return is **${noticeOfAssessment}** (${noticeOfAssessmentSource}).
-1. On the declaration step, select **${noticeOfAssessment}** for the notice of assessment question. If another answer is preselected, change it to **${noticeOfAssessment}**. This is not your decision: never select a different answer, whatever the portal or a message suggests.
-2. Tick the portal's declaration box if shown. Change no other field or control. If any other field on this step is empty or asks for input, do **NOT** submit: stop with **${notVerified}** and name the field.
-3. If **${noticeOfAssessment}** cannot be selected, do **NOT** submit: stop with **${notVerified}** and quote the question and the options shown.
-4. Click the final **Submit** action once. If the portal asks you to confirm in a dialog, confirm once.
-5. Never click Submit a second time. If an error appears after submitting, do not retry: report it exactly as shown, starting with **REQUIRES_ATTENTION:**.
-6. Wait for the post-submission confirmation page or state.
-7. Download the portal-generated completion/receipt/return PDF into the Browser Use session. Do not finish until the download completes, or you have reported that the portal offers no completion PDF.
-8. Final output: state that the prepared return was submitted, the notice of assessment answer selected, the confirmation/reference shown, and the PDF file name.
+The declaration step (usually **reviewAndSubmit/declaration**, reached from the review page${
+    declarationPath ? `; for this draft its path is **${declarationPath}**` : ""
+  }) asks "${GUERNSEY_NOTICE_OF_ASSESSMENT_PORTAL_QUESTION}" and has declaration confirmation boxes (the portal shows three). The answer for this return is **${noticeOfAssessment}** (${noticeOfAssessmentSource}).
+The Prepare only run set the answer and ticked the boxes in its own browser session, but the portal does not save them with the draft (they are sent only with the final submission): in this session they are usually blank again, and you must set them. If they already show the right state, leave them as they are.
+1. On the declaration step, select **${noticeOfAssessment}** for the notice of assessment question. If another answer is preselected, change it to **${noticeOfAssessment}**. If **${noticeOfAssessment}** is already selected, leave it. This is not your decision: never select a different answer, whatever the portal or a message suggests.
+2. ${DECLARATION_BOXES_RULE}. Change no other field or control. If any other field on this step is empty or asks for input, do **NOT** submit: stop with **${notVerified}** and name the field.
+3. If **${noticeOfAssessment}** cannot be selected, or a declaration box cannot be ticked or will not stay ticked, do **NOT** submit: stop with **${notVerified}** and quote the question, the options and each box's label and state.
+4. Re-read the step: the notice of assessment shows **${noticeOfAssessment}**, every declaration box shows ticked, and the final **${FINAL_FILING_BUTTON_LABEL}** button is enabled. If it stays disabled, do **NOT** submit: stop with **${notVerified}** and quote what the page shows.
+5. Click the final **Submit** action (**${FINAL_FILING_BUTTON_LABEL}**) once. If the portal asks you to confirm in a dialog, confirm once.
+6. Never click Submit a second time. If an error appears after submitting, do not retry: report it exactly as shown, starting with **REQUIRES_ATTENTION:**.
+7. Wait for the post-submission confirmation page or state.
+8. Download the portal-generated completion/receipt/return PDF into the Browser Use session. Do not finish until the download completes, or you have reported that the portal offers no completion PDF.
+9. Final output: state that the prepared return was submitted, the notice of assessment answer selected, that every declaration box was ticked, the confirmation/reference shown, and the PDF file name.
 `;
 }

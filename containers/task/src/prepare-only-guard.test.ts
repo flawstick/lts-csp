@@ -146,6 +146,78 @@ describe("prepare-only guard on the real final action", () => {
   });
 });
 
+describe("prepare-only guard on the declaration step", () => {
+  const declarationPage = "/company-tax-ui/company-tax/tax-returns/abc/reviewAndSubmit/declaration";
+  const boxLabels = [
+    "I declare that the information given in this return is correct and complete",
+    "I confirm that I am authorised to submit this return on behalf of the company",
+    "I confirm that this submission to the Revenue Service is complete to the best of my knowledge",
+  ];
+
+  function renderDeclaration() {
+    history.replaceState(null, "", declarationPage);
+    document.body.innerHTML = `
+      <form id="f">
+        <fieldset>
+          <legend>Please indicate if you wish to receive a notice of assessment</legend>
+          <input type="radio" id="noa-yes" name="noa" value="Yes" /><label for="noa-yes">Yes</label>
+          <input type="radio" id="noa-no" name="noa" value="No" /><label for="noa-no">No</label>
+        </fieldset>
+        ${boxLabels
+          .map(
+            (label, i) => `
+          <div class="checkbox-item">
+            <input type="checkbox" id="box-${i}" />
+            <label id="label-${i}" for="box-${i}">${label}</label>
+          </div>`,
+          )
+          .join("")}
+        <label id="wrapped-label"><input type="checkbox" id="wrapped" /> ${boxLabels[1]}</label>
+        <button id="final" type="submit">Complete submission to Revenue Service</button>
+      </form>`;
+    const form = document.getElementById("f") as HTMLFormElement;
+    const pageSubmit = vi.fn((event: Event) => event.preventDefault());
+    form.addEventListener("submit", pageSubmit);
+    return { form, pageSubmit };
+  }
+
+  const blocks = () => document.documentElement.dataset.ltsPrepareOnlyBlocks;
+
+  it("does not treat typical declaration box labels as final actions", () => {
+    expect(guard.isFinalSubmitLabel(boxLabels[0]!)).toBe(false);
+    expect(guard.isFinalSubmitLabel(boxLabels[1]!)).toBe(false);
+    // Would match as a control label ("submission to the Revenue Service"),
+    // but a checkbox and its <label> are not controls: see the next test.
+    expect(guard.isFinalSubmitLabel(boxLabels[2]!)).toBe(true);
+  });
+
+  it("lets the agent tick every box (input or label) and choose the notice of assessment answer", () => {
+    const { pageSubmit } = renderDeclaration();
+    (document.getElementById("noa-yes") as HTMLInputElement).click();
+    document.getElementById("label-0")!.click();
+    (document.getElementById("box-1") as HTMLInputElement).click();
+    document.getElementById("label-2")!.click();
+    (document.getElementById("wrapped") as HTMLInputElement).click();
+    for (const id of ["noa-yes", "box-0", "box-1", "box-2", "wrapped"]) {
+      expect((document.getElementById(id) as HTMLInputElement).checked, id).toBe(true);
+    }
+    const space = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    document.getElementById("box-0")!.dispatchEvent(space);
+    expect(space.defaultPrevented).toBe(false);
+    expect(pageSubmit).not.toHaveBeenCalled();
+    expect(blocks()).toBeUndefined();
+  });
+
+  it("still blocks the final button once the declaration is complete", () => {
+    const { pageSubmit } = renderDeclaration();
+    for (let i = 0; i < boxLabels.length; i++) document.getElementById(`label-${i}`)!.click();
+    expect(blocks()).toBeUndefined();
+    document.getElementById("final")!.click();
+    expect(pageSubmit).not.toHaveBeenCalled();
+    expect(blocks()).toBe("1");
+  });
+});
+
 describe("prepare-only guard network layer (fail closed on final page)", () => {
   const finalPage = "/company-tax-ui/company-tax/tax-returns/abc/reviewAndSubmit/summary";
 

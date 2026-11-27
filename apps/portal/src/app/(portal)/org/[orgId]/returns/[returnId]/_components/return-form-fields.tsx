@@ -452,7 +452,8 @@ export function ReturnFormFields({
             }
           />
           <p className="text-xs text-muted-foreground">
-            The Guernsey Tax Portal asks this when the return is submitted.
+            The Guernsey Tax Portal asks this on its declaration page, just
+            before the return is submitted.
             LTS answers Yes unless you choose No.
           </p>
         </FieldShell>

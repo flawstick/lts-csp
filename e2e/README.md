@@ -91,6 +91,7 @@ like production rows.
 | `d_noa_no` | like `a`, notice of assessment explicitly "No" |
 | `e_awaiting_signoff` | complete, manager signed off, waiting for the client; notice of assessment unset; no runs |
 | `f_edit_noa` | like `a`, used to save No / Yes from the staff editor |
+| `g_needs_input` | an older ready prepare, then a Prepare only run (latest) paused on an agent question: `status` paused, `pendingQuestion` (`agent_question`, a long markdown `PREPARED_DRAFT_NOT_VERIFIED` question) and `pauseReason`, as the worker writes them |
 
 ## Flows
 
@@ -102,14 +103,23 @@ like production rows.
   job with the right `preparedJobId`; the queued run can be cancelled and
   submitted again.
 - **web (b)**: Submit prepared return disabled with the reason; forced through
-  stale page data, the server's refusal shows in the persistent alert, the
-  page keeps the earlier run, no job is created; Prepare only queues and can
-  be cancelled.
-- **web (c)**: lock banner with the agent's report; confirm-not-filed needs the
-  box and a 10+ character note; the lock is released and audited.
+  stale page data, the server's refusal shows in a dialog that stays until
+  dismissed, the page keeps the earlier run, no job is created; Prepare only
+  queues and can be cancelled.
+- **web (c)**: the toolbar's "Submit locked" indicator (and the More menu)
+  opens the lock dialog with the agent's report behind a toggle;
+  confirm-not-filed, a second view of that dialog, needs the box and a 10+
+  character note; the lock is released and audited.
 - **web (d)**: dialog shows "Notice of assessment: No".
 - **web (f)**: saving No clears the client sign-off and keeps the prepared
   draft valid; saving Yes over No.
+- **tasks (g)**: the Tasks list shows "Needs input" with a one-line question
+  preview (markers and markdown removed, full text in its title), the sidebar
+  Tasks item shows a count of 1, the "Needs input" status filter keeps only
+  that task, and the detail panel's "Answer in task" opens the task. No worker
+  runs, so the flow first re-arms the paused run with a fresh heartbeat
+  (`rearmPausedJob` in `src/db.ts`); otherwise any page that reads it after a
+  minute marks it "heartbeat lost".
 - **worker**: for the job queued from the UI, the worker's prepared-draft
   re-check accepts it, and the Submit prepared return prompt says Yes (LTS's
   default) for (a) and No (the reviewer's answer) for (d).

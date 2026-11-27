@@ -1,7 +1,15 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { TriangleAlertIcon, X } from "@/lib/icons";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { TriangleAlertIcon } from "@/lib/icons";
 
 export type StartError = {
   /** What the reviewer tried to start, e.g. "Submit prepared return". */
@@ -28,8 +36,9 @@ export function describeStartAction(variables: StartVariables): string {
 }
 
 /**
- * Why the last start request was refused. Stays until dismissed or until a
- * run starts, so a refusal never looks like a run that silently stalled.
+ * Why the last start request was refused, as a dialog. Stays open until
+ * dismissed (or until a run starts), so a refusal never looks like a run
+ * that silently stalled.
  */
 export function StartErrorAlert({
   error,
@@ -39,30 +48,33 @@ export function StartErrorAlert({
   onDismiss: () => void;
 }) {
   return (
-    <div
-      role="alert"
-      className="border-destructive/30 bg-destructive/10 flex shrink-0 items-start gap-2 border-b px-4 py-3 text-sm"
+    <AlertDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onDismiss();
+      }}
     >
-      <TriangleAlertIcon className="text-destructive mt-0.5 size-4 shrink-0" />
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-destructive font-medium">
-          {error.action} did not start
-        </p>
-        <p className="text-foreground/90 break-words">{error.message}</p>
+      <AlertDialogContent className="max-h-[calc(100dvh-2rem)] max-w-[calc(100%-2rem)] overflow-y-auto rounded-lg sm:max-w-lg">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="flex items-center gap-2 text-left leading-snug">
+            <TriangleAlertIcon
+              aria-hidden
+              className="text-destructive size-5 shrink-0"
+            />
+            {error.action} did not start
+          </AlertDialogTitle>
+          <AlertDialogDescription className="text-foreground/90 text-left break-words">
+            {error.message}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
         <p className="text-muted-foreground text-xs">
-          No new run was created. Anything shown below is from an earlier
-          run.
+          No new run was created. What the page shows is from an earlier run.
         </p>
-      </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="text-muted-foreground hover:text-foreground size-6 shrink-0"
-        aria-label="Dismiss"
-        onClick={onDismiss}
-      >
-        <X className="size-3.5" />
-      </Button>
-    </div>
+        <AlertDialogFooter>
+          {/* Closing (OK, Escape) calls onDismiss through onOpenChange. */}
+          <AlertDialogAction>OK</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

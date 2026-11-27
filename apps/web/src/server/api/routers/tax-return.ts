@@ -92,6 +92,12 @@ import {
   planOperatorMessage,
 } from "@repo/database/operator-messages";
 import { mergeResultDataPatchSql } from "@repo/database/operator-messages-sql";
+import {
+  getTaskAttention,
+  getTaskRunState,
+  TASK_LIST_JOB_RESULT_KEYS,
+  taskNeedsInput,
+} from "@/lib/task-attention";
 import { triggerTaxSync } from "@/lib/tax-sync-launcher";
 import {
   jerseyCompanyReturnFormSchema,
@@ -207,6 +213,34 @@ function matchesGuernseyCertificateFilter(
 
   return resolved.certificateType === certificateFilter;
 }
+
+/**
+ * Columns of each task's latest run (highest job_number) needed by the task
+ * list: enough for the stale check and the needs-input state, and only the
+ * result_data keys they read (result_data also holds step history).
+ */
+const latestTaskJobResultDataSql = () => sql<Record<string, unknown> | null>`jsonb_strip_nulls(jsonb_build_object(${sql.join(
+  TASK_LIST_JOB_RESULT_KEYS.map((key) => {
+    if (!/^[A-Za-z]+$/.test(key)) throw new Error(`Unsafe result_data key: ${key}`);
+    const literal = sql.raw(`'${key}'`);
+    return sql`${literal}, ${jobs.resultData} -> ${literal}`;
+  }),
+  sql`, `,
+)}))`.mapWith(jobs.resultData);
+
+const latestTaskJobFields = () => ({
+  id: jobs.id,
+  taskId: jobs.taskId,
+  status: jobs.status,
+  createdAt: jobs.createdAt,
+  startedAt: jobs.startedAt,
+  updatedAt: jobs.updatedAt,
+  completedAt: jobs.completedAt,
+  errorMessage: jobs.errorMessage,
+  resultData: latestTaskJobResultDataSql(),
+});
+
+const notDismissedReturnSql = sql`(${taxReturns.status} IS NULL OR ${taxReturns.status} <> 'dismissed')`;
 
 function getTaskDisplayStatus(
   taskStatus: string,
@@ -1371,8 +1405,17 @@ export const taxReturnRouter = createTRPCRouter({
         page: z.number().min(1).default(1),
         pageSize: z.number().min(1).max(100).default(20),
         jurisdictionCode: z.string().trim().min(2).max(8).optional(),
+        // needs_input: the latest run is paused on an agent question
+        // (derived from runs, so filtered after they are read).
         status: z
-          .enum(["pending", "in_progress", "completed", "failed", "cancelled"])
+          .enum([
+            "pending",
+            "in_progress",
+            "completed",
+            "failed",
+            "cancelled",
+            "needs_input",
+          ])
           .optional(),
         certificateType: z
           .enum(["Certificate 2", "Certificate 3", "unresolved"])
@@ -1403,16 +1446,14 @@ export const taxReturnRouter = createTRPCRouter({
         conditions.push(eq(jurisdictions.code, jurisdictionCode));
       }
 
-      if (status) {
+      if (status && status !== "needs_input") {
         conditions.push(eq(tasks.status, status));
       }
       if (search) {
         const searchPattern = `%${search}%`;
         conditions.push(sql`(${tasks.name} ILIKE ${searchPattern})`);
       }
-      conditions.push(
-        sql`(${taxReturns.status} IS NULL OR ${taxReturns.status} <> 'dismissed')`,
-      );
+      conditions.push(notDismissedReturnSql);
 
       const whereClause =
         conditions.length > 0 ? and(...conditions) : undefined;
@@ -1475,44 +1516,51 @@ export const taxReturnRouter = createTRPCRouter({
         ),
       );
 
-      const total = filteredTaskList.length;
-      const totalPages = Math.ceil(total / pageSize);
-
       const taskIds = filteredTaskList.map((task) => task.id);
-      const latestJobsByTaskId = new Map<string, string>();
+      const latestJobsByTaskId = new Map<
+        string,
+        { status: string; resultData: unknown }
+      >();
 
       if (taskIds.length > 0) {
-        const pageJobs = await ctx.db.query.jobs.findMany({
-          where: inArray(jobs.taskId, taskIds),
-          orderBy: desc(jobs.createdAt),
-        });
+        // One row per task: its latest run (DISTINCT ON task_id).
+        const latestJobs = await ctx.db
+          .selectDistinctOn([jobs.taskId], latestTaskJobFields())
+          .from(jobs)
+          .where(inArray(jobs.taskId, taskIds))
+          .orderBy(jobs.taskId, desc(jobs.jobNumber));
 
-        for (const job of pageJobs) {
-          if (latestJobsByTaskId.has(job.taskId)) {
-            continue;
-          }
-
-          const relatedTask = filteredTaskList.find(
-            (task) => task.id === job.taskId,
-          );
+        const taxReturnIdByTaskId = new Map(
+          filteredTaskList.map((task) => [task.id, task.taxReturn?.id ?? null]),
+        );
+        for (const job of latestJobs) {
           const normalizedJob = await maybeMarkBrowserJobStale(ctx.db, job, {
             taskId: job.taskId,
-            taxReturnId: relatedTask?.taxReturn?.id ?? null,
+            taxReturnId: taxReturnIdByTaskId.get(job.taskId) ?? null,
           });
-
-          latestJobsByTaskId.set(job.taskId, normalizedJob.status);
+          latestJobsByTaskId.set(job.taskId, normalizedJob);
         }
       }
 
-      const normalizedTasks = filteredTaskList.map((task) => ({
-        ...task,
-        status: getTaskDisplayStatus(
-          task.status,
-          latestJobsByTaskId.get(task.id),
-        ),
-      }));
+      const normalizedTasks = filteredTaskList.map((task) => {
+        const latestJob = latestJobsByTaskId.get(task.id);
+        return {
+          ...task,
+          status: getTaskDisplayStatus(task.status, latestJob?.status),
+          attention: getTaskAttention(latestJob),
+          runState: getTaskRunState(latestJob?.status),
+        };
+      });
 
-      const paginatedTasks = normalizedTasks.slice(offset, offset + pageSize);
+      const statusFilteredTasks =
+        status === "needs_input"
+          ? normalizedTasks.filter((task) => taskNeedsInput(task.attention))
+          : normalizedTasks;
+
+      const total = statusFilteredTasks.length;
+      const totalPages = Math.ceil(total / pageSize);
+
+      const paginatedTasks = statusFilteredTasks.slice(offset, offset + pageSize);
 
       return {
         tasks: paginatedTasks,
@@ -1521,6 +1569,44 @@ export const taxReturnRouter = createTRPCRouter({
         pageSize,
         totalPages,
       };
+    }),
+
+  // Sidebar badge: tasks in the org whose latest run is paused on an agent
+  // question. Same org scoping and dismissed-return rule as listTasks.
+  countTasksNeedingInput: publicProcedure
+    .input(z.object({ orgId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const latestJobs = ctx.db
+        .selectDistinctOn([jobs.taskId], {
+          taskId: jobs.taskId,
+          status: jobs.status,
+          createdAt: jobs.createdAt,
+          startedAt: jobs.startedAt,
+          updatedAt: jobs.updatedAt,
+          resultData: latestTaskJobResultDataSql().as("result_data"),
+        })
+        .from(jobs)
+        .innerJoin(tasks, eq(jobs.taskId, tasks.id))
+        .leftJoin(taxReturns, eq(tasks.taxReturnId, taxReturns.id))
+        .where(and(eq(tasks.orgId, input.orgId), notDismissedReturnSql))
+        .orderBy(jobs.taskId, desc(jobs.jobNumber))
+        .as("latest_job");
+
+      const pausedJobs = await ctx.db
+        .select()
+        .from(latestJobs)
+        .where(eq(latestJobs.status, "paused"));
+
+      // Read-only: a paused run whose worker is gone is not waiting on
+      // anyone (listTasks / the task page mark it failed when opened).
+      const count = pausedJobs.filter(
+        (job) =>
+          !getBrowserJobStaleReason(job, {
+            startupTimeoutMs: env.BROWSER_STARTUP_TIMEOUT_MS,
+          }) && taskNeedsInput(getTaskAttention(job)),
+      ).length;
+
+      return { count };
     }),
 
   getJerseyCompanyReturnForm: publicProcedure
@@ -1932,7 +2018,8 @@ export const taxReturnRouter = createTRPCRouter({
           .optional()
           .default("prepare_only"),
         // "submit_prepared" files the exact draft the latest Prepare only run
-        // left on the review page, without filling or reviewing it again.
+        // left ready on the review/declaration step, without filling or
+        // reviewing it again.
         filingOperation: z
           .enum(["fill", SUBMIT_PREPARED_OPERATION])
           .optional()

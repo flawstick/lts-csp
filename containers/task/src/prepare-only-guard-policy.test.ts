@@ -82,6 +82,42 @@ describe("detectPrepareOnlyBreach", () => {
   });
 });
 
+describe("detectPrepareOnlyBreach on the declaration step of a prepare run", () => {
+  it("does not treat answering the notice of assessment and ticking the boxes as a submission", () => {
+    expect(
+      detectPrepareOnlyBreach([
+        { summary: "Clicked Continue on the review summary; now on reviewAndSubmit/declaration." },
+        { summary: "Selected 'Yes' for 'Please indicate if you wish to receive a notice of assessment'." },
+        { summary: "Ticked 'I declare that the information given in this return is correct and complete'." },
+        {
+          summary: "Ticked 'I confirm that I am authorised to submit this return on behalf of the company'.",
+          data: { pageText: "Declaration ... Complete submission to Revenue Service" },
+        },
+        {
+          summary:
+            "All three declaration confirmations are ticked and the 'Complete submission to Revenue Service' button is now enabled. Not clicking it: this is a prepare-only run.",
+        },
+        {
+          summary:
+            "READY_FOR_MANUAL_SUBMISSION: The return is prepared on the final declaration page. Notice of assessment: Yes. All 3 declaration boxes are ticked. The only remaining action is 'Complete submission to Revenue Service', which is enabled and was not clicked.",
+        },
+      ]),
+    ).toBeNull();
+  });
+
+  it("still cancels when the guard blocked the final button on the declaration page", () => {
+    expect(
+      detectPrepareOnlyBreach([
+        { summary: "Ticked all three declaration boxes." },
+        {
+          summary: "click 'Complete submission to Revenue Service'",
+          data: { result: "LTS PREPARE-ONLY GUARD: final submission is blocked in this run." },
+        },
+      ]),
+    ).toMatchObject({ kind: "submission_attempt_blocked" });
+  });
+});
+
 describe("prepare-only guard fail-closed policy", () => {
   it("requires the guard unless explicitly opted out", () => {
     expect(isPrepareOnlyGuardRequired(undefined)).toBe(true);

@@ -1,5 +1,6 @@
 import type { Checks } from "../browser";
 import type { SeedResult } from "../seed";
+import { attentionFlows } from "./attention";
 import { portalFlows } from "./portal";
 import { smokeFlows } from "./smoke";
 import { webFlows } from "./web";
@@ -16,4 +17,4 @@ export type Flow = { name: string; needsPortal?: boolean; run: (ctx: FlowContext
 
 // Order matters: the worker check reads the job the (a) flow queued, and the
 // portal re-sign-off of (f) follows the staff edit that cleared it.
-export const flows: Flow[] = [...smokeFlows, ...webFlows, ...workerFlows, ...portalFlows];
+export const flows: Flow[] = [...smokeFlows, ...webFlows, ...attentionFlows, ...workerFlows, ...portalFlows];

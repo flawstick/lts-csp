@@ -43,6 +43,7 @@ import {
   Trash2,
   RefreshCw,
   FileText,
+  Lock,
 } from "@/lib/icons";
 
 type Job = {
@@ -105,6 +106,13 @@ type BrowserToolbarProps = {
    * declaration page, e.g. "Yes (default)". Null when it does not apply.
    */
   noticeOfAssessmentLabel?: string | null;
+  /**
+   * A Submit prepared return run that reached the portal locks submitting
+   * this return. Shows the "Submit locked" indicator, which opens the lock
+   * dialog through onOpenSubmitLock.
+   */
+  submitLocked?: boolean;
+  onOpenSubmitLock?: () => void;
 };
 
 function blockerOf(readiness: SubmitReadiness | undefined) {
@@ -201,7 +209,10 @@ export function BrowserToolbar({
   submitReadiness,
   onActionsMenuOpen,
   noticeOfAssessmentLabel = null,
+  submitLocked = false,
+  onOpenSubmitLock,
 }: BrowserToolbarProps) {
+  const showSubmitLock = submitLocked && !!onOpenSubmitLock;
   const reasonIdBase = useId();
   const submitPreparedBlocker = blockerOf(submitReadiness?.submitPrepared);
   const submitBlocker = blockerOf(submitReadiness?.submit);
@@ -265,11 +276,14 @@ export function BrowserToolbar({
               {isPreparedSubmission ? (
                 <>
                   This authorises the agent to open the draft of{" "}
-                  {entityName || "this entity's return"} left on the review
-                  page by the last Prepare only run, confirm it is that exact
-                  draft and still ready, and file it with the Revenue Service
-                  without changing any answers. It stops without submitting if
-                  any check fails.
+                  {entityName || "this entity's return"} prepared by the last
+                  Prepare only run, confirm it is that exact draft and still
+                  ready, and file it with the Revenue Service without editing
+                  the return. The portal does not keep the declaration
+                  step between sessions, so the agent selects the notice of
+                  assessment answer and ticks the declaration boxes again if
+                  they are blank. It stops without submitting if any check
+                  fails.
                 </>
               ) : (
                 <>
@@ -291,8 +305,9 @@ export function BrowserToolbar({
               </span>{" "}
               <span className="font-medium">{noticeOfAssessmentLabel}</span>
               <span className="text-muted-foreground block text-xs">
-                Selected on the portal&apos;s declaration page. Change it under
-                Additional Information on the return before submitting.
+                Selected on the portal&apos;s declaration page by Prepare only
+                and again at submission. Change it under Additional Information
+                on the return before submitting.
               </span>
             </p>
           ) : null}
@@ -463,6 +478,25 @@ export function BrowserToolbar({
 
         {/* Status + Controls */}
         <div className="flex items-center gap-1.5">
+          {showSubmitLock ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 gap-1 border-amber-500/50 bg-amber-500/10 px-2 text-[11px] font-medium text-amber-700 hover:bg-amber-500/20 hover:text-amber-800 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-300 dark:hover:bg-amber-400/20 dark:hover:text-amber-200"
+                  aria-haspopup="dialog"
+                  onClick={onOpenSubmitLock}
+                >
+                  <Lock aria-hidden className="size-3" />
+                  {/* Icon-only on narrow screens; the text stays the accessible name. */}
+                  <span className="sr-only sm:not-sr-only">Submit locked</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Why submitting is locked, and how to unlock it</TooltipContent>
+            </Tooltip>
+          ) : null}
+
           {(() => {
             const sc = getStatusConfig(taskStatus);
             return (
@@ -661,6 +695,12 @@ export function BrowserToolbar({
                     <BlockerReason id={submitReasonId}>
                       {submitBlocker}
                     </BlockerReason>
+                  ) : null}
+                  {showSubmitLock ? (
+                    <DropdownMenuItem onClick={onOpenSubmitLock}>
+                      <Lock className="mr-2 size-3.5" /> Review the submit
+                      lock…
+                    </DropdownMenuItem>
                   ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>

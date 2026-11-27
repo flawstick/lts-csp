@@ -9,6 +9,8 @@ function renderToolbar(
     submitReadiness?: ToolbarSubmitReadiness | null;
     onActionsMenuOpen?: () => void;
     noticeOfAssessmentLabel?: string | null;
+    submitLocked?: boolean;
+    onOpenSubmitLock?: () => void;
   } = {},
 ) {
   render(<TooltipProvider><BrowserToolbar {...extra}
@@ -275,5 +277,49 @@ describe("cancel control", () => {
     /></TooltipProvider>);
     fireEvent.click(screen.getByRole("button", { name: "Cancel task" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("submit lock indicator", () => {
+  it("is hidden while submitting is not locked", () => {
+    renderToolbar(vi.fn(), { submitLocked: false, onOpenSubmitLock: vi.fn() });
+    expect(
+      screen.queryByRole("button", { name: "Submit locked" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens the lock dialog from the toolbar", () => {
+    const onOpenSubmitLock = vi.fn();
+    renderToolbar(vi.fn(), { submitLocked: true, onOpenSubmitLock });
+    const indicator = screen.getByRole("button", { name: "Submit locked" });
+    expect(indicator).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(indicator);
+    expect(onOpenSubmitLock).toHaveBeenCalledTimes(1);
+  });
+
+  it("is offered next to the lock reason in the More menu", async () => {
+    const onOpenSubmitLock = vi.fn();
+    const blocker = "An earlier Submit prepared return run reached the portal.";
+    renderToolbar(vi.fn(), {
+      submitLocked: true,
+      onOpenSubmitLock,
+      submitReadiness: {
+        submit: { ready: false, blocker },
+        submitPrepared: { ready: false, blocker },
+      },
+    });
+    fireEvent.keyDown(screen.getByRole("button", { name: /More/ }), { key: "Enter" });
+    expect(await screen.findByText(blocker)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Review the submit lock/ }));
+    expect(onOpenSubmitLock).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds no menu item while unlocked", async () => {
+    renderToolbar(vi.fn(), { onOpenSubmitLock: vi.fn() });
+    fireEvent.keyDown(screen.getByRole("button", { name: /More/ }), { key: "Enter" });
+    await screen.findByRole("menuitem", { name: /Submit prepared/ });
+    expect(
+      screen.queryByRole("menuitem", { name: /Review the submit lock/ }),
+    ).not.toBeInTheDocument();
   });
 });

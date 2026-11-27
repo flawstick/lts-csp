@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parsePreparedDraftOutput } from "@repo/database/prepared-draft";
+import { classifyRunOutcome } from "./run-outcome";
 import {
   ENTITY_ACCOUNTS_INCOMPLETE_RULE,
   PROFIT_ALLOCATION_COLUMNS,
@@ -527,17 +528,17 @@ describe("buildSubmitPreparedReturnPrompt", () => {
   it("answers the notice of assessment with the reviewer's No and allows no other change", () => {
     const prompt = buildSubmitPreparedReturnPrompt(withAnswer("No"));
     expect(prompt).toContain(
-      'asks "Please indicate if you wish to receive a notice of assessment". The answer for this return is **No** (the reviewer\'s answer for this return).',
+      'asks "Please indicate if you wish to receive a notice of assessment" and has declaration confirmation boxes (the portal shows three). The answer for this return is **No** (the reviewer\'s answer for this return).',
     );
     expect(prompt).toContain("select **No** for the notice of assessment question");
     expect(prompt).toContain("never select a different answer");
     expect(prompt).toContain(
-      "**The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **No**, the reviewer's answer for this return) and the portal's declaration tick-box or confirmation. Change nothing else there.",
+      "**The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **No**, the reviewer's answer for this return) and every declaration confirmation box (the portal shows three). Change nothing else there.",
     );
     expect(prompt).toContain("Change no other field or control");
     // Answering happens before the single Submit click.
     expect(prompt.indexOf("select **No** for the notice")).toBeLessThan(
-      prompt.indexOf("Click the final **Submit** action once"),
+      prompt.indexOf("Click the final **Submit** action (**Complete submission to Revenue Service**) once"),
     );
     expect(buildSubmitPreparedReturnPrompt(withAnswer("Yes"))).toContain(
       "select **Yes** for the notice of assessment question",
@@ -560,6 +561,42 @@ describe("buildSubmitPreparedReturnPrompt", () => {
     expect(buildSubmitPreparedReturnPrompt(base)).toContain(
       "select **Yes** for the notice of assessment question",
     );
+  });
+
+  it("re-applies every declaration box before the single Submit, verifying rather than toggling", () => {
+    const prompt = buildSubmitPreparedReturnPrompt(base);
+    expect(prompt).toContain("Tick **every** declaration confirmation checkbox on the declaration step (the portal shows **three**");
+    expect(prompt).toContain("clicking a box that is already ticked UN-TICKS it");
+    expect(prompt).toContain("If they already show the right state, leave them as they are.");
+    expect(prompt).toContain("in this session they are usually blank again, and you must set them");
+    expect(prompt).toContain(
+      "or a declaration box cannot be ticked or will not stay ticked, do **NOT** submit: stop with **REQUIRES_ATTENTION: PREPARED_DRAFT_NOT_VERIFIED:**",
+    );
+    expect(prompt).toContain(
+      "the final **Complete submission to Revenue Service** button is enabled. If it stays disabled, do **NOT** submit",
+    );
+    expect(prompt).not.toContain("declaration tick-box");
+    expect(prompt).not.toContain("Tick the portal's declaration box");
+    expect(prompt.indexOf("Tick **every** declaration confirmation checkbox")).toBeLessThan(
+      prompt.indexOf("Click the final **Submit** action"),
+    );
+  });
+
+  it("opens the review summary of a draft recorded on its declaration page, at its exact path", () => {
+    const prompt = buildSubmitPreparedReturnPrompt({
+      ...base,
+      reviewUrl:
+        "https://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/d-1/reviewAndSubmit/declaration",
+    });
+    expect(prompt).toContain(
+      "Go to the prepared review/submit page: https://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/d-1/reviewAndSubmit/summary",
+    );
+    expect(prompt).toContain("The prepared draft is **d-1**");
+    expect(prompt).toContain("its path must be **/company-tax-ui/company-tax/tax-returns/d-1/reviewAndSubmit/summary**");
+    expect(prompt).toContain(
+      "for this draft its path is **/company-tax-ui/company-tax/tax-returns/d-1/reviewAndSubmit/declaration**",
+    );
+    expect(prompt).not.toContain(`Go to the case: ${base.returnLink}`);
   });
 });
 
@@ -612,8 +649,9 @@ describe("notice of assessment in the filling prompt", () => {
     },
   );
 
-  it("does not need or use it to prepare, and leaves the question alone", () => {
-    for (const answer of [null, "Yes"]) {
+  it.each(["Yes", "No"])(
+    "tells a prepare run with a contact to select the reviewer's %s and stop before the final button",
+    (answer) => {
       const prompt = buildSubstanceFormPrompt({
         taxReturn: baseTaxReturn,
         substanceForm: form(answer),
@@ -621,10 +659,187 @@ describe("notice of assessment in the filling prompt", () => {
         submissionMode: "prepare_only",
         ...contact,
       });
-      expect(prompt).toContain("This run does not answer it: if you see it, leave it exactly as the portal shows it.");
+      expect(prompt).toContain("DECLARATION STEP — NOTICE OF ASSESSMENT (SET FOR THIS RETURN)");
+      expect(prompt).toContain(
+        `The answer for this return is **${answer}** (the reviewer's answer for this return). Select **${answer}**.`,
+      );
+      expect(prompt).toContain(`4. On the declaration step, select **${answer}** for the notice of assessment question`);
+      expect(prompt).not.toContain("This run does not answer it");
+      // Never an instruction to file.
+      expect(prompt).not.toContain("Click the final submit/confirm action");
+      expect(prompt).not.toContain("do NOT submit: STOP");
+    },
+  );
+
+  it.each([null, undefined, "", "maybe"])(
+    "tells a prepare run with a contact to select the default Yes when no answer is saved (%j)",
+    (answer) => {
+      const prompt = buildSubstanceFormPrompt({
+        taxReturn: baseTaxReturn,
+        substanceForm: form(answer),
+        portalUrl: "https://my.gov.gg",
+        submissionMode: "prepare_only",
+        ...contact,
+      });
+      expect(prompt).toContain(
+        "The answer for this return is **Yes** (LTS's default answer for this return). Select **Yes**.",
+      );
+      expect(prompt).not.toContain("**No**");
+    },
+  );
+
+  it("leaves the question and the boxes alone when the run stops at the contact step", () => {
+    for (const submissionMode of ["prepare_only", "submit_and_capture_pdf"] as const) {
+      const prompt = buildSubstanceFormPrompt({
+        taxReturn: baseTaxReturn,
+        substanceForm: form("No"),
+        portalUrl: "https://my.gov.gg",
+        submissionMode,
+      });
+      expect(prompt).toContain("This run does not answer it: if you see it, leave it exactly as the portal shows it");
+      expect(prompt).toContain("do not tick any declaration box");
       expect(prompt).not.toContain("SET FOR THIS RETURN");
       expect(prompt).not.toContain("The answer for this return is");
+      expect(prompt).not.toContain("DECLARATION BOXES");
     }
+  });
+});
+
+describe("prepare only completes the declaration step", () => {
+  const contact = { contactName: "NSM Filings Team", contactEmail: "filings@nsm.example" };
+  const prepare = (noticeOfAssessment?: string | null) =>
+    buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: {
+        certificateType: "Certificate 3",
+        relevantActivity: "Banking",
+        noticeOfAssessment,
+      } as any,
+      portalUrl: "https://my.gov.gg",
+      submissionMode: "prepare_only",
+      ...contact,
+    });
+
+  it("continues past the review page to the declaration step and ticks every box", () => {
+    const prompt = prepare();
+    expect(prompt).toContain("continue from the review page to the **declaration step** (usually **reviewAndSubmit/declaration**)");
+    expect(prompt).toContain("Tick every declaration confirmation box (the portal shows three");
+    expect(prompt).toContain("Tick **every** declaration confirmation checkbox on the declaration step (the portal shows **three**");
+    expect(prompt).toContain("Change nothing else on this step");
+    expect(prompt).toContain(
+      "the final **Complete submission to Revenue Service** button is now enabled (not greyed out). Check its state by reading the page; do NOT click it to test it",
+    );
+    // The order a person would follow: review, declaration, answer, boxes, stop.
+    const order = [
+      "continue from the review page to the **declaration step**",
+      "4. On the declaration step, select **Yes**",
+      "5. Tick every declaration confirmation box",
+      "**STOP BEFORE CLICKING THE FINAL BUTTON**",
+      "Your final output MUST start with exactly: **READY_FOR_MANUAL_SUBMISSION:**",
+    ].map((text) => prompt.indexOf(text));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it("warns that clicking a ticked box un-ticks it", () => {
+    const prompt = prepare();
+    expect(prompt).toContain("clicking a box that is already ticked UN-TICKS it");
+    expect(prompt).toContain("click only a box that is NOT ticked");
+  });
+
+  it("never lets a prepare run click the final button", () => {
+    const prompt = prepare();
+    expect(prompt).toContain("Do NOT click **Complete submission to Revenue Service**");
+    expect(prompt).toContain(
+      "Do **NOT** click **Complete submission to Revenue Service**, a **Submit** or **Confirm** button, **Print**, **Download**, or any final filing action under any circumstances",
+    );
+    expect(prompt).toContain("This run is **PREPARE ONLY**");
+    expect(prompt).toContain("Ticking these boxes is not filing; only the final button files.");
+    expect(prompt).not.toContain("Click the final submit/confirm action");
+    expect(prompt).not.toContain("Click the final **Submit** action");
+    expect(prompt).not.toMatch(/\bclick (it|the final button) once\b/i);
+  });
+
+  it("reports the answer, the ticked boxes and the declaration page URL", () => {
+    const prompt = prepare("No");
+    expect(prompt).toContain(
+      "Then state the notice of assessment answer you selected, that every declaration box is ticked (say how many), that **Complete submission to Revenue Service** is enabled and was not clicked",
+    );
+    expect(prompt).toContain("REVIEW_PAGE_URL: <the full URL of the declaration page currently open>");
+    expect(prompt).toContain("PORTAL_REFERENCE: <the return or case reference");
+  });
+
+  it("stops with DECLARATION_INCOMPLETE when the step cannot be completed", () => {
+    const prompt = prepare();
+    expect(prompt).toContain(
+      "a declaration box cannot be ticked or will not stay ticked, the step asks for anything else, or **Complete submission to Revenue Service** stays disabled once every box is ticked: do NOT click it",
+    );
+    expect(prompt).toContain("Your final output MUST instead start with exactly: **REQUIRES_ATTENTION: DECLARATION_INCOMPLETE:**");
+    expect(prompt).toContain(
+      "If **Yes** cannot be selected, do NOT click the final button: STOP and report **REQUIRES_ATTENTION: DECLARATION_INCOMPLETE:**",
+    );
+    // That output is a pause, not a prepared draft.
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output:
+        "**REQUIRES_ATTENTION: DECLARATION_INCOMPLETE:** The third box 'I confirm that I am authorised to submit this return on behalf of the company' will not stay ticked and 'Complete submission to Revenue Service' is still disabled. I did not click it and this is not READY_FOR_MANUAL_SUBMISSION.\nhttps://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/d-1/reviewAndSubmit/declaration",
+      isTaskSuccessful: true,
+    });
+    expect(outcome).toMatchObject({
+      prepareOnlyReady: false,
+      needsAttention: true,
+      prepareOnlyLikelySubmitted: false,
+      needsFilingContact: false,
+    });
+  });
+
+  it("produces output the worker records as the prepared draft", () => {
+    const declaration =
+      "https://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/d-1/reviewAndSubmit/declaration";
+    const output = [
+      "**READY_FOR_MANUAL_SUBMISSION:** The return is prepared on the final declaration page. Notice of assessment: Yes selected (LTS's default). All 3 declaration boxes are ticked. 'Complete submission to Revenue Service' is now enabled and was not clicked; it is the only remaining action.",
+      `**REVIEW_PAGE_URL:** ${declaration}`,
+      "**PORTAL_REFERENCE:** NONE",
+    ].join("\n");
+    expect(parsePreparedDraftOutput(output)).toEqual({ reviewUrl: declaration, portalReference: null });
+    expect(
+      classifyRunOutcome({ submissionMode: "prepare_only", sessionStatus: "idle", output, isTaskSuccessful: false }),
+    ).toMatchObject({ success: true, prepareOnlyReady: true, prepareOnlyLikelySubmitted: false, needsAttention: false });
+  });
+
+  it("keeps a prepare run without a contact stopping at the contact step", () => {
+    const prompt = buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: { certificateType: "Certificate 3", relevantActivity: "Banking" } as any,
+      portalUrl: "https://my.gov.gg",
+      submissionMode: "prepare_only",
+    });
+    expect(prompt).toContain("COMPLETION — STOP AT THE CONTACT STEP");
+    expect(prompt).toContain("stop on the final review/submit page");
+    expect(prompt).not.toContain("DECLARATION_INCOMPLETE");
+    expect(prompt).not.toContain("Tick every declaration confirmation box");
+  });
+});
+
+describe("full submit declaration step", () => {
+  it("ticks every declaration box, warns about un-ticking, then files once", () => {
+    const prompt = buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: { certificateType: "Certificate 3", relevantActivity: "Banking" } as any,
+      portalUrl: "https://my.gov.gg",
+      submissionMode: "submit_and_capture_pdf",
+      contactName: "NSM Filings Team",
+      contactEmail: "filings@nsm.example",
+    });
+    expect(prompt).toContain("tick every declaration confirmation box (the portal shows three;");
+    expect(prompt).toContain("clicking a box that is already ticked UN-TICKS it");
+    expect(prompt).toContain("DECLARATION STEP — DECLARATION BOXES");
+    expect(prompt).not.toContain("tick the portal's declaration\n");
+    expect(prompt.indexOf("tick every declaration confirmation box")).toBeLessThan(
+      prompt.indexOf("Click the final submit/confirm action once"),
+    );
+    expect(prompt).not.toContain("READY_FOR_MANUAL_SUBMISSION");
   });
 });
 
@@ -635,15 +850,18 @@ describe("buildNoticeOfAssessmentContinuationRule", () => {
       defaulted: false,
       submitPrepared: false,
     });
-    expect(rule).toContain("NOTICE OF ASSESSMENT (the reviewer's answer for this return;");
+    expect(rule).toContain("NOTICE OF ASSESSMENT AND DECLARATION (the reviewer's answer for this return;");
     expect(rule).toContain(
       'answer "Please indicate if you wish to receive a notice of assessment" with **Yes**',
     );
     expect(rule).toContain("Never select a different answer");
+    expect(rule).toContain("Tick **every** declaration confirmation checkbox");
+    expect(rule).toContain("clicking a box that is already ticked UN-TICKS it");
     expect(rule).not.toContain("only things you may set");
+    expect(rule).not.toContain("PREPARE ONLY");
   });
 
-  it("keeps a submit prepared continuation to that answer and the declaration tick", () => {
+  it("keeps a submit prepared continuation to that answer and the declaration boxes", () => {
     const rule = buildNoticeOfAssessmentContinuationRule({
       answer: "No",
       defaulted: false,
@@ -651,9 +869,30 @@ describe("buildNoticeOfAssessmentContinuationRule", () => {
     });
     expect(rule).toContain("with **No**");
     expect(rule).toContain(
-      "This answer and the portal's declaration tick-box are the only things you may set. Change no other field.",
+      "This answer and the declaration confirmation boxes are the only things you may set. Change no other field.",
     );
+    expect(rule).toContain("(the portal shows **three**");
+    expect(rule).toContain("If a box is already ticked, leave it ticked");
     expect(rule).toContain("REQUIRES_ATTENTION**: PREPARED_DRAFT_NOT_VERIFIED:");
+  });
+
+  it("restates the answer and boxes for a prepare run, without clicking the final button", () => {
+    const rule = buildNoticeOfAssessmentContinuationRule({
+      answer: "No",
+      defaulted: false,
+      submitPrepared: false,
+      prepareOnly: true,
+    });
+    expect(rule).toContain("with **No**");
+    expect(rule).toContain("Tick **every** declaration confirmation checkbox");
+    expect(rule).toContain("clicking a box that is already ticked UN-TICKS it");
+    expect(rule).toContain(
+      "This is a PREPARE ONLY run: do **NOT** click **Complete submission to Revenue Service** or any final filing action.",
+    );
+    expect(rule).toContain("**READY_FOR_MANUAL_SUBMISSION:**");
+    expect(rule).toContain("do NOT click the final button: stop and report **REQUIRES_ATTENTION**: DECLARATION_INCOMPLETE:");
+    expect(rule).not.toContain("do NOT submit");
+    expect(rule).not.toContain("PREPARED_DRAFT_NOT_VERIFIED");
   });
 });
 
@@ -664,7 +903,7 @@ describe("buildNoticeOfAssessmentContinuationRule with the default", () => {
       defaulted: true,
       submitPrepared: true,
     });
-    expect(rule).toContain("NOTICE OF ASSESSMENT (LTS's default answer for this return;");
+    expect(rule).toContain("NOTICE OF ASSESSMENT AND DECLARATION (LTS's default answer for this return;");
     expect(rule).toContain("with **Yes**");
   });
 });
