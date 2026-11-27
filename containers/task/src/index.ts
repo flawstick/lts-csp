@@ -92,6 +92,7 @@ import {
   buildResumePrompt,
   buildSubmitPreparedReturnPrompt,
   buildSubstanceFormPrompt,
+  hasConfiguredFilingContact,
 } from "./prompt-builder";
 import {
   classifyRunOutcome,
@@ -1498,8 +1499,19 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     // The declaration step's notice-of-assessment answer, resolved from the
     // current form: the reviewer's saved "No", otherwise the default "Yes".
     // The agent is always told which to select and never picks it itself.
+    // Every run that reaches the declaration step needs it: a submit run, and
+    // a prepare run with a filing contact (it completes the declaration and
+    // stops before the final button). A prepare run without a contact stops
+    // at the contact step and never answers it.
+    const prepareCompletesDeclaration =
+      submissionMode === "prepare_only" &&
+      filingContactDecision.kind === "configured" &&
+      hasConfiguredFilingContact(
+        filingContactDecision.contact.name,
+        filingContactDecision.contact.email,
+      );
     const noticeOfAssessment =
-      submissionMode === "submit_and_capture_pdf"
+      submissionMode === "submit_and_capture_pdf" || prepareCompletesDeclaration
         ? getGuernseyNoticeOfAssessment(taxReturn.substanceForm)
         : null;
     if (noticeOfAssessment) {
@@ -1673,7 +1685,8 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
           contactEmail: filingContactInfo?.email ?? "",
         })
       : buildFillPrompt();
-    // Restated in every recovery/resume continuation of a submit run.
+    // Restated in every recovery/resume continuation of a run that reaches
+    // the declaration step (submit, submit prepared, prepare with a contact).
     const noticeOfAssessmentRule = noticeOfAssessment
       ? buildNoticeOfAssessmentContinuationRule({
           answer: noticeOfAssessment,
@@ -1681,6 +1694,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
             taxReturn.substanceForm,
           ),
           submitPrepared: isSubmitPrepared,
+          prepareOnly: submissionMode === "prepare_only",
         })
       : "";
     const recoveryReturnUrl =
@@ -2571,6 +2585,10 @@ RECOVERY RULES:
             submissionMode === "submit_and_capture_pdf"
               ? "treat it as a draft summary until every section has been rechecked in this run. Only use the final submit path after the filing is fully validated and you are ready to download the portal-generated completion PDF."
               : "this is a saved draft summary. Do NOT click Submit, Confirm, Print, or Download from that page."
+          }${
+            submissionMode === "prepare_only"
+              ? " On reviewAndSubmit/declaration, never click Complete submission to Revenue Service or any final filing action."
+              : ""
           }
 - From the summary page, use a Change or Edit link to reopen the filing sections and continue the return.
 - Verify the Financial Statements / Accounts upload before leaving that section, and do not continue while the control still says "No file chosen".

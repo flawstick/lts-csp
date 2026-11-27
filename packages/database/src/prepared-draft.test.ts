@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   fingerprintPreparedInputs,
   getGuernseyReviewDraftId,
+  getGuernseyReviewSummaryUrl,
   getSubmitBrowserStopRefusal,
   getSubmitNotFiledConfirmationRefusal,
   getSubmitRunAgentReport,
@@ -197,6 +198,39 @@ describe("parsePreparedDraftOutput", () => {
     ).toBe("d-123");
   });
 
+  it("accepts the declaration page a prepare run now stops on (Pudleston, 2026-11-27)", () => {
+    const declaration =
+      "https://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/0b6f3c1e-8f7d-4b39-9a51-2f1c7d6e4a10/reviewAndSubmit/declaration";
+    const output = [
+      "READY_FOR_MANUAL_SUBMISSION: The return is prepared and on the final declaration page. The notice of assessment answer selected is Yes and all three declaration boxes are ticked. The remaining portal action is 'Complete submission to Revenue Service', which is enabled and was not clicked.",
+      `REVIEW_PAGE_URL: ${declaration}`,
+      "PORTAL_REFERENCE: NONE",
+    ].join("\n");
+    expect(parsePreparedDraftOutput(output)).toEqual({ reviewUrl: declaration, portalReference: null });
+    expect(getGuernseyReviewDraftId(declaration)).toBe("0b6f3c1e-8f7d-4b39-9a51-2f1c7d6e4a10");
+    expect(getGuernseyReviewDraftId(`${declaration}/`)).toBe("0b6f3c1e-8f7d-4b39-9a51-2f1c7d6e4a10");
+    for (const url of [
+      `${declaration}?step=2`,
+      declaration.replace("/declaration", "/declarations"),
+      declaration.replace("/reviewAndSubmit/declaration", "/declaration"),
+      declaration.replace("revenueservice.gov.gg", "revenueservice.gov.gg.evil.example"),
+    ]) {
+      expect(getGuernseyReviewDraftId(url)).toBeNull();
+    }
+  });
+
+  it("derives the review summary of the same draft, keeping its exact path", () => {
+    expect(
+      getGuernseyReviewSummaryUrl(
+        "https://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/d-123/reviewAndSubmit/declaration",
+      ),
+    ).toBe("https://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/d-123/reviewAndSubmit/summary");
+    expect(
+      getGuernseyReviewSummaryUrl("https://revenueservice.gov.gg/company-tax-ui/d-123/reviewAndSubmit/summary/"),
+    ).toBe("https://revenueservice.gov.gg/company-tax-ui/d-123/reviewAndSubmit/summary");
+    expect(getGuernseyReviewSummaryUrl("https://my.gov.gg/revenue/case/abc/process")).toBeNull();
+  });
+
   it("keeps only specific portal references, never truncated", () => {
     expect(normalizePortalReference(" ESR-2025-0042 ")).toBe("ESR-2025-0042");
     for (const value of ["NONE", "Not shown", "Submitted", "2025", "12", "x".repeat(70) + "1", "ESR-1 (header)", null]) {
@@ -242,6 +276,20 @@ describe("resolvePreparedDraft", () => {
   it("accepts the latest ready draft with unchanged inputs", () => {
     const result = resolvePreparedDraft({ jobs: [prepared], currentFingerprint: fingerprint });
     expect(result.ok && result.preparedJob.id).toBe("prep");
+  });
+
+  it("accepts a draft recorded on the declaration page", () => {
+    const reviewUrl =
+      "https://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/d-123/reviewAndSubmit/declaration";
+    const onDeclaration: PreparedDraftJob = {
+      ...prepared,
+      resultData: {
+        ...(prepared.resultData as Record<string, unknown>),
+        preparedDraft: { version: 1, preparedAt: 1, inputFingerprint: fingerprint, reviewUrl, portalReference: null },
+      },
+    };
+    const result = resolvePreparedDraft({ jobs: [onDeclaration], currentFingerprint: fingerprint });
+    expect(result.ok && result.draft.reviewUrl).toBe(reviewUrl);
   });
 
   it("refuses when inputs changed after preparation", () => {

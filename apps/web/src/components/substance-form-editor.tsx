@@ -150,8 +150,9 @@ export function SubstanceFormEditor({
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            The Guernsey portal asks this on its declaration page when the return is submitted.
-            LTS answers Yes unless you choose No.
+            The Guernsey portal asks this on its declaration page, just before the return is
+            submitted. Prepare only selects it and ticks the declaration boxes, stopping before
+            the final button. LTS answers Yes unless you choose No.
           </p>
         </div>
       )

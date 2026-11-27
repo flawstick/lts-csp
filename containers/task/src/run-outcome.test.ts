@@ -164,6 +164,65 @@ describe("classifyRunOutcome", () => {
   });
 });
 
+describe("prepare run that completed the declaration step", () => {
+  // Shape of the Pudleston (2026-11-27) prepare output once the declaration
+  // step is completed in the prepare run.
+  const declarationReady = `READY_FOR_MANUAL_SUBMISSION: The return is prepared and on the final declaration/submit page. Notice of assessment: selected "Yes" (LTS's default answer). All three declaration confirmations are ticked: "I declare that the information given in this return is correct and complete", "I confirm that I am authorised to submit this return on behalf of the company" and the third declaration box. The final button "Complete submission to Revenue Service" is now enabled and was not clicked; it is the only remaining portal action.
+REVIEW_PAGE_URL: https://revenueservice.gov.gg/company-tax-ui/company-tax/tax-returns/0b6f3c1e-8f7d-4b39-9a51-2f1c7d6e4a10/reviewAndSubmit/declaration
+PORTAL_REFERENCE: NONE`;
+
+  it("is a prepared draft, not a submission", () => {
+    expect(isLikelySubmittedOutput(declarationReady)).toBe(false);
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output: declarationReady,
+      isTaskSuccessful: false,
+    });
+    expect(outcome).toMatchObject({
+      success: true,
+      prepareOnlyReady: true,
+      likelySubmitted: false,
+      prepareOnlyLikelySubmitted: false,
+      needsAttention: false,
+      needsFilingContact: false,
+    });
+    expect(shouldCaptureFiledReturnPdf("prepare_only", outcome)).toBe(false);
+    expect(getTaxReturnStatusForOutcome("prepare_only", outcome)).toBe("review_required");
+  });
+
+  it.each([
+    "**REQUIRES_ATTENTION: DECLARATION_INCOMPLETE:** The second declaration box would not stay ticked; \"Complete submission to Revenue Service\" is still disabled. I did not click it.",
+    "REQUIRES_ATTENTION: DECLARATION_INCOMPLETE: 'Please indicate if you wish to receive a notice of assessment' shows no 'Yes' option (options: 'Paper', 'Email'). This is not READY_FOR_MANUAL_SUBMISSION; nothing was submitted.",
+  ])("pauses when the declaration could not be completed: %s", (output) => {
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output,
+      isTaskSuccessful: true,
+    });
+    expect(outcome).toMatchObject({
+      prepareOnlyReady: false,
+      likelySubmitted: false,
+      prepareOnlyLikelySubmitted: false,
+      needsAttention: true,
+      needsFilingContact: false,
+    });
+  });
+
+  it("lets a leading REQUIRES_ATTENTION win over a later READY marker", () => {
+    const outcome = classifyRunOutcome({
+      submissionMode: "prepare_only",
+      sessionStatus: "idle",
+      output: `REQUIRES_ATTENTION: a box will not tick.\n${declarationReady}`,
+      isTaskSuccessful: true,
+    });
+    expect(outcome.prepareOnlyReady).toBe(false);
+    expect(outcome.needsAttention).toBe(true);
+    expect(outcome.prepareOnlyLikelySubmitted).toBe(false);
+  });
+});
+
 describe("receipt-gated completion", () => {
   const submitted = classifyRunOutcome({
     submissionMode: "submit_and_capture_pdf",

@@ -82,6 +82,11 @@ export function isPrepareOnlyReadyOutput(output: string): boolean {
   );
 }
 
+/** The output opens with the REQUIRES_ATTENTION marker (optionally bold). */
+function startsWithRequiresAttention(output: string): boolean {
+  return /^\**\s*requires_attention\b/.test(normalize(output).trimStart());
+}
+
 export function isLikelySubmittedOutput(output: string): boolean {
   const normalized = normalize(output);
   const ready = isPrepareOnlyReadyOutput(output);
@@ -92,8 +97,8 @@ export function isLikelySubmittedOutput(output: string): boolean {
 }
 
 export function hasRequiresAttentionOutputMarker(output: string): boolean {
-  const normalized = normalize(output).trimStart();
-  if (normalized.startsWith("**requires_attention") || normalized.startsWith("requires_attention")) {
+  const normalized = normalize(output);
+  if (startsWithRequiresAttention(output)) {
     return true;
   }
   return REQUIRES_ATTENTION_OUTPUT_MARKERS.some((marker) =>
@@ -119,6 +124,15 @@ export type RunOutcome = {
 /** Agent output marker for a run that stopped at the GRS contact step. */
 export const NEEDS_FILING_CONTACT_MARKER = "NEEDS_FILING_CONTACT";
 
+/**
+ * Agent output marker for a prepare run that reached the declaration step but
+ * could not leave it complete (notice of assessment answer not selectable, a
+ * declaration box that will not tick, or the final button still disabled).
+ * Always reported as "REQUIRES_ATTENTION: DECLARATION_INCOMPLETE: ...", which
+ * pauses the run and records no prepared draft.
+ */
+export const DECLARATION_INCOMPLETE_MARKER = "DECLARATION_INCOMPLETE";
+
 export function classifyRunOutcome(input: {
   submissionMode: SubmissionMode;
   sessionStatus: string;
@@ -127,8 +141,12 @@ export function classifyRunOutcome(input: {
 }): RunOutcome {
   const { submissionMode, output } = input;
   const lowerOutput = normalize(output);
+  // An output that opens with REQUIRES_ATTENTION is a stop, even if it also
+  // mentions the READY marker (e.g. "not READY_FOR_MANUAL_SUBMISSION").
   const prepareOnlyReady =
-    submissionMode === "prepare_only" && isPrepareOnlyReadyOutput(output);
+    submissionMode === "prepare_only" &&
+    isPrepareOnlyReadyOutput(output) &&
+    !startsWithRequiresAttention(output);
   const likelySubmitted = isLikelySubmittedOutput(output);
   const prepareOnlyLikelySubmitted =
     submissionMode === "prepare_only" && likelySubmitted;

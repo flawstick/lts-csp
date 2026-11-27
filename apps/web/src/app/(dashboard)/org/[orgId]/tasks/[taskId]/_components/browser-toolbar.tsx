@@ -265,11 +265,14 @@ export function BrowserToolbar({
               {isPreparedSubmission ? (
                 <>
                   This authorises the agent to open the draft of{" "}
-                  {entityName || "this entity's return"} left on the review
-                  page by the last Prepare only run, confirm it is that exact
-                  draft and still ready, and file it with the Revenue Service
-                  without changing any answers. It stops without submitting if
-                  any check fails.
+                  {entityName || "this entity's return"} prepared by the last
+                  Prepare only run, confirm it is that exact draft and still
+                  ready, and file it with the Revenue Service without editing
+                  the return. The portal does not keep the declaration
+                  step between sessions, so the agent selects the notice of
+                  assessment answer and ticks the declaration boxes again if
+                  they are blank. It stops without submitting if any check
+                  fails.
                 </>
               ) : (
                 <>
@@ -291,8 +294,9 @@ export function BrowserToolbar({
               </span>{" "}
               <span className="font-medium">{noticeOfAssessmentLabel}</span>
               <span className="text-muted-foreground block text-xs">
-                Selected on the portal&apos;s declaration page. Change it under
-                Additional Information on the return before submitting.
+                Selected on the portal&apos;s declaration page by Prepare only
+                and again at submission. Change it under Additional Information
+                on the return before submitting.
               </span>
             </p>
           ) : null}
