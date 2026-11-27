@@ -32,3 +32,26 @@ export async function formRow(taxReturnId: string) {
   >`select notice_of_assessment, last_edited_at, is_complete from lts_substance_form where tax_return_id = ${taxReturnId}`;
   return row!;
 }
+
+/**
+ * Puts a seeded paused run back the way a live paused worker keeps it: status
+ * paused with a fresh heartbeat. No worker runs in the harness, so after a
+ * minute the web app marks such a run "heartbeat lost" (failed) when any page
+ * reads it; this undoes that and keeps the heartbeat fresh until `stop()`.
+ */
+export async function rearmPausedJob(jobId: string, taskId: string) {
+  const beat = () =>
+    sql`update lts_job set result_data = coalesce(result_data, '{}'::jsonb) || jsonb_build_object('lastHeartbeatAt', ${Date.now()}::bigint)
+        where id = ${jobId}`;
+  await sql`
+    update lts_job
+    set status = 'paused', completed_at = null, error_message = null,
+        result_data = (coalesce(result_data, '{}'::jsonb) - 'staleFailureAt' - 'staleFailureReason')
+          || jsonb_build_object('lastHeartbeatAt', ${Date.now()}::bigint)
+    where id = ${jobId}`;
+  await sql`update lts_task set status = 'in_progress' where id = ${taskId}`;
+  await sql`update lts_tax_return set status = 'in_progress'
+            where id = (select tax_return_id from lts_task where id = ${taskId}) and status <> 'completed'`;
+  const timer = setInterval(() => void beat().catch(() => {}), 15_000);
+  return { stop: () => clearInterval(timer) };
+}
