@@ -4,6 +4,7 @@ import {
   getTaskAttention,
   getTaskRunState,
   TASK_QUESTION_PREVIEW_LENGTH,
+  stripLeadingMarkers,
   taskNeedsInput,
   toPlainText,
   truncateText,
@@ -35,6 +36,7 @@ describe("getTaskAttention", () => {
       expiresAt: askedAt + 3_600_000,
       preview: "Which accounting period should I use?",
       text: "Which accounting period should I use?",
+      markdown: "Which accounting period should I use?",
     });
     expect(taskNeedsInput(attention)).toBe(true);
   });
@@ -110,8 +112,19 @@ describe("getTaskAttention", () => {
     expect(attention.preview.endsWith("…")).toBe(true);
     expect(attention.preview).not.toMatch(/PREPARED_DRAFT_NOT_VERIFIED|\*|`|#|\n|\s{2}/);
     expect(attention.text).toBe(
-      "The draft isn't fully ready for submission. On the Review & Submit summary: Entity Details shows COMPLETE Entity Accounts shows IN PROGRESS (Net Book Value is blank) What should I do? Re-run Prepare only Or enter the value yourself",
+      [
+        "The draft isn't fully ready for submission. On the Review & Submit summary:",
+        "",
+        "• Entity Details shows COMPLETE",
+        "• Entity Accounts shows IN PROGRESS (Net Book Value is blank)",
+        "",
+        "What should I do?",
+        "1. Re-run Prepare only",
+        "2. Or enter the value yourself",
+      ].join("\n"),
     );
+    // The detail panel renders the markdown itself, minus the leading marker.
+    expect(attention.markdown).toBe(text.replace("PREPARED_DRAFT_NOT_VERIFIED: ", ""));
   });
 
   it("falls back to a generic preview when the question is only markers", () => {
@@ -138,6 +151,36 @@ describe("toPlainText", () => {
 
   it("collapses whitespace and strips quotes, emphasis and html", () => {
     expect(toPlainText("> _Please_ confirm\n\n\t<b>now</b>  ")).toBe("Please confirm now");
+  });
+
+  it("only removes markers at the start, keeping field names and words later on", () => {
+    expect(toPlainText("Please confirm the VAT_NUMBER: GB123 is right")).toBe(
+      "Please confirm the VAT_NUMBER: GB123 is right",
+    );
+    expect(toPlainText("Is NEEDS_REVIEW the right flag?")).toBe("Is NEEDS_REVIEW the right flag?");
+    expect(toPlainText("**REQUIRES_ATTENTION: NEEDS_FILING_CONTACT:** Contact step reached.")).toBe(
+      "Contact step reached.",
+    );
+    expect(toPlainText("**NET_BOOK_VALUE_CHECK**\n\nIs it 0?")).toBe("Is it 0?");
+  });
+
+  it("keeps option numbers and text that only looks like a tag", () => {
+    expect(toPlainText("Reply with:\n1. Re-run\n2. Enter it yourself")).toBe(
+      "Reply with: 1. Re-run 2. Enter it yourself",
+    );
+    expect(toPlainText("Reply with:\n1. Re-run\n2. Enter it yourself", { singleLine: false })).toBe(
+      "Reply with:\n1. Re-run\n2. Enter it yourself",
+    );
+    expect(toPlainText("Is a <b then c> ok?")).toBe("Is a <b then c> ok?");
+  });
+});
+
+describe("stripLeadingMarkers", () => {
+  it("keeps the markdown and removes only leading markers", () => {
+    expect(stripLeadingMarkers("**REQUIRES_ATTENTION:** Is **this** `right`?")).toBe(
+      "Is **this** `right`?",
+    );
+    expect(stripLeadingMarkers("*Really* sure?")).toBe("*Really* sure?");
   });
 });
 

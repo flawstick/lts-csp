@@ -14,7 +14,7 @@ import {
 
 /** Characters of the question shown in the list row (ellipsis included). */
 export const TASK_QUESTION_PREVIEW_LENGTH = 160;
-/** The cleaned question kept for tooltips and the detail panel. */
+/** Characters of the question kept for tooltips and the detail panel. */
 export const TASK_QUESTION_TEXT_LENGTH = 2000;
 
 export type TaskAttention =
@@ -26,8 +26,10 @@ export type TaskAttention =
       expiresAt: number | null;
       /** One line, markdown and worker markers removed, at most TASK_QUESTION_PREVIEW_LENGTH. */
       preview: string;
-      /** The whole question as plain text (capped), for title / tooltip. */
+      /** The whole question as plain text with its line breaks (capped), for title / tooltip. */
       text: string;
+      /** The whole question's markdown, leading markers removed (capped), for the detail panel. */
+      markdown: string;
     }
   | {
       kind: "paused";
@@ -61,14 +63,17 @@ export function getTaskAttention(job: JobLike): TaskAttention | null {
   if (!job || job.status !== "paused") return null;
   const question = parsePendingAgentQuestion(job.resultData);
   if (question && QUESTION_REASONS.has(question.reason)) {
-    const text = toPlainText(question.text);
+    const preview = toPlainText(question.text);
+    const text = toPlainText(question.text, { singleLine: false });
+    const markdown = stripLeadingMarkers(question.text);
     return {
       kind: "question",
       reason: question.reason as "agent_question" | "filing_contact",
       askedAt: question.askedAt,
       expiresAt: question.expiresAt ?? null,
-      preview: truncateText(text, TASK_QUESTION_PREVIEW_LENGTH) || FALLBACK_PREVIEW,
+      preview: truncateText(preview, TASK_QUESTION_PREVIEW_LENGTH) || FALLBACK_PREVIEW,
       text: truncateText(text, TASK_QUESTION_TEXT_LENGTH) || FALLBACK_PREVIEW,
+      markdown: truncateText(markdown, TASK_QUESTION_TEXT_LENGTH) || FALLBACK_PREVIEW,
     };
   }
   // Reviewer pause (user_pause), a pause that delivers a reviewer message
@@ -102,45 +107,58 @@ export function getTaskRunState(status: string | null | undefined): TaskRunState
 const FALLBACK_PREVIEW = "The filing agent asked a question.";
 
 /**
- * Worker / prompt markers the agent puts in its output (REQUIRES_ATTENTION:,
+ * Worker / prompt markers the agent opens its output with (REQUIRES_ATTENTION:,
  * PREPARED_DRAFT_NOT_VERIFIED:, NEEDS_FILING_CONTACT:, NET_BOOK_VALUE_CHECK...).
- * Any ALL_CAPS_WITH_UNDERSCORES token followed by a colon counts, plus the
- * known ones without a colon.
+ * Like extractAgentQuestionText, only markers at the very start are removed
+ * (possibly bold and stacked); an ALL_CAPS token later in the question, such as
+ * a field name ("VAT_NUMBER:"), is part of the question and is kept.
  */
-const MARKER_WITH_COLON = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b\s*:/g;
-const KNOWN_MARKERS =
-  /\b(?:REQUIRES_ATTENTION|PREPARED_DRAFT_NOT_VERIFIED|NET_BOOK_VALUE_CHECK|READY_FOR_MANUAL_SUBMISSION|NEEDS_[A-Z0-9_]+)\b/g;
+const LEADING_MARKER =
+  /^\s*(?:\*\*|__)?\s*[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\s*(?:\*\*|__)?\s*(?::|(?=\n|$))[ \t]*(?:\*\*|__)?/;
 
-/** Markdown and worker markers removed, whitespace collapsed to one line. */
-export function toPlainText(raw: string): string {
-  return (
-    raw
-      .replace(/\r\n?/g, "\n")
-      // Fenced code: keep the code, drop the fences.
-      .replace(/```[^\n]*\n?/g, " ")
-      // Images and links keep their text.
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-      .replace(/<\/?[a-z][^>]*>/gi, " ")
-      // Line-level syntax: headings, quotes, list bullets, rules, tables.
-      .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-      .replace(/^\s{0,3}>\s?/gm, "")
-      .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, "")
-      .replace(/^\s*(?:[-*_]\s*){3,}$/gm, " ")
-      .replace(/\|/g, " ")
-      // Emphasis and inline code.
-      .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2")
-      .replace(/\*\*|__/g, "")
-      .replace(/(^|[^\w*])\*(?=\S)([^*\n]*?\S)\*(?!\w)/g, "$1$2")
-      .replace(/(^|[^\w])_(?=\S)([^_\n]*?\S)_(?!\w)/g, "$1$2")
-      .replace(/`+/g, "")
-      .replace(MARKER_WITH_COLON, " ")
-      .replace(KNOWN_MARKERS, " ")
-      .replace(/\s+/g, " ")
-      // Punctuation left dangling at the start by a removed marker.
-      .replace(/^[\s:*\-–—]+/, "")
-      .trim()
-  );
+/** The question with its leading worker markers removed (markdown kept). */
+export function stripLeadingMarkers(raw: string): string {
+  let text = raw.replace(/\r\n?/g, "\n");
+  for (let i = 0; i < 8; i++) {
+    const next = text.replace(LEADING_MARKER, "");
+    if (next === text) break;
+    text = next;
+  }
+  return text.trim();
+}
+
+/**
+ * Markdown removed, for a title / tooltip (multiline, line breaks and list
+ * numbers kept) or the list row (singleLine: whitespace collapsed).
+ */
+export function toPlainText(raw: string, { singleLine = true } = {}): string {
+  const plain = stripLeadingMarkers(raw)
+    // Fenced code: keep the code, drop the fences.
+    .replace(/```[^\n]*\n?/g, singleLine ? " " : "")
+    // Images and links keep their text.
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    // HTML tags only when they look like tags (name, then name="value" attributes).
+    .replace(/<\/?[a-z][a-z0-9-]*(?:\s+[a-z-]+=(?:"[^"]*"|'[^']*'))*\s*\/?>/gi, " ")
+    // Line-level syntax: headings, quotes, bullets (numbers kept), rules, tables.
+    .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "")
+    .replace(/^[ \t]{0,3}>[ \t]?/gm, "")
+    .replace(/^([ \t]*)[-*+][ \t]+/gm, singleLine ? "$1" : "$1• ")
+    .replace(/^[ \t]*(?:[-*_][ \t]*){3,}$/gm, "")
+    .replace(/\|/g, " ")
+    // Emphasis and inline code.
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    .replace(/\*\*|__/g, "")
+    .replace(/(^|[^\w*])\*(?=\S)([^*\n]*?\S)\*(?!\w)/g, "$1$2")
+    .replace(/(^|[^\w])_(?=\S)([^_\n]*?\S)_(?!\w)/g, "$1$2")
+    .replace(/`+/g, "");
+  if (singleLine) return plain.replace(/\s+/g, " ").trim();
+  return plain
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /** At most `max` characters, cut on a word boundary when one is close. */

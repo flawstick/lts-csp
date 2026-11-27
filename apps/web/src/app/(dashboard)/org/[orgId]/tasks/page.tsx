@@ -82,12 +82,21 @@ import {
   type VisibilityState,
 } from "@tanstack/react-table"
 import Link from "next/link"
+import ReactMarkdown from "react-markdown"
 import { api } from "@/trpc/react"
 import { useParams } from "next/navigation"
 import { DirectionalTransition } from "@/components/view-transition"
 import { useNavigateWithTransition } from "@/lib/navigate-with-transition"
 import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing"
 import { formatAskedAgo, type TaskAttention } from "@/lib/task-attention"
+
+/** The agent's question in the detail panel: same markdown look as the task page, scrolls when long. */
+const QUESTION_MARKDOWN_CLASS = [
+  "prose prose-sm dark:prose-invert max-h-48 max-w-none overflow-y-auto text-sm leading-relaxed [overflow-wrap:anywhere]",
+  "[&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0",
+  "[&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:text-[12px]",
+  "[&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto",
+].join(" ")
 
 type StatusFilter = "pending" | "in_progress" | "completed" | "failed" | "cancelled" | "needs_input" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
@@ -235,13 +244,9 @@ const createColumns = (orgId: string): ColumnDef<TaskRow>[] => [
         <div className="flex max-w-[28rem] min-w-0 flex-col">
           <span className="font-medium">{row.original.name}</span>
           {attention?.kind === "question" && (
-            <span
-              className="text-muted-foreground truncate text-xs"
-              title={attention.text}
-              data-testid="task-question-preview"
-            >
+            <span className="text-muted-foreground truncate text-xs" title={attention.text}>
               <span className="sr-only">Agent question: </span>
-              {attention.preview}
+              <span data-testid="task-question-preview">{attention.preview}</span>
             </span>
           )}
         </div>
@@ -889,9 +894,9 @@ export default function TasksPage() {
                           {formatAskedAgo(liveDetailTask.attention.askedAt)}
                         </span>
                       </div>
-                      <p className="max-h-48 overflow-y-auto text-sm leading-relaxed break-words" data-testid="task-question-text">
-                        {liveDetailTask.attention.text}
-                      </p>
+                      <div className={QUESTION_MARKDOWN_CLASS} data-testid="task-question-text">
+                        <ReactMarkdown>{liveDetailTask.attention.markdown}</ReactMarkdown>
+                      </div>
                       <div className="flex justify-end pt-1">
                         <Button size="sm" asChild>
                           <Link href={`/org/${orgId}/tasks/${liveDetailTask.id}`}>

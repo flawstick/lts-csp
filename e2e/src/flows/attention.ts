@@ -30,7 +30,13 @@ const tasksNeedInput: Flow = {
         previewText,
       );
       c.ok("preview is at most 160 characters", previewText.length <= 160, String(previewText.length));
-      const title = (await preview.getAttribute("title")) ?? "";
+      // The tooltip sits on the wrapper, which also holds the screen-reader-only "Agent question:" label.
+      const previewWrapper = preview.locator("..");
+      c.ok(
+        "preview is labelled for screen readers",
+        (await previewWrapper.textContent())?.startsWith("Agent question: ") ?? false,
+      );
+      const title = (await previewWrapper.getAttribute("title")) ?? "";
       c.ok("full question in the preview's title", title.includes("Should I enter the saved Net Book Value"), title);
 
       const otherRow = page.getByRole("row").filter({ hasText: ctx.seeded.returns.a_ready_default!.entityName });
@@ -68,6 +74,12 @@ const tasksNeedInput: Flow = {
       c.ok("detail panel says the agent asked a question", await dialog.getByText("The filing agent asked a question").isVisible());
       const fullText = (await dialog.getByTestId("task-question-text").innerText()).trim();
       c.ok("detail panel shows the whole question", fullText.includes("leave the draft for you to check?"), fullText);
+      c.ok(
+        "detail panel renders the question's markdown without the worker markers",
+        !/REQUIRES_ATTENTION|PREPARED_DRAFT_NOT_VERIFIED|\*\*/.test(fullText) &&
+          (await dialog.getByTestId("task-question-text").locator("li").count()) === 2,
+        fullText,
+      );
       const answer = dialog.getByRole("link", { name: "Answer in task" });
       c.eq(
         "Answer in task links to the task page",
