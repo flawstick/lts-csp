@@ -26,8 +26,6 @@ import { TaskHeader } from "./_components/task-header";
 import { BrowserToolbar } from "./_components/browser-toolbar";
 import { BrowserFrame } from "./_components/browser-frame";
 import { AgentPanel } from "./_components/agent-panel";
-import { SubmitLockDialog } from "./_components/submit-lock-dialog";
-import { useSubmitDispatchLock } from "./_components/use-submit-dispatch-lock";
 import { getJobToCancel } from "./_components/cancel-target";
 import {
   StartErrorAlert,
@@ -100,10 +98,6 @@ export default function TaskDetailPage() {
   const [isChatSheetOpen, setIsChatSheetOpen] = useState(false);
   // Why the last start request was refused; stays until dismissed or a run starts.
   const [startError, setStartError] = useState<StartError | null>(null);
-  // The submit dispatch lock: a toolbar indicator opens its dialog (never
-  // opened automatically).
-  const submitLock = useSubmitDispatchLock(taskId);
-  const [isSubmitLockOpen, setIsSubmitLockOpen] = useState(false);
   const isMobile = useIsMobile();
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -979,8 +973,6 @@ export default function TaskDetailPage() {
                 onActionsMenuOpen={() => {
                   void refetch();
                 }}
-                submitLocked={submitLock.isLocked}
-                onOpenSubmitLock={() => setIsSubmitLockOpen(true)}
               />
 
               {startError ? (
@@ -989,19 +981,6 @@ export default function TaskDetailPage() {
                   onDismiss={() => setStartError(null)}
                 />
               ) : null}
-
-              <SubmitLockDialog
-                taskId={taskId}
-                lock={submitLock.lock}
-                open={isSubmitLockOpen}
-                onOpenChange={setIsSubmitLockOpen}
-                onSelectJob={handleSelectJob}
-                onStopBrowser={submitLock.stopBrowser}
-                stoppingJobId={submitLock.stoppingJobId}
-                isStopPending={submitLock.isStopPending}
-                onRecordNotSubmitted={submitLock.recordNotSubmitted}
-                isRecordPending={submitLock.isRecordPending}
-              />
 
               <BrowserFrame
                 liveUrl={liveUrl}

@@ -14,11 +14,13 @@ import {
 } from "@repo/database";
 
 import {
+  formatRunNumbers,
   getGuernseyReviewDraftId,
   getGuernseyReviewSummaryUrl,
   normalizePortalReference,
 } from "@repo/database/prepared-draft";
 import {
+  ALREADY_SUBMITTED_MARKER,
   DECLARATION_INCOMPLETE_MARKER,
   NEEDS_FILING_CONTACT_MARKER,
   PREPARED_DRAFT_NOT_VERIFIED_MARKER,
@@ -131,6 +133,67 @@ interface PromptBuilderOptions {
    * unknown provenance, which asks a reviewer.
    */
   netBookValue?: NetBookValuePromptInput;
+  /** Submit mode: earlier submit runs that may have filed (see FIRST CHECK). */
+  earlierUnreceiptedSubmitRuns?: EarlierUnreceiptedSubmitRun[];
+}
+
+/** An earlier submit run on the return that reached the portal and saved no receipt. */
+export type EarlierUnreceiptedSubmitRun = { jobNumber?: number | null };
+
+const ALREADY_SUBMITTED_OUTPUT = `REQUIRES_ATTENTION: ${ALREADY_SUBMITTED_MARKER}:`;
+
+/**
+ * The first thing every submit run does (a full submit and Submit prepared
+ * return): confirm on the portal, before changing anything, that the return
+ * is not already submitted. It replaces the manual portal check staff once
+ * had to record after an earlier submit run ended without a receipt; with
+ * such runs it is stricter and names them.
+ */
+export function buildAlreadySubmittedCheck(options: {
+  entityName: string;
+  taxYear: number | string;
+  /** The case to open (its view page when known); null: none recorded. */
+  caseUrl: string | null;
+  submitPrepared: boolean;
+  earlierRuns?: EarlierUnreceiptedSubmitRun[];
+}): string {
+  const { entityName, taxYear, caseUrl, submitPrepared } = options;
+  const earlierRuns = options.earlierRuns ?? [];
+  const unsureStop = submitPrepared
+    ? `**REQUIRES_ATTENTION: ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}:**`
+    : "**REQUIRES_ATTENTION:**";
+  const named = formatRunNumbers(earlierRuns);
+  const caution =
+    earlierRuns.length > 0
+      ? `
+**CAUTION:** ${
+          named
+            ? `${earlierRuns.length === 1 ? "an earlier LTS submit run" : "earlier LTS submit runs"} (${named})`
+            : earlierRuns.length === 1
+              ? "an earlier LTS submit run"
+              : "earlier LTS submit runs"
+        } on this return reached the portal and saved no filed-return receipt, so ${
+          earlierRuns.length === 1 ? "it" : "they"
+        } may already have filed this return. Do this check with particular care and do not assume the return is still a draft. If you cannot see the case or return status at all, do **NOT** submit: stop with ${unsureStop} saying the submission status could not be confirmed, and describe what the case page shows.
+`
+      : "";
+  return `
+## FIRST CHECK — THIS RETURN MUST NOT ALREADY BE SUBMITTED (DO THIS BEFORE ANYTHING ELSE)
+Do this before you change anything: before ${
+    submitPrepared ? "opening the prepared draft" : "case assignment, opening or editing any section"
+  }, any declaration answer or box, and any Submit.
+${caution}
+1. Open the case${caseUrl ? `: ${caseUrl}` : " for this return"}. Read, without changing anything, the case status and the status of the ${taxYear} return for **${entityName}**.${
+    submitPrepared
+      ? ` Only read the case page: do not use its links to reach the return (section 1 below opens the prepared draft by its exact URL).${
+          caseUrl ? "" : " If no case URL is given, do this check on the review page in section 2."
+        }`
+      : ""
+  }
+2. The return is still a draft only when the case/return status is a draft status such as **Pending** or **In progress**, and nothing on the case or return shows a submitted return, a submission receipt or confirmation, or a **Submitted** / **Received** (or similar filed) status for tax year ${taxYear}.
+3. If anything shows this return as already submitted, filed or received: do **NOT** submit and change nothing. If the portal offers the filed return or its receipt as a PDF, download it into the Browser Use session. Your final output MUST start with exactly: **${ALREADY_SUBMITTED_OUTPUT}** followed by what the portal shows (quote the status, any submission date and reference, and the PDF file name if you downloaded one).
+4. Until you click **${FINAL_FILING_BUTTON_LABEL}** yourself in this run, keep checking: if the review or declaration step no longer offers that button at all, or any page shows this return as submitted, stop the same way. After your own single click, the submission confirmation is the expected result: follow the remaining steps.
+`;
 }
 
 // Portal login used by every Guernsey run (filling and submitting).
@@ -191,6 +254,7 @@ export function buildSubstanceFormPrompt(
     contactEmail,
     contactPhone,
     netBookValue,
+    earlierUnreceiptedSubmitRuns,
   } = options;
 
   const sections: string[] = [];
@@ -251,7 +315,17 @@ ${
 - **Inference:** only the low-risk inferences listed under PORTAL FIELD NOTES. Never infer ownership, parent companies, beneficial owners, tax residence, registration or incorporation facts, or Relevant Activity.
 - **If stuck:** on an error you cannot resolve, STOP and report **REQUIRES_ATTENTION** quoting the portal's message.
 
-${PORTAL_LOGIN_SECTION}
+${PORTAL_LOGIN_SECTION}${
+  isPrepareOnly
+    ? ""
+    : buildAlreadySubmittedCheck({
+        entityName: taxReturn.entityName,
+        taxYear: taxReturn.taxYear,
+        caseUrl: caseViewUrl ?? returnLink ?? portalUrl,
+        submitPrepared: false,
+        earlierRuns: earlierUnreceiptedSubmitRuns,
+      })
+}
 ## NAVIGATION
 1. Go to: ${returnLink || portalUrl}
 2. ${
@@ -1109,6 +1183,8 @@ export function buildSubmitPreparedReturnPrompt(options: {
   portalReference: string | null;
   contactName: string;
   contactEmail: string;
+  /** Earlier submit runs that may have filed (see FIRST CHECK). */
+  earlierUnreceiptedSubmitRuns?: EarlierUnreceiptedSubmitRun[];
 }): string {
   const {
     taxReturn,
@@ -1119,6 +1195,7 @@ export function buildSubmitPreparedReturnPrompt(options: {
     portalReference,
     contactName,
     contactEmail,
+    earlierUnreceiptedSubmitRuns,
   } = options;
   const noticeOfAssessment = getGuernseyNoticeOfAssessment(substanceForm);
   const noticeOfAssessmentSource = describeNoticeOfAssessmentSource(
@@ -1157,7 +1234,13 @@ You are **not** filling or reviewing the return. Do **NOT** open sections, click
 
 **The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **${noticeOfAssessment}**, ${noticeOfAssessmentSource}) and every declaration confirmation box (the portal shows three). Change nothing else there.
 
-${PORTAL_LOGIN_SECTION}
+${PORTAL_LOGIN_SECTION}${buildAlreadySubmittedCheck({
+    entityName: taxReturn.entityName,
+    taxYear: taxReturn.taxYear,
+    caseUrl: getCaseViewUrl(returnLink) ?? returnLink ?? null,
+    submitPrepared: true,
+    earlierRuns: earlierUnreceiptedSubmitRuns,
+  })}
 ## 1. OPEN THE PREPARED DRAFT
 ${
   draftPath
@@ -1187,9 +1270,9 @@ Read the review/submit page only. Do not change anything to make a check pass.
   }
 - No section is shown as incomplete, not started or in error, and no validation message is shown.
 - If the filing contact is shown, its name is **${contactName}** and its email is **${contactEmail}**.
-- The return is not already submitted or filed.
+- The return still shows as not submitted (see **FIRST CHECK**).
 
-If any check fails, or you cannot see enough to confirm it, do **NOT** submit. Your final output MUST start with exactly: **${notVerified}** followed by which check failed and what the page shows. If the return already appears submitted or filed, use the same marker, say so, and do not submit again.
+If any check fails, or you cannot see enough to confirm it, do **NOT** submit. Your final output MUST start with exactly: **${notVerified}** followed by which check failed and what the page shows. If the return appears already submitted or filed, do **NOT** submit: stop with **${ALREADY_SUBMITTED_OUTPUT}** as **FIRST CHECK** says, not with the marker above.
 
 ## 3. DECLARATION, THEN SUBMIT ONCE
 The declaration step (usually **reviewAndSubmit/declaration**, reached from the review page${

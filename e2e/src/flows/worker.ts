@@ -20,14 +20,17 @@ async function loadReturn(taxReturnId: string) {
 async function returnJobs(taxReturnId: string) {
   const { db, jobs, tasks, eq } = await import("@repo/database");
   return db
-    .select({ id: jobs.id, status: jobs.status, createdAt: jobs.createdAt, resultData: jobs.resultData })
+    .select({ id: jobs.id, jobNumber: jobs.jobNumber, status: jobs.status, createdAt: jobs.createdAt, resultData: jobs.resultData })
     .from(jobs)
     .innerJoin(tasks, eq(jobs.taskId, tasks.id))
     .where(eq(tasks.taxReturnId, taxReturnId));
 }
 
-async function buildPrompt(ctx: FlowContext, key: string, submitJobId?: string) {
-  const { fingerprintPreparedInputs, resolvePreparedDraft } = await import("@repo/database/prepared-draft");
+/** The Submit prepared return prompt the worker would build for a queued job. */
+export async function buildPrompt(ctx: FlowContext, key: string, submitJobId?: string) {
+  const { fingerprintPreparedInputs, getEarlierUnreceiptedSubmitJobs, resolvePreparedDraft } = await import(
+    "@repo/database/prepared-draft"
+  );
   const { buildSubmitPreparedReturnPrompt, buildNoticeOfAssessmentContinuationRule } = await import(
     "@repo/task/src/prompt-builder"
   );
@@ -61,6 +64,8 @@ async function buildPrompt(ctx: FlowContext, key: string, submitJobId?: string) 
     portalReference: resolution.draft.portalReference,
     contactName: "E2E Filing Contact",
     contactEmail: "filing@client-e2e.test",
+    // Same as the worker's startup (findEarlierUnreceiptedSubmitRuns).
+    earlierUnreceiptedSubmitRuns: getEarlierUnreceiptedSubmitJobs({ jobs, excludeJobId: submitJobId }),
   });
   const rule = buildNoticeOfAssessmentContinuationRule({
     answer: getGuernseyNoticeOfAssessment(taxReturn.substanceForm),

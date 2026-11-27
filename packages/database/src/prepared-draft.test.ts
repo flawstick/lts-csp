@@ -1,25 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  EARLIER_UNRECEIPTED_SUBMIT_JOBS_KEY,
   fingerprintPreparedInputs,
+  formatRunNumbers,
+  getEarlierUnreceiptedSubmitCaution,
+  getEarlierUnreceiptedSubmitJobs,
   getGuernseyReviewDraftId,
   getGuernseyReviewSummaryUrl,
-  getSubmitBrowserStopRefusal,
-  getSubmitNotFiledConfirmationRefusal,
-  getSubmitRunAgentReport,
-  isBrowserSessionStoppedStatus,
-  parseSubmitBrowserStop,
-  planSubmitBrowserStop,
-  SUBMIT_BROWSER_STOP_KEY,
-  SUBMIT_NOT_FILED_UNVERIFIED_QUIET_PERIOD_MS,
-  getUnconfirmedSubmitBlocker,
-  getUnconfirmedSubmitJobs,
   isGuernseyPortalUrl,
-  isSubmitConfirmedNotFiled,
-  parseSubmitNotFiledConfirmation,
-  planSubmitNotFiledConfirmation,
-  SUBMIT_NOT_FILED_CONFIRMATION_KEY,
-  SUBMIT_NOT_FILED_QUIET_PERIOD_MS,
   normalizePortalReference,
   parsePreparedDraftOutput,
   parsePreparedDraftRecord,
@@ -318,7 +307,7 @@ describe("resolvePreparedDraft", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("refuses any new submission once a submit run reached the browser without a receipt", () => {
+  it("does not lock the draft after a submit run that reached the browser without a receipt", () => {
     const dispatched = (status: string, extra: Record<string, unknown> = {}) =>
       later({
         status,
@@ -331,30 +320,27 @@ describe("resolvePreparedDraft", () => {
         },
       });
     // Cancelled, timed out / errored, lost worker (marked stale -> failed),
-    // paused after an error, and an agent that said it did not submit.
+    // and an agent that said it did not submit (Pudleston: paused on a
+    // question, timed out, case still "Pending"): the same draft may be
+    // submitted again. The new run checks the portal first.
     for (const job of [
       dispatched("cancelled"),
       dispatched("failed", { staleFailureReason: "worker lost" }),
-      dispatched("paused"),
       dispatched("failed", { output: "REQUIRES_ATTENTION: PREPARED_DRAFT_NOT_VERIFIED: name differs" }),
+      dispatched("failed", { pauseExpiredReason: "Timed out waiting for user intervention" }),
     ]) {
       const result = resolvePreparedDraft({ jobs: [job, prepared], currentFingerprint: fingerprint });
-      expect(!result.ok && result.blocker).toContain("may have accepted the filing");
-      // Also blocks a full submit run on the same return.
-      expect(getUnconfirmedSubmitBlocker({ jobs: [prepared, job] })).not.toBeNull();
+      expect(result.ok && result.preparedJob.id).toBe("prep");
     }
-    // Even after a newer Prepare only run on the same return.
+    // A dispatched run that has not ended (or completed) still means the
+    // draft may have changed; an active run is refused before this anyway.
+    for (const status of ["paused", "running", "completed"]) {
+      expect(resolvePreparedDraft({ jobs: [dispatched(status), prepared], currentFingerprint: fingerprint }).ok).toBe(false);
+    }
+    // A newer Prepare only run is the draft to submit.
     const reprepared = { ...prepared, id: "prep-2", createdAt: "2026-11-22T10:00:00Z" };
-    expect(
-      resolvePreparedDraft({ jobs: [reprepared, dispatched("failed"), prepared], currentFingerprint: fingerprint }).ok,
-    ).toBe(false);
-    // The worker ignores the run being started; prepare-only jobs never carry it.
-    expect(getUnconfirmedSubmitBlocker({ jobs: [dispatched("starting")], excludeJobId: "later" })).toBeNull();
-    expect(
-      getUnconfirmedSubmitBlocker({
-        jobs: [later({ resultData: { submissionMode: "prepare_only", [SUBMIT_PREPARED_DISPATCHED_KEY]: 1 } })],
-      }),
-    ).toBeNull();
+    const result = resolvePreparedDraft({ jobs: [reprepared, dispatched("failed"), prepared], currentFingerprint: fingerprint });
+    expect(result.ok && result.preparedJob.id).toBe("prep-2");
   });
 
   it("refuses drafts without a specific identity", () => {
@@ -438,448 +424,69 @@ describe("resolvePreparedDraft", () => {
   });
 });
 
-describe("staff confirmation that a dispatched submit did not file", () => {
-  const fingerprint = "fp-1";
-  const NOW = Date.parse("2026-11-25T12:00:00Z");
-  const DISPATCHED_AT = Date.parse("2026-11-24T22:50:00Z");
-  const prepared: PreparedDraftJob = {
-    id: "prep",
-    status: "completed",
-    createdAt: "2026-11-24T21:00:00Z",
-    resultData: {
-      submissionMode: "prepare_only",
-      prepareOnlyReadyAt: 1,
-      preparedDraft: {
-        version: 1,
-        preparedAt: 1,
-        inputFingerprint: fingerprint,
-        reviewUrl: "https://revenueservice.gov.gg/company-tax-ui/x/reviewAndSubmit/summary",
-        portalReference: null,
-      },
-    },
-  };
-  const ENDED_AT = Date.parse("2026-11-24T23:10:00Z");
-  const STOPPED_AT = ENDED_AT;
-  const SESSION = "sess-1";
-  const stopRecord = (overrides: Record<string, unknown> = {}) => ({
-    version: 1,
-    stoppedAt: STOPPED_AT,
-    stoppedBy: "acct-1",
-    stoppedByName: "Reviewer One",
-    dispatchedAt: DISPATCHED_AT,
-    sessionId: SESSION,
-    statusBefore: "stopped",
-    statusAfter: "stopped",
-    verified: true,
-    ...overrides,
-  });
-  const AGENT_OUTPUT =
-    "REQUIRES_ATTENTION: PREPARED_DRAFT_NOT_VERIFIED: the declaration page asks 'Please indicate if you wish to receive a notice of assessment'. I did not click Submit.";
-  const dispatched = (
-    overrides: Partial<PreparedDraftJob> & {
-      completedAt?: string | null;
-      updatedAt?: string | null;
-      errorMessage?: string | null;
-    } = {},
+describe("earlier submit runs without a receipt (caution, not a lock)", () => {
+  const job = (
+    id: string,
+    overrides: Partial<PreparedDraftJob> & { jobNumber?: number | null } = {},
     extra: Record<string, unknown> = {},
   ) => ({
-    id: "submit-1",
+    id,
     status: "failed",
     createdAt: "2026-11-24T22:49:00Z",
-    completedAt: "2026-11-24T23:10:00Z",
-    errorMessage: "Timed out waiting for user intervention",
+    jobNumber: 2,
     ...overrides,
     resultData: {
       submissionMode: "submit_and_capture_pdf",
       filingOperation: "submit_prepared",
       preparedJobId: "prep",
-      [SUBMIT_PREPARED_DISPATCHED_KEY]: DISPATCHED_AT,
-      lastHeartbeatAt: Date.parse("2026-11-24T23:10:00Z"),
-      output: AGENT_OUTPUT,
-      browserUseSessionId: SESSION,
-      [SUBMIT_BROWSER_STOP_KEY]: stopRecord(),
+      [SUBMIT_PREPARED_DISPATCHED_KEY]: Date.parse("2026-11-24T22:50:00Z"),
       ...extra,
     },
   });
-  const openReturn = { status: "review_required", files: [], metadata: {} };
-  const staff = { id: "acct-1", name: "Reviewer One" };
-  const NOTE = "Portal shows the 2025 return still as a draft, not submitted.";
 
-  const confirm = (job: ReturnType<typeof dispatched>) => {
-    const plan = planSubmitNotFiledConfirmation({
-      job,
-      taxReturn: openReturn,
-      hasActiveJob: false,
-      browserSessionStatus: "stopped",
-      checkedAfterBrowserStoppedAt: STOPPED_AT,
-      actor: staff,
-      note: NOTE,
-      now: NOW,
+  it("lists dispatched submit_prepared runs with no saved receipt, oldest first", () => {
+    const pudleston = job("submit-3", { jobNumber: 3, createdAt: "2026-11-25T10:00:00Z" }, {
+      output: "REQUIRES_ATTENTION: which answer? Case status: Pending",
     });
-    if (!plan.ok) throw new Error(plan.message);
-    return {
-      ...job,
-      resultData: { ...job.resultData, [SUBMIT_NOT_FILED_CONFIRMATION_KEY]: plan.confirmation },
-    };
-  };
-
-  it("the agent's own PREPARED_DRAFT_NOT_VERIFIED report never lifts the lock", () => {
-    const job = dispatched();
-    expect(getUnconfirmedSubmitBlocker({ jobs: [prepared, job] })).toContain("may have accepted the filing");
-    expect(isSubmitConfirmedNotFiled(job)).toBe(false);
-    // Fields an agent or worker could plausibly write are not a confirmation.
-    for (const extra of [
-      { confirmedNotFiledAt: "2026-11-25T00:00:00Z", confirmedNotFiledBy: "agent" },
-      { [SUBMIT_NOT_FILED_CONFIRMATION_KEY]: true },
-      { [SUBMIT_NOT_FILED_CONFIRMATION_KEY]: { version: 1, confirmedNotFiledAt: "2026-11-25T00:00:00Z" } },
-    ]) {
-      expect(getUnconfirmedSubmitBlocker({ jobs: [prepared, dispatched({}, extra)] })).not.toBeNull();
-    }
+    const older = job("submit-2", { jobNumber: 2, status: "cancelled" });
+    const listed = getEarlierUnreceiptedSubmitJobs({ jobs: [pudleston, older] });
+    expect(listed.map((j) => j.id)).toEqual(["submit-2", "submit-3"]);
   });
 
-  it("records who confirmed, when, what they saw and which dispatch it answers", () => {
-    const plan = planSubmitNotFiledConfirmation({
-      job: dispatched(),
-      taxReturn: openReturn,
-      hasActiveJob: false,
-      browserSessionStatus: "stopped",
-      checkedAfterBrowserStoppedAt: STOPPED_AT,
-      actor: staff,
-      note: `  ${NOTE}  `,
-      now: NOW,
-    });
-    expect(plan).toEqual({
-      ok: true,
-      confirmation: {
-        version: 1,
-        confirmedNotFiledAt: "2026-11-25T12:00:00.000Z",
-        confirmedNotFiledBy: "acct-1",
-        confirmedNotFiledByName: "Reviewer One",
-        note: NOTE,
-        dispatchedAt: DISPATCHED_AT,
-        browserSessionStatus: "stopped",
-        browserStoppedAt: STOPPED_AT,
-        browserStopVerified: true,
-      },
-    });
-  });
-
-  it("a confirmed job no longer blocks a full submit, but Submit prepared return needs a fresh Prepare only", () => {
-    const confirmed = confirm(dispatched());
-    expect(isSubmitConfirmedNotFiled(confirmed)).toBe(true);
-    expect(getUnconfirmedSubmitBlocker({ jobs: [prepared, confirmed] })).toBeNull();
-    expect(getUnconfirmedSubmitJobs({ jobs: [prepared, confirmed] })).toEqual([]);
-    // The confirmed run had the old draft open in the browser.
-    const sameDraft = resolvePreparedDraft({ jobs: [confirmed, prepared], currentFingerprint: fingerprint });
-    expect(!sameDraft.ok && sameDraft.blocker).toContain("Run Prepare only again");
-    // A newer prepared draft can be submitted.
-    const reprepared = { ...prepared, id: "prep-2", createdAt: "2026-11-25T11:00:00Z" };
-    const next = resolvePreparedDraft({ jobs: [reprepared, confirmed, prepared], currentFingerprint: fingerprint });
-    expect(next.ok && next.preparedJob.id).toBe("prep-2");
-  });
-
-  it("each dispatched run needs its own confirmation", () => {
-    const confirmed = confirm(dispatched());
-    const second = dispatched({ id: "submit-2", createdAt: "2026-11-25T09:00:00Z" });
-    expect(getUnconfirmedSubmitBlocker({ jobs: [prepared, confirmed, second] })).not.toBeNull();
-    expect(getUnconfirmedSubmitJobs({ jobs: [prepared, confirmed, second] }).map((job) => job.id)).toEqual([
-      "submit-2",
-    ]);
-  });
-
-  it("a confirmation only counts on an ended run and for the dispatch it answers", () => {
-    const confirmed = confirm(dispatched());
-    for (const status of ["paused", "running", "queued", "starting", "completed"]) {
-      expect(getUnconfirmedSubmitBlocker({ jobs: [{ ...confirmed, status }] })).not.toBeNull();
-    }
-    const redispatched = {
-      ...confirmed,
-      resultData: { ...confirmed.resultData, [SUBMIT_PREPARED_DISPATCHED_KEY]: DISPATCHED_AT + 1 },
-    };
-    expect(parseSubmitNotFiledConfirmation(redispatched.resultData)).toBeNull();
-    expect(getUnconfirmedSubmitBlocker({ jobs: [redispatched] })).not.toBeNull();
-    // A worker write that drops the key brings the lock back.
-    const { [SUBMIT_NOT_FILED_CONFIRMATION_KEY]: _dropped, ...rewritten } = confirmed.resultData as Record<string, unknown>;
-    expect(getUnconfirmedSubmitBlocker({ jobs: [{ ...confirmed, resultData: rewritten }] })).not.toBeNull();
-  });
-
-  it("is only allowed on failed or cancelled dispatched runs", () => {
-    const refusal = (job: ReturnType<typeof dispatched>) =>
-      getSubmitNotFiledConfirmationRefusal({ job, taxReturn: openReturn, hasActiveJob: false, now: NOW });
-    expect(refusal(dispatched())).toBeNull();
-    expect(refusal(dispatched({ status: "cancelled" }))).toBeNull();
-    for (const status of ["queued", "starting", "running", "paused", "completed"]) {
-      expect(refusal(dispatched({ status }))).not.toBeNull();
-    }
-    // Never reached the browser: nothing to confirm (and it does not block).
-    const notDispatched = dispatched({}, { [SUBMIT_PREPARED_DISPATCHED_KEY]: undefined });
-    expect(refusal(notDispatched)).toContain("reached the portal");
-    expect(refusal(dispatched({}, { filingOperation: undefined }))).toContain("reached the portal");
-    expect(refusal(confirm(dispatched()))).toContain("already confirmed");
-  });
-
-  it("is refused while another run is active or the run was active recently", () => {
+  it("ignores the run being started, undispatched runs, prepare runs and runs that saved a receipt", () => {
+    const notDispatched = job("a", {}, { [SUBMIT_PREPARED_DISPATCHED_KEY]: undefined });
+    const prepare = job("b", {}, { submissionMode: "prepare_only", filingOperation: undefined });
+    const withReceipt = job("c", {}, { completionPdf: { status: "uploaded" } });
+    const self = job("self", { status: "starting" });
     expect(
-      getSubmitNotFiledConfirmationRefusal({ job: dispatched(), taxReturn: openReturn, hasActiveJob: true, now: NOW }),
-    ).toContain("Another run is active");
-    const ended = Date.parse("2026-11-24T23:10:00Z");
-    const recent = (now: number, extra: Record<string, unknown> = {}) =>
-      getSubmitNotFiledConfirmationRefusal({
-        job: dispatched({}, extra),
-        taxReturn: openReturn,
-        hasActiveJob: false,
-        now,
-      });
-    expect(recent(ended + SUBMIT_NOT_FILED_QUIET_PERIOD_MS - 1)).toContain("quiet");
-    expect(recent(ended + SUBMIT_NOT_FILED_QUIET_PERIOD_MS)).toBeNull();
-    // A heartbeat after the end time (worker still winding down) counts.
-    expect(recent(NOW, { lastHeartbeatAt: NOW - 1000 })).toContain("quiet");
-    // No end time recorded: the last row update is used.
-    expect(
-      getSubmitNotFiledConfirmationRefusal({
-        job: dispatched({ completedAt: null, updatedAt: new Date(NOW - 60_000).toISOString() }, { lastHeartbeatAt: undefined }),
-        taxReturn: openReturn,
-        hasActiveJob: false,
-        now: NOW,
-      }),
-    ).toContain("quiet");
+      getEarlierUnreceiptedSubmitJobs({ jobs: [notDispatched, prepare, withReceipt, self], excludeJobId: "self" }),
+    ).toEqual([]);
+    // A receipt capture that failed is still no receipt.
+    expect(getEarlierUnreceiptedSubmitJobs({ jobs: [job("d", {}, { completionPdf: { status: "missing" } })] })).toHaveLength(1);
   });
 
-  it("is refused when there is any receipt evidence", () => {
-    const refusal = (taxReturn: Record<string, unknown> & { status: string }, extra: Record<string, unknown> = {}) =>
-      getSubmitNotFiledConfirmationRefusal({ job: dispatched({}, extra), taxReturn, hasActiveJob: false, now: NOW });
-    expect(refusal({ ...openReturn, status: "completed" })).toContain("already completed");
-    expect(
-      refusal({ ...openReturn, files: [{ url: "https://blob/r.pdf", role: "filed_return_pdf" }] }),
-    ).toContain("receipt is attached");
-    expect(
-      refusal({
-        ...openReturn,
-        files: [{ url: "https://blob/r.pdf", metadata: { kind: "filed_return_pdf", jobId: "submit-1" } }],
-      }),
-    ).toContain("saved a filed-return receipt");
-    expect(
-      refusal({ ...openReturn, metadata: { filedReturnPdf: { jobId: "submit-1", status: "uploaded" } } }),
-    ).toContain("captured a filed-return receipt");
-    expect(refusal(openReturn, { completionPdf: { status: "uploaded" } })).toContain("receipt evidence");
-    expect(refusal(openReturn, { receiptGate: "receipt_from_unsuccessful_run" })).toContain("receipt evidence");
-    // A recorded failed capture for this run is not a receipt.
-    expect(
-      refusal({ ...openReturn, metadata: { filedReturnPdf: { jobId: "submit-1", status: "missing" } } }),
-    ).toBeNull();
+  it("still lists a run an older version of the app recorded as confirmed not filed", () => {
+    // Existing rows may carry submitNotFiledConfirmation / submitBrowserStop
+    // records: they are ignored, and never break anything.
+    const confirmed = job("e", {}, {
+      submitNotFiledConfirmation: { version: 1, confirmedNotFiledAt: "2026-11-25T00:00:00Z", note: "draft" },
+      submitBrowserStop: { version: 1, stoppedAt: 1 },
+    });
+    expect(getEarlierUnreceiptedSubmitJobs({ jobs: [confirmed] })).toHaveLength(1);
   });
 
-  it("requires a note and refuses a browser session that is still running", () => {
-    const plan = (overrides: Partial<Parameters<typeof planSubmitNotFiledConfirmation>[0]>) =>
-      planSubmitNotFiledConfirmation({
-        job: dispatched(),
-        taxReturn: openReturn,
-        hasActiveJob: false,
-        browserSessionStatus: "stopped",
-        checkedAfterBrowserStoppedAt: STOPPED_AT,
-        actor: staff,
-        note: NOTE,
-        now: NOW,
-        ...overrides,
-      });
-    expect(plan({ note: "   ok    " })).toMatchObject({ ok: false, code: "BAD_REQUEST" });
-    expect(plan({ note: "x".repeat(1001) })).toMatchObject({ ok: false, code: "BAD_REQUEST" });
-    expect(plan({ browserSessionStatus: "running" })).toMatchObject({ ok: false, code: "PRECONDITION_FAILED" });
-    // Not readable now: the browser stop cannot be re-verified, so the long wait applies.
-    expect(plan({ browserSessionStatus: null })).toMatchObject({ ok: false, code: "PRECONDITION_FAILED" });
-    expect(plan({ hasActiveJob: true })).toMatchObject({ ok: false, code: "PRECONDITION_FAILED" });
-    expect(plan({ actor: { id: " " } })).toMatchObject({ ok: false, code: "BAD_REQUEST" });
-  });
-
-  describe("the run's browser must be stopped before the portal check", () => {
-    const plan = (
-      job: ReturnType<typeof dispatched>,
-      overrides: Partial<Parameters<typeof planSubmitNotFiledConfirmation>[0]> = {},
-    ) =>
-      planSubmitNotFiledConfirmation({
-        job,
-        taxReturn: openReturn,
-        hasActiveJob: false,
-        browserSessionStatus: "stopped",
-        checkedAfterBrowserStoppedAt: STOPPED_AT,
-        actor: staff,
-        note: NOTE,
-        now: NOW,
-        ...overrides,
-      });
-
-    it("knows which Browser Use statuses mean the agent can no longer act", () => {
-      for (const status of ["idle", "stopped", "error", "timed_out"]) {
-        expect(isBrowserSessionStoppedStatus(status)).toBe(true);
-      }
-      for (const status of ["running", "queued", "dispatching", "created", "", null, undefined]) {
-        expect(isBrowserSessionStoppedStatus(status)).toBe(false);
-      }
-    });
-
-    it("refuses until staff stopped the browser from the task page", () => {
-      const job = dispatched({}, { [SUBMIT_BROWSER_STOP_KEY]: undefined });
-      expect(plan(job, { checkedAfterBrowserStoppedAt: null })).toMatchObject({
-        ok: false,
-        message: expect.stringContaining("Stop this run's browser first"),
-      });
-    });
-
-    it("lost worker: a browser still active when stopped needs the quiet period after the stop, not after the stale failure", () => {
-      // Job was marked failed (stale heartbeat) hours ago, but the Browser Use
-      // agent was still driving the portal until staff stopped it just now.
-      const stoppedNow = NOW - 60_000;
-      const job = dispatched(
-        {},
-        {
-          staleFailureAt: ENDED_AT,
-          [SUBMIT_BROWSER_STOP_KEY]: stopRecord({ stoppedAt: stoppedNow, statusBefore: "running" }),
-        },
-      );
-      expect(plan(job, { checkedAfterBrowserStoppedAt: stoppedNow })).toMatchObject({
-        ok: false,
-        message: expect.stringContaining("stopped less than 5 minutes ago"),
-      });
-      const later = plan(job, {
-        checkedAfterBrowserStoppedAt: stoppedNow,
-        now: stoppedNow + SUBMIT_NOT_FILED_QUIET_PERIOD_MS,
-      });
-      expect(later.ok && later.confirmation).toMatchObject({
-        browserStoppedAt: stoppedNow,
-        browserStopVerified: true,
-      });
-    });
-
-    it("refuses when Browser Use reports the browser active at confirmation, even after an earlier stop", () => {
-      for (const status of ["running", "created", "queued"]) {
-        expect(plan(dispatched(), { browserSessionStatus: status })).toMatchObject({
-          ok: false,
-          message: expect.stringContaining("may still be acting on the portal"),
-        });
-      }
-      for (const status of ["idle", "error", "timed_out"]) {
-        expect(plan(dispatched(), { browserSessionStatus: status }).ok).toBe(true);
-      }
-    });
-
-    it("the person must have been shown the latest stop", () => {
-      expect(plan(dispatched(), { checkedAfterBrowserStoppedAt: STOPPED_AT - 1 })).toMatchObject({
-        ok: false,
-        message: expect.stringContaining("stop changed"),
-      });
-      expect(plan(dispatched(), { checkedAfterBrowserStoppedAt: null }).ok).toBe(false);
-    });
-
-    it("unverifiable browser (no session id, unreadable status, unverified stop) waits 24 hours with no activity", () => {
-      const lastActivity = ENDED_AT;
-      const cases: Array<[ReturnType<typeof dispatched>, string | null, number | null]> = [
-        // Worker crashed between dispatch and recording the session id.
-        [dispatched({}, { browserUseSessionId: undefined, [SUBMIT_BROWSER_STOP_KEY]: undefined }), null, null],
-        // Browser Use returns 404 / no API key now.
-        [dispatched(), null, STOPPED_AT],
-        // Stop could not be verified at the time.
-        [dispatched({}, { [SUBMIT_BROWSER_STOP_KEY]: stopRecord({ statusAfter: null, verified: false }) }), "stopped", STOPPED_AT],
-      ];
-      for (const [job, status, stoppedAt] of cases) {
-        const early = plan(job, {
-          browserSessionStatus: status,
-          checkedAfterBrowserStoppedAt: stoppedAt,
-          now: lastActivity + SUBMIT_NOT_FILED_UNVERIFIED_QUIET_PERIOD_MS - 1,
-        });
-        expect(early).toMatchObject({ ok: false, message: expect.stringContaining("24 hours") });
-        const late = plan(job, {
-          browserSessionStatus: status,
-          checkedAfterBrowserStoppedAt: stoppedAt,
-          now: lastActivity + SUBMIT_NOT_FILED_UNVERIFIED_QUIET_PERIOD_MS,
-        });
-        expect(late.ok && late.confirmation.browserStopVerified).toBe(false);
-      }
-    });
-
-    it("ignores a stop record for another session or dispatch, and a verified flag without a stopped status", () => {
-      const otherSession = dispatched({}, { [SUBMIT_BROWSER_STOP_KEY]: stopRecord({ sessionId: "sess-other" }) });
-      expect(plan(otherSession, { checkedAfterBrowserStoppedAt: null })).toMatchObject({
-        ok: false,
-        message: expect.stringContaining("Stop this run's browser first"),
-      });
-      const otherDispatch = dispatched({}, { [SUBMIT_BROWSER_STOP_KEY]: stopRecord({ dispatchedAt: DISPATCHED_AT - 1 }) });
-      expect(parseSubmitBrowserStop(otherDispatch.resultData)).toBeNull();
-      expect(plan(otherDispatch, { checkedAfterBrowserStoppedAt: null }).ok).toBe(false);
-      const forged = dispatched({}, { [SUBMIT_BROWSER_STOP_KEY]: stopRecord({ statusAfter: "running", verified: true }) });
-      expect(parseSubmitBrowserStop(forged.resultData)?.verified).toBe(false);
-      expect(plan(forged).ok).toBe(false);
-    });
-
-    it("the display refusal (status not read) shows the stop step and its wait", () => {
-      const refusal = (job: ReturnType<typeof dispatched>, now = NOW) =>
-        getSubmitNotFiledConfirmationRefusal({ job, taxReturn: openReturn, hasActiveJob: false, now });
-      expect(refusal(dispatched())).toBeNull();
-      expect(refusal(dispatched({}, { [SUBMIT_BROWSER_STOP_KEY]: undefined }))).toContain("Stop this run's browser first");
-      expect(
-        refusal(dispatched({}, { [SUBMIT_BROWSER_STOP_KEY]: stopRecord({ stoppedAt: NOW - 1000 }) })),
-      ).toContain("stopped less than");
-    });
-
-    it("plans the browser stop record from the statuses read before and after", () => {
-      const job = dispatched({}, { [SUBMIT_BROWSER_STOP_KEY]: undefined });
-      const stop = planSubmitBrowserStop({ job, statusBefore: "running", statusAfter: "stopped", actor: staff, now: NOW });
-      expect(stop).toEqual({
-        ok: true,
-        wasActive: true,
-        record: {
-          version: 1,
-          stoppedAt: NOW,
-          stoppedBy: "acct-1",
-          stoppedByName: "Reviewer One",
-          dispatchedAt: DISPATCHED_AT,
-          sessionId: SESSION,
-          statusBefore: "running",
-          statusAfter: "stopped",
-          verified: true,
-        },
-      });
-      const idle = planSubmitBrowserStop({ job, statusBefore: "idle", statusAfter: "idle", actor: staff, now: NOW });
-      expect(idle.ok && idle.wasActive).toBe(false);
-      // Unreadable after the stop: recorded, but not verified.
-      const unreadable = planSubmitBrowserStop({ job, statusBefore: null, statusAfter: null, actor: staff, now: NOW });
-      expect(unreadable.ok && unreadable.record.verified).toBe(false);
-      expect(unreadable.ok && unreadable.wasActive).toBe(true);
-      // Still running after the stop: nothing recorded.
-      expect(
-        planSubmitBrowserStop({ job, statusBefore: "running", statusAfter: "running", actor: staff, now: NOW }),
-      ).toMatchObject({ ok: false, code: "PRECONDITION_FAILED" });
-      expect(planSubmitBrowserStop({ job, statusBefore: "stopped", statusAfter: "stopped", actor: { id: " " }, now: NOW })).toMatchObject({
-        ok: false,
-        code: "BAD_REQUEST",
-      });
-    });
-
-    it("only stops the browser of an ended, dispatched, unconfirmed run with a session", () => {
-      expect(getSubmitBrowserStopRefusal(dispatched())).toBeNull();
-      expect(getSubmitBrowserStopRefusal(dispatched({ status: "cancelled" }))).toBeNull();
-      for (const status of ["queued", "starting", "running", "paused", "completed"]) {
-        expect(getSubmitBrowserStopRefusal(dispatched({ status }))).toContain("has not ended");
-      }
-      expect(getSubmitBrowserStopRefusal(dispatched({}, { browserUseSessionId: undefined }))).toContain(
-        "no browser session",
-      );
-      expect(getSubmitBrowserStopRefusal(dispatched({}, { [SUBMIT_PREPARED_DISPATCHED_KEY]: undefined }))).toContain(
-        "reached the portal",
-      );
-      expect(getSubmitBrowserStopRefusal(confirm(dispatched()))).toContain("already confirmed");
-    });
-  });
-
-  it("shows the reviewer what the agent itself reported", () => {
-    expect(getSubmitRunAgentReport(dispatched())).toEqual({
-      output: AGENT_OUTPUT,
-      question: null,
-      error: "Timed out waiting for user intervention",
-    });
-    const paused = getSubmitRunAgentReport(
-      dispatched({ errorMessage: null }, { output: undefined, pauseReason: "long recap", pendingQuestion: { text: "Which answer?" } }),
+  it("names the runs in one caution line", () => {
+    expect(getEarlierUnreceiptedSubmitCaution([])).toBeNull();
+    expect(getEarlierUnreceiptedSubmitCaution([{ jobNumber: 3 }])).toBe(
+      "Run #3 reached the portal and saved no receipt. This run first checks the portal shows the return as not yet submitted.",
     );
-    expect(paused).toEqual({ output: "long recap", question: "Which answer?", error: null });
-    expect(getSubmitRunAgentReport({ resultData: { output: "x".repeat(7000) } }).output?.length).toBe(6001);
+    expect(getEarlierUnreceiptedSubmitCaution([{ jobNumber: 2 }, { jobNumber: 5 }])).toMatch(/^Runs #2 and #5 reached the portal/);
+    expect(getEarlierUnreceiptedSubmitCaution([{ jobNumber: null }])).toMatch(/^An earlier Submit prepared return run reached/);
+    expect(formatRunNumbers([{ jobNumber: 1 }, { jobNumber: 2 }, { jobNumber: 4 }])).toBe("Runs #1, #2 and #4");
+    expect(formatRunNumbers([{ jobNumber: 1 }, {}])).toBeNull();
+  });
+
+  it("uses a stable resultData key for traceability", () => {
+    expect(EARLIER_UNRECEIPTED_SUBMIT_JOBS_KEY).toBe("earlierUnreceiptedSubmitJobIds");
   });
 });

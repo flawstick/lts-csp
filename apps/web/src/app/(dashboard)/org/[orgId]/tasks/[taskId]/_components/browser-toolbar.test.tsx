@@ -9,8 +9,6 @@ function renderToolbar(
     submitReadiness?: ToolbarSubmitReadiness | null;
     onActionsMenuOpen?: () => void;
     noticeOfAssessmentLabel?: string | null;
-    submitLocked?: boolean;
-    onOpenSubmitLock?: () => void;
   } = {},
 ) {
   render(<TooltipProvider><BrowserToolbar {...extra}
@@ -190,7 +188,7 @@ describe("submit readiness from the server", () => {
   });
 
   it("shows a reason shared by every submit action once", async () => {
-    const blocker = "An earlier Submit prepared return run reached the portal.";
+    const blocker = "This return is already completed.";
     await openMenu({
       submit: { ready: false, blocker },
       submitPrepared: { ready: false, blocker },
@@ -280,46 +278,41 @@ describe("cancel control", () => {
   });
 });
 
-describe("submit lock indicator", () => {
-  it("is hidden while submitting is not locked", () => {
-    renderToolbar(vi.fn(), { submitLocked: false, onOpenSubmitLock: vi.fn() });
-    expect(
-      screen.queryByRole("button", { name: "Submit locked" }),
-    ).not.toBeInTheDocument();
-  });
+describe("earlier submit runs without a receipt", () => {
+  const ready = { ready: true, blocker: null };
+  const caution =
+    "Run #3 reached the portal and saved no receipt. This run first checks the portal shows the return as not yet submitted.";
 
-  it("opens the lock dialog from the toolbar", () => {
-    const onOpenSubmitLock = vi.fn();
-    renderToolbar(vi.fn(), { submitLocked: true, onOpenSubmitLock });
-    const indicator = screen.getByRole("button", { name: "Submit locked" });
-    expect(indicator).toHaveAttribute("aria-haspopup", "dialog");
-    fireEvent.click(indicator);
-    expect(onOpenSubmitLock).toHaveBeenCalledTimes(1);
-  });
-
-  it("is offered next to the lock reason in the More menu", async () => {
-    const onOpenSubmitLock = vi.fn();
-    const blocker = "An earlier Submit prepared return run reached the portal.";
-    renderToolbar(vi.fn(), {
-      submitLocked: true,
-      onOpenSubmitLock,
-      submitReadiness: {
-        submit: { ready: false, blocker },
-        submitPrepared: { ready: false, blocker },
-      },
-    });
+  async function openDialog(menuItem: RegExp, submitReadiness: ToolbarSubmitReadiness) {
+    const onStart = renderToolbar(vi.fn(), { submitReadiness });
     fireEvent.keyDown(screen.getByRole("button", { name: /More/ }), { key: "Enter" });
-    expect(await screen.findByText(blocker)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("menuitem", { name: /Review the submit lock/ }));
-    expect(onOpenSubmitLock).toHaveBeenCalledTimes(1);
+    fireEvent.click(await screen.findByRole("menuitem", { name: menuItem }));
+    return { onStart, dialog: await screen.findByRole("alertdialog") };
+  }
+
+  it.each([/Submit prepared/, /Submit return \+ save PDF/])(
+    "shows one caution line and still lets the submission start (%s)",
+    async (menuItem) => {
+      const { onStart, dialog } = await openDialog(menuItem, { submit: ready, submitPrepared: ready, caution });
+      expect(screen.getAllByText(caution)).toHaveLength(1);
+      expect(dialog).toHaveTextContent(caution);
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(screen.getByRole("button", { name: /^Submit (prepared )?return$/ }));
+      expect(onStart).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("shows no caution without earlier runs", async () => {
+    const { dialog } = await openDialog(/Submit prepared/, { submit: ready, submitPrepared: ready, caution: null });
+    expect(dialog).not.toHaveTextContent("saved no receipt");
   });
 
-  it("adds no menu item while unlocked", async () => {
-    renderToolbar(vi.fn(), { onOpenSubmitLock: vi.fn() });
+  it("has no submit lock indicator or menu item", async () => {
+    renderToolbar(vi.fn(), { submitReadiness: { submit: ready, submitPrepared: ready, caution } });
+    expect(screen.queryByRole("button", { name: "Submit locked" })).not.toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("button", { name: /More/ }), { key: "Enter" });
     await screen.findByRole("menuitem", { name: /Submit prepared/ });
-    expect(
-      screen.queryByRole("menuitem", { name: /Review the submit lock/ }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /submit lock/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Submit prepared/ })).not.toHaveAttribute("aria-disabled");
   });
 });

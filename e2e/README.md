@@ -87,7 +87,7 @@ like production rows.
 | --- | --- |
 | `a_ready_default` | prepared draft ready (completed prepare run with `prepareOnlyReadyAt` and a matching `preparedDraft`), notice of assessment unset, client signed off |
 | `b_failed_prepare` | an older ready prepare, then a prepare run that timed out (latest) |
-| `c_locked` | Submit prepared return run that reached the portal (`submitPreparedDispatchedAt`), failed with `PREPARED_DRAFT_NOT_VERIFIED`, no browser session, 30h ago |
+| `c_locked` | Submit prepared return run that reached the portal (`submitPreparedDispatchedAt`), failed with `PREPARED_DRAFT_NOT_VERIFIED`, no receipt, 30h ago (the key predates removing the submit lock; nothing is locked) |
 | `d_noa_no` | like `a`, notice of assessment explicitly "No" |
 | `e_awaiting_signoff` | complete, manager signed off, waiting for the client; notice of assessment unset; no runs |
 | `f_edit_noa` | like `a`, used to save No / Yes from the staff editor |
@@ -106,10 +106,14 @@ like production rows.
   stale page data, the server's refusal shows in a dialog that stays until
   dismissed, the page keeps the earlier run, no job is created; Prepare only
   queues and can be cancelled.
-- **web (c)**: the toolbar's "Submit locked" indicator (and the More menu)
-  opens the lock dialog with the agent's report behind a toggle;
-  confirm-not-filed, a second view of that dialog, needs the box and a 10+
-  character note; the lock is released and audited.
+- **web (c)**: an earlier submit run that reached the portal without a
+  receipt is a caution, not a lock: no "Submit locked" indicator or menu item
+  (`c1-task-no-lock`), Submit prepared return and the full submit are enabled
+  (`c2-menu-enabled`), the confirmation shows one caution line naming the
+  earlier run (`c3-caution-dialog`), and confirming queues a `submit_prepared`
+  job that records the earlier run (`earlierUnreceiptedSubmitJobIds`) and whose
+  worker prompt opens with the not-already-submitted check
+  (`REQUIRES_ATTENTION: ALREADY_SUBMITTED:`) naming that run (`c4-queued-with-check`).
 - **web (d)**: dialog shows "Notice of assessment: No".
 - **web (f)**: saving No clears the client sign-off and keeps the prepared
   draft valid; saving Yes over No.

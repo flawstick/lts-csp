@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   fingerprintPreparedInputs,
-  getUnconfirmedSubmitBlocker,
+  getEarlierUnreceiptedSubmitJobs,
   parsePreparedDraftOutput,
   resolvePreparedDraft,
   type PreparedDraftJob,
@@ -166,27 +166,58 @@ describe("prepare then submit prepared return", () => {
     ).toBe(false);
   });
 
-  it("never submits again after a submit run reached the browser and ended without a receipt", () => {
+  it("submits again after a submit run reached the browser and ended without a receipt, checking the portal first", () => {
     const prepared = prepareRun(READY_OUTPUT);
     const currentFingerprint = fingerprintPreparedInputs({ ...taxReturn, substanceForm });
     // Enqueued and cancelled before the worker dispatched: safe to retry.
-    const notDispatched: PreparedDraftJob = {
+    const notDispatched: PreparedDraftJob & { jobNumber: number } = {
       id: "submit-1",
+      jobNumber: 2,
       status: "cancelled",
       createdAt: "2026-11-21T10:00:00Z",
       resultData: { submissionMode: "submit_and_capture_pdf", filingOperation: "submit_prepared", preparedJobId: "prep" },
     };
     expect(resolvePreparedDraft({ jobs: [prepared, notDispatched], currentFingerprint }).ok).toBe(true);
-    // Dispatched (evidence written before the browser run), then cancelled.
-    const dispatched: PreparedDraftJob = {
+    expect(getEarlierUnreceiptedSubmitJobs({ jobs: [prepared, notDispatched] })).toEqual([]);
+    // Dispatched (evidence written before the browser run), then failed
+    // (Pudleston: paused on a question, timed out; the case was "Pending").
+    const dispatched = {
       ...notDispatched,
+      status: "failed",
       resultData: { ...(notDispatched.resultData as object), [SUBMIT_PREPARED_DISPATCHED_KEY]: 1 },
     };
-    expect(resolvePreparedDraft({ jobs: [prepared, dispatched], currentFingerprint }).ok).toBe(false);
-    // The full submit path is refused too (web enqueue and worker startup).
-    expect(getUnconfirmedSubmitBlocker({ jobs: [prepared, dispatched], excludeJobId: "full-submit" })).toContain(
-      "record the filed return instead of submitting again",
-    );
+    const resolution = resolvePreparedDraft({ jobs: [prepared, dispatched], currentFingerprint, excludeJobId: "submit-2" });
+    expect(resolution.ok).toBe(true);
+    // The new run is cautioned about it (web enqueue and worker startup)...
+    const earlier = getEarlierUnreceiptedSubmitJobs({ jobs: [{ ...prepared, jobNumber: 1 }, dispatched], excludeJobId: "submit-2" });
+    expect(earlier.map((job) => job.id)).toEqual(["submit-1"]);
+    if (!resolution.ok) return;
+    // ...and its prompt checks the portal first, naming the earlier run.
+    const prompt = buildSubmitPreparedReturnPrompt({
+      taxReturn,
+      substanceForm,
+      portalUrl: "https://my.gov.gg",
+      returnLink: taxReturn.link,
+      reviewUrl: resolution.draft.reviewUrl,
+      portalReference: resolution.draft.portalReference,
+      contactName: "NSM Filings Team",
+      contactEmail: "filings@nsm.example",
+      earlierUnreceiptedSubmitRuns: earlier,
+    });
+    expect(prompt).toContain("(Run #2) on this return reached the portal and saved no filed-return receipt");
+    expect(prompt).toContain("**REQUIRES_ATTENTION: ALREADY_SUBMITTED:**");
+    // If the portal shows it filed, the run is held for review with the
+    // receipt gate that refuses further submissions.
+    const outcome = classifyRunOutcome({
+      submissionMode: "submit_and_capture_pdf",
+      sessionStatus: "idle",
+      output: "REQUIRES_ATTENTION: ALREADY_SUBMITTED: case status Submitted on 24/11/2026.",
+      isTaskSuccessful: true,
+    });
+    expect(resolveFinalRunStatuses("submit_and_capture_pdf", outcome, "missing")).toMatchObject({
+      taxReturnStatus: "review_required",
+      receiptGate: "portal_reports_already_submitted",
+    });
   });
 
   it("does not record a draft identity from a generic portal URL", () => {

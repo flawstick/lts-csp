@@ -907,3 +907,109 @@ describe("buildNoticeOfAssessmentContinuationRule with the default", () => {
     expect(rule).toContain("with **Yes**");
   });
 });
+
+describe("first check: the return is not already submitted", () => {
+  const preparedBase = {
+    taxReturn: { entityName: "Pudleston Farm Limited", taxYear: 2025 } as any,
+    substanceForm: {
+      companyNumber: "12345",
+      accountingPeriodStart: "2025-01-01",
+      accountingPeriodEnd: "2025-12-31",
+    } as any,
+    portalUrl: "https://my.gov.gg",
+    returnLink: "https://my.gov.gg/revenue/case/abc/process",
+    reviewUrl: "https://revenueservice.gov.gg/company-tax-ui/a/reviewAndSubmit/summary",
+    portalReference: null,
+    contactName: "NSM Filings Team",
+    contactEmail: "filings@nsm.example",
+  };
+  const fullSubmit = (extra: Record<string, unknown> = {}) =>
+    buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: { certificateType: "Certificate 2" } as any,
+      portalUrl: "https://my.gov.gg",
+      returnLink: baseTaxReturn.link,
+      submissionMode: "submit_and_capture_pdf",
+      contactName: "NSM Filings Team",
+      contactEmail: "filings@nsm.example",
+      ...extra,
+    });
+
+  it("comes first in a Submit prepared return run, on the case page, before the draft is opened", () => {
+    const prompt = buildSubmitPreparedReturnPrompt(preparedBase);
+    const check = prompt.indexOf("## FIRST CHECK");
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(prompt.indexOf("## 1. OPEN THE PREPARED DRAFT"));
+    expect(prompt).toContain("Open the case: https://my.gov.gg/revenue/case/abc/view.");
+    expect(prompt).toContain("**Pending** or **In progress**");
+    expect(prompt).toContain("**Submitted** / **Received**");
+    expect(prompt).toContain("Your final output MUST start with exactly: **REQUIRES_ATTENTION: ALREADY_SUBMITTED:**");
+    expect(prompt).toContain("download it into the Browser Use session");
+    expect(prompt).toContain("do not use its links to reach the return");
+    // The step 2 status check is folded into it, not a second marker for it.
+    expect(prompt).toContain("The return still shows as not submitted (see **FIRST CHECK**).");
+    expect(prompt).not.toContain("use the same marker, say so");
+    // No earlier runs: no caution.
+    expect(prompt).not.toContain("**CAUTION:**");
+  });
+
+  it("names earlier runs that reached the portal without a receipt, and is stricter", () => {
+    const one = buildSubmitPreparedReturnPrompt({ ...preparedBase, earlierUnreceiptedSubmitRuns: [{ jobNumber: 3 }] });
+    expect(one).toContain(
+      "**CAUTION:** an earlier LTS submit run (Run #3) on this return reached the portal and saved no filed-return receipt, so it may already have filed this return.",
+    );
+    expect(one).toContain(
+      "If you cannot see the case or return status at all, do **NOT** submit: stop with **REQUIRES_ATTENTION: PREPARED_DRAFT_NOT_VERIFIED:**",
+    );
+    const two = buildSubmitPreparedReturnPrompt({
+      ...preparedBase,
+      earlierUnreceiptedSubmitRuns: [{ jobNumber: 2 }, { jobNumber: 3 }],
+    });
+    expect(two).toContain("earlier LTS submit runs (Runs #2 and #3) on this return reached the portal");
+    expect(two).toContain("so they may already have filed");
+  });
+
+  it("without a case link, checks on the review page", () => {
+    const prompt = buildSubmitPreparedReturnPrompt({ ...preparedBase, returnLink: undefined });
+    expect(prompt).toContain("Open the case for this return.");
+    expect(prompt).toContain("do this check on the review page in section 2");
+  });
+
+  it("comes before navigation and case assignment in a full submit run", () => {
+    const prompt = fullSubmit({ earlierUnreceiptedSubmitRuns: [{ jobNumber: 4 }] });
+    const check = prompt.indexOf("## FIRST CHECK");
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(prompt.indexOf("## NAVIGATION"));
+    expect(check).toBeLessThan(prompt.indexOf("## CASE ASSIGNMENT"));
+    expect(prompt).toContain("before case assignment, opening or editing any section");
+    expect(prompt).toContain("Open the case: https://my.gov.gg/revenue/case/example/view.");
+    expect(prompt).toContain("**REQUIRES_ATTENTION: ALREADY_SUBMITTED:**");
+    expect(prompt).toContain("(Run #4)");
+    expect(prompt).toContain("stop with **REQUIRES_ATTENTION:** saying the submission status could not be confirmed");
+  });
+
+  it("keeps the run's own submission as the expected result", () => {
+    const prompt = fullSubmit();
+    expect(prompt).toContain(
+      "Until you click **Complete submission to Revenue Service** yourself in this run, keep checking",
+    );
+    expect(prompt).toContain("After your own single click, the submission confirmation is the expected result");
+  });
+
+  it("is not part of a prepare-only run", () => {
+    const prompt = fullSubmit({ submissionMode: "prepare_only" });
+    expect(prompt).not.toContain("## FIRST CHECK");
+    expect(prompt).not.toContain("ALREADY_SUBMITTED");
+  });
+
+  it("an ALREADY_SUBMITTED report is held for review, not read as this run's filing", () => {
+    const outcome = classifyRunOutcome({
+      submissionMode: "submit_and_capture_pdf",
+      sessionStatus: "idle",
+      output:
+        "**REQUIRES_ATTENTION: ALREADY_SUBMITTED:** The case view shows the 2025 return as Submitted (submitted successfully on 24/11/2026).",
+      isTaskSuccessful: true,
+    });
+    expect(outcome).toMatchObject({ alreadySubmitted: true, success: false, likelySubmitted: false, needsAttention: true });
+  });
+});

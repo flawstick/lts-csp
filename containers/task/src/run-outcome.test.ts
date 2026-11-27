@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ALREADY_SUBMITTED_MARKER,
   classifyRunOutcome,
   getTaxReturnStatusForOutcome,
+  isAlreadySubmittedOutput,
   isLikelySubmittedOutput,
+  PORTAL_ALREADY_SUBMITTED_GATE,
   resolveFinalRunStatuses,
   shouldCaptureFiledReturnPdf,
 } from "./run-outcome";
@@ -394,5 +397,64 @@ describe("receipt-gated completion", () => {
       jobStatus: "completed",
       receiptGate: null,
     });
+  });
+});
+
+describe("submit run that finds the return already submitted", () => {
+  const output = `**REQUIRES_ATTENTION: ${ALREADY_SUBMITTED_MARKER}:** The case view shows status "Submitted" for the 2025 return (submitted successfully on 25/11/2026, reference ESR-2025-123). I did not change anything and did not click Complete submission to Revenue Service. I downloaded the filed return PDF company-tax-submitted.pdf.`;
+  const classify = (mode: "submit_and_capture_pdf" | "prepare_only" = "submit_and_capture_pdf") =>
+    classifyRunOutcome({ submissionMode: mode, sessionStatus: "idle", output, isTaskSuccessful: true });
+
+  it("recognises the marker, bold or not, only at the start", () => {
+    expect(isAlreadySubmittedOutput(output)).toBe(true);
+    expect(isAlreadySubmittedOutput("REQUIRES_ATTENTION: ALREADY_SUBMITTED: status Received")).toBe(true);
+    expect(isAlreadySubmittedOutput("  **REQUIRES_ATTENTION**: **ALREADY_SUBMITTED**: Submitted")).toBe(true);
+    expect(isAlreadySubmittedOutput("REQUIRES_ATTENTION: PREPARED_DRAFT_NOT_VERIFIED: not ALREADY_SUBMITTED")).toBe(false);
+    expect(isAlreadySubmittedOutput("The return was submitted successfully. ALREADY_SUBMITTED")).toBe(false);
+  });
+
+  it("is held for review: not a success, not a filing by this run, never paused for a reply", () => {
+    const outcome = classify();
+    expect(outcome).toMatchObject({
+      alreadySubmitted: true,
+      success: false,
+      likelySubmitted: false,
+      prepareOnlyLikelySubmitted: false,
+      needsAttention: true,
+      needsFilingContact: false,
+    });
+  });
+
+  it("captures any filed-return PDF but never completes the return on its own", () => {
+    const outcome = classify();
+    expect(shouldCaptureFiledReturnPdf("submit_and_capture_pdf", outcome)).toBe(true);
+    for (const receipt of ["uploaded", "missing", "failed", "not_attempted"] as const) {
+      expect(resolveFinalRunStatuses("submit_and_capture_pdf", outcome, receipt)).toEqual({
+        taxReturnStatus: "review_required",
+        jobStatus: "failed",
+        taskStatus: "failed",
+        receiptGate: PORTAL_ALREADY_SUBMITTED_GATE,
+      });
+    }
+    expect(getTaxReturnStatusForOutcome("submit_and_capture_pdf", outcome)).toBe("review_required");
+  });
+
+  it("is only a submit-run outcome", () => {
+    const prepare = classify("prepare_only");
+    // A prepare run is never asked for the check; its submission wording
+    // falls under the existing prepare-only guardrail.
+    expect(prepare.alreadySubmitted).toBe(false);
+    expect(prepare.prepareOnlyLikelySubmitted).toBe(true);
+  });
+
+  it("does not affect other submit outcomes", () => {
+    const filed = classifyRunOutcome({
+      submissionMode: "submit_and_capture_pdf",
+      sessionStatus: "idle",
+      output: "Submitted successfully and downloaded the completion PDF.",
+      isTaskSuccessful: true,
+    });
+    expect(filed.alreadySubmitted).toBe(false);
+    expect(filed.success).toBe(true);
   });
 });
