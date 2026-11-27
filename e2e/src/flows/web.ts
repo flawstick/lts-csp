@@ -254,20 +254,24 @@ const submitPreparedFailedPrepare: Flow = {
     const dialog = page.getByRole("alertdialog");
     await dialog.getByRole("checkbox").check();
     await dialog.getByRole("button", { name: "Submit prepared return" }).click();
-    const alert = page.getByRole("alert").filter({ hasText: "did not start" });
+    // The refusal opens its own dialog once the confirmation has closed.
+    const alert = page.getByRole("alertdialog").filter({ hasText: "did not start" });
     await alert.waitFor();
     const alertText = await alert.innerText();
-    c.ok("persistent alert names the action", alertText.includes("Submit prepared return did not start"), alertText);
-    c.ok("persistent alert shows the server's reason", alertText.includes("The latest preparation did not finish on the review page"), alertText);
+    c.ok("refusal dialog names the action", alertText.includes("Submit prepared return did not start"), alertText);
+    c.ok("refusal dialog shows the server's reason", alertText.includes("The latest preparation did not finish on the review page"), alertText);
+    c.ok("refusal dialog says no run was created", alertText.includes("No new run was created"), alertText);
     await page.waitForTimeout(6000); // past the toast's lifetime
-    c.ok("alert is still there after the toast", await alert.isVisible());
-    c.eq("selected run unchanged", (await page.getByRole("button", { name: /^Run \d+/ }).innerText()).trim(), runLabelBefore);
-    c.ok("earlier run's output still shown", await page.getByText("E2E seeded output of the timed-out prepare run").first().isVisible());
+    c.ok("refusal dialog is still there after the toast", await alert.isVisible());
     const after = await jobsForTask(r.taskId);
     c.eq("no job created by the refused start", after.length, before.length);
     await shot(page, "b2-forced-refusal-alert");
-    await page.getByRole("alert").filter({ hasText: "did not start" }).getByRole("button", { name: "Dismiss" }).click();
-    c.ok("alert dismissable", (await page.getByText("did not start").count()) === 0);
+    await alert.getByRole("button", { name: "OK" }).click();
+    await alert.waitFor({ state: "hidden" });
+    c.ok("refusal dialog dismissable", (await page.getByText("did not start").count()) === 0);
+    // The modal hid the page from the accessibility tree; check it once closed.
+    c.eq("selected run unchanged", (await page.getByRole("button", { name: /^Run \d+/ }).innerText()).trim(), runLabelBefore);
+    c.ok("earlier run's output still shown", await page.getByText("E2E seeded output of the timed-out prepare run").first().isVisible());
     await page.unroute("**/api/trpc/**taxReturn.getTask**");
 
     // The fix for (b): Prepare only again. It queues a prepare run (no ECS),
@@ -287,41 +291,58 @@ const submitPreparedFailedPrepare: Flow = {
   },
 };
 
-/** (c) Locked return: banner, confirm-not-filed needs a note, then the lock is released. */
+/**
+ * (c) Locked return: the toolbar's "Submit locked" indicator opens the lock
+ * dialog; confirm-not-filed (a second view of that dialog) needs a note,
+ * then the lock is released.
+ */
 const lockedReturn: Flow = {
   name: "web: task (c) dispatch lock and confirm not filed",
   async run(ctx, c) {
     const page = await staffPage(ctx.webUrl);
     const r = await openTask(page, ctx, "c_locked");
-    const banner = page.getByRole("alert").filter({ hasText: "Submitting is locked for this return" });
-    await banner.waitFor();
-    const bannerText = await banner.innerText();
-    c.ok("banner shows the agent report", bannerText.includes("PREPARED_DRAFT_NOT_VERIFIED"), bannerText);
-    c.ok("banner explains no browser session / 24h rule", bannerText.includes("recorded no browser session"), bannerText);
+    const indicator = page.getByRole("button", { name: "Submit locked" });
+    await indicator.waitFor();
+    c.ok("no inline lock banner", (await page.getByText("Submitting is locked for this return").count()) === 0);
+    await indicator.click();
+    const dialog = page.getByRole("dialog").filter({ hasText: "Submitting is locked for this return" });
+    await dialog.waitFor();
+    c.ok("agent report collapsed by default", !(await dialog.innerText()).includes("PREPARED_DRAFT_NOT_VERIFIED"));
+    await dialog.getByRole("button", { name: "Show agent report" }).click();
+    const dialogText = await dialog.innerText();
+    c.ok("dialog shows the agent report", dialogText.includes("PREPARED_DRAFT_NOT_VERIFIED"), dialogText);
+    c.ok("dialog explains no browser session / 24h rule", dialogText.includes("recorded no browser session"), dialogText);
     await shot(page, "c1-lock-banner");
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
 
     await openMoreMenu(page);
     c.ok("Submit prepared return disabled while locked", await isDisabled(submitPreparedItem(page)));
     c.ok("full submit disabled while locked", await isDisabled(fullSubmitItem(page)));
     c.ok("lock reason shown in menu", (await page.getByRole("menu").innerText()).includes("may have accepted the filing"));
-    await page.keyboard.press("Escape");
-
-    await banner.getByRole("button", { name: /I checked the portal: not submitted/ }).click();
-    const dialog = page.getByRole("alertdialog");
+    // The menu offers the lock dialog next to the reason.
+    await page.getByRole("menuitem", { name: /Review the submit lock/ }).click();
     await dialog.waitFor();
-    const record = dialog.getByRole("button", { name: "Record not submitted" });
+
+    await dialog.getByRole("button", { name: /I checked the portal: not submitted/ }).click();
+    // Same dialog, second view: no dialog stacked on top.
+    const form = page.getByRole("dialog").filter({ hasText: "did not submit?" });
+    await form.waitFor();
+    c.eq("one dialog open", await page.getByRole("dialog").count(), 1);
+    const record = form.getByRole("button", { name: "Record not submitted" });
     c.ok("record disabled with nothing filled in", await record.isDisabled());
-    await dialog.getByRole("checkbox").click();
+    await form.getByRole("checkbox").click();
     c.ok("record disabled without a note", await record.isDisabled());
-    await dialog.getByRole("textbox").fill("too short");
+    await form.getByRole("textbox").fill("too short");
     c.ok("record disabled with a note under 10 characters", await record.isDisabled());
-    await dialog.getByRole("textbox").fill("E2E check: the 2025 return is still a draft on the portal; no submitted return or receipt.");
+    await form.getByRole("textbox").fill("E2E check: the 2025 return is still a draft on the portal; no submitted return or receipt.");
     c.ok("record enabled with a note and the box ticked", await record.isEnabled());
     await shot(page, "c2-confirm-dialog");
     await record.click();
-    await dialog.waitFor({ state: "hidden" });
-    await banner.waitFor({ state: "hidden" });
-    c.ok("lock banner gone", (await page.getByText("Submitting is locked for this return").count()) === 0);
+    // The lock lifts, so the dialog closes and the indicator goes.
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
+    await indicator.waitFor({ state: "hidden" });
+    c.ok("lock indicator gone", (await page.getByText("Submitting is locked for this return").count()) === 0);
     await shot(page, "c3-lock-released");
 
     const jobs = await jobsForTask(r.taskId);

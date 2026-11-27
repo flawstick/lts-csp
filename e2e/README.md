@@ -102,11 +102,13 @@ like production rows.
   job with the right `preparedJobId`; the queued run can be cancelled and
   submitted again.
 - **web (b)**: Submit prepared return disabled with the reason; forced through
-  stale page data, the server's refusal shows in the persistent alert, the
-  page keeps the earlier run, no job is created; Prepare only queues and can
-  be cancelled.
-- **web (c)**: lock banner with the agent's report; confirm-not-filed needs the
-  box and a 10+ character note; the lock is released and audited.
+  stale page data, the server's refusal shows in a dialog that stays until
+  dismissed, the page keeps the earlier run, no job is created; Prepare only
+  queues and can be cancelled.
+- **web (c)**: the toolbar's "Submit locked" indicator (and the More menu)
+  opens the lock dialog with the agent's report behind a toggle;
+  confirm-not-filed, a second view of that dialog, needs the box and a 10+
+  character note; the lock is released and audited.
 - **web (d)**: dialog shows "Notice of assessment: No".
 - **web (f)**: saving No clears the client sign-off and keeps the prepared
   draft valid; saving Yes over No.

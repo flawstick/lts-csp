@@ -22,21 +22,35 @@ describe("describeStartAction", () => {
 });
 
 describe("StartErrorAlert", () => {
-  it("shows the server's reason until dismissed", () => {
-    const onDismiss = vi.fn();
-    const message =
-      "The latest preparation did not finish on the review page. Run Prepare only again, then submit the new draft.";
+  const message =
+    "The latest preparation did not finish on the review page. Run Prepare only again, then submit the new draft.";
+
+  function renderAlert(onDismiss = vi.fn()) {
     render(
       <StartErrorAlert
         error={{ action: "Submit prepared return", message }}
         onDismiss={onDismiss}
       />,
     );
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("Submit prepared return did not start");
-    expect(alert).toHaveTextContent(message);
-    expect(alert).toHaveTextContent("No new run was created");
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    return onDismiss;
+  }
+
+  it("shows the server's reason in a dialog until dismissed with OK", () => {
+    const onDismiss = renderAlert();
+    const dialog = screen.getByRole("alertdialog", {
+      name: "Submit prepared return did not start",
+    });
+    expect(dialog).toHaveAccessibleDescription(message);
+    expect(dialog).toHaveTextContent("No new run was created");
+    // A single action closes it.
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("is dismissed with Escape", () => {
+    const onDismiss = renderAlert();
+    fireEvent.keyDown(screen.getByRole("alertdialog"), { key: "Escape" });
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 });

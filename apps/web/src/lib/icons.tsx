@@ -90,6 +90,7 @@ import {
   Cursor01Icon,
   GlobeIcon,
   KeyboardIcon,
+  LockIcon,
 } from "@hugeicons/core-free-icons"
 
 // Create wrapped icon components
@@ -185,6 +186,7 @@ export const MessageSquare = createIcon(MailSend01Icon) // Use mail icon for fee
 export const MousePointer2 = createIcon(Cursor01Icon)
 export const Globe = createIcon(GlobeIcon)
 export const Type = createIcon(KeyboardIcon)
+export const Lock = createIcon(LockIcon)
 // Note: CircleIcon is exported as Circle above
 
 // Also export the raw HugeiconsIcon for direct usage
