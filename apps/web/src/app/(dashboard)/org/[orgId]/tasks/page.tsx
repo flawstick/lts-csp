@@ -87,8 +87,9 @@ import { useParams } from "next/navigation"
 import { DirectionalTransition } from "@/components/view-transition"
 import { useNavigateWithTransition } from "@/lib/navigate-with-transition"
 import { resolveGuernseyCertificateType } from "@repo/database/guernsey-filing"
+import { formatAskedAgo, type TaskAttention } from "@/lib/task-attention"
 
-type StatusFilter = "pending" | "in_progress" | "completed" | "failed" | "cancelled" | undefined
+type StatusFilter = "pending" | "in_progress" | "completed" | "failed" | "cancelled" | "needs_input" | undefined
 type JurisdictionFilter = "all" | "GG" | "JE"
 type CertificateFilter = "all" | "Certificate 2" | "Certificate 3" | "unresolved"
 
@@ -111,7 +112,12 @@ type TaskRow = {
     missingFields: unknown
     certificateType?: string | null
   } | null
+  /** What the latest run is waiting on (listTasks). */
+  attention?: TaskAttention | null
 }
+
+/** How often the list (and the sidebar count) re-checks for new questions. */
+const TASKS_REFETCH_INTERVAL_MS = 30_000
 
 function matchesCertificateFilter(
   task: Pick<TaskRow, "jurisdiction" | "taxReturn" | "substanceForm">,
@@ -143,7 +149,21 @@ function matchesCertificateFilter(
   return resolution.certificateType === certificateFilter
 }
 
-function getStatusBadge(status: string) {
+function getStatusBadge(status: string, attention?: TaskAttention | null) {
+  if (attention?.kind === "question") {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/60 bg-amber-500/15 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300"
+        title={`The filing agent asked a question ${formatAskedAgo(attention.askedAt)}`}
+      >
+        <span className="relative flex size-1.5" aria-hidden="true">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-amber-500 opacity-75 motion-reduce:animate-none" />
+          <span className="relative inline-flex size-1.5 rounded-full bg-amber-500" />
+        </span>
+        Needs input
+      </span>
+    )
+  }
   const styles: Record<string, string> = {
     completed: "border-emerald-500/50 bg-emerald-500/15 text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400",
     queued: "border-yellow-500/50 bg-yellow-500/15 text-yellow-800 dark:border-yellow-500/35 dark:bg-yellow-500/10 dark:text-yellow-400",
@@ -161,7 +181,7 @@ function getStatusBadge(status: string) {
     starting: "Starting",
     running: "Running",
     in_progress: "Running",
-    paused: "Awaiting Input",
+    paused: "Paused",
     failed: "Failed",
     cancelled: "Cancelled",
     pending: "Pending",
@@ -169,7 +189,7 @@ function getStatusBadge(status: string) {
   const cls = styles[status] ?? styles.pending
   const label = labels[status] ?? labels.pending
   return (
-    <span className={`inline-flex rounded-lg border px-2 py-0.5 text-xs font-medium ${cls}`}>
+    <span className={`inline-flex rounded-lg border px-2 py-0.5 text-xs font-medium whitespace-nowrap ${cls}`}>
       {label}
     </span>
   )
@@ -209,9 +229,24 @@ const createColumns = (orgId: string): ColumnDef<TaskRow>[] => [
   {
     accessorKey: "name",
     header: "Name",
-    cell: ({ row }) => (
-      <span className="font-medium">{row.original.name}</span>
-    ),
+    cell: ({ row }) => {
+      const attention = row.original.attention
+      return (
+        <div className="flex max-w-[28rem] min-w-0 flex-col">
+          <span className="font-medium">{row.original.name}</span>
+          {attention?.kind === "question" && (
+            <span
+              className="text-muted-foreground truncate text-xs"
+              title={attention.text}
+              data-testid="task-question-preview"
+            >
+              <span className="sr-only">Agent question: </span>
+              {attention.preview}
+            </span>
+          )}
+        </div>
+      )
+    },
     enableHiding: false,
   },
   {
@@ -258,7 +293,7 @@ const createColumns = (orgId: string): ColumnDef<TaskRow>[] => [
   {
     accessorKey: "status",
     header: "Status",
-    cell: ({ row }) => getStatusBadge(row.original.status),
+    cell: ({ row }) => getStatusBadge(row.original.status, row.original.attention),
   },
   {
     id: "actions",
@@ -316,6 +351,8 @@ export default function TasksPage() {
     search: debouncedSearch || undefined,
   }, {
     enabled: !!orgId,
+    // New agent questions appear without a manual refresh.
+    refetchInterval: TASKS_REFETCH_INTERVAL_MS,
   })
 
   const deleteTasksMutation = api.taxReturn.deleteTasks.useMutation({
@@ -376,6 +413,11 @@ export default function TasksPage() {
   })
 
   const selectedCount = table.getSelectedRowModel().rows.length
+  // The open detail panel follows the periodic refetch (a question can be
+  // asked or answered while it is open).
+  const liveDetailTask = detailTask
+    ? ((data?.tasks as TaskRow[] | undefined)?.find((task) => task.id === detailTask.id) ?? detailTask)
+    : null
 
   return (
     <DirectionalTransition>
@@ -428,7 +470,7 @@ export default function TasksPage() {
                   <DropdownMenu>
                     <TooltipTrigger asChild>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="icon" className="relative size-8">
+                        <Button variant="outline" size="icon" className="relative size-8" aria-label="Filter by status">
                           <IconCircleDot className="h-4 w-4" />
                           {statusFilter && (
                             <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
@@ -442,6 +484,7 @@ export default function TasksPage() {
                     <DropdownMenuSeparator />
                     {([
                       ["all", "All statuses"],
+                      ["needs_input", "Needs input"],
                       ["pending", "Pending"],
                       ["in_progress", "Running"],
                       ["completed", "Completed"],
@@ -463,7 +506,7 @@ export default function TasksPage() {
                   <DropdownMenu>
                     <TooltipTrigger asChild>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="icon" className="relative size-8">
+                        <Button variant="outline" size="icon" className="relative size-8" aria-label="Filter by jurisdiction">
                           <IconGlobe className="h-4 w-4" />
                           {jurisdictionFilter !== "all" && (
                             <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
@@ -495,7 +538,7 @@ export default function TasksPage() {
                   <DropdownMenu>
                     <TooltipTrigger asChild>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="icon" className="relative size-8">
+                        <Button variant="outline" size="icon" className="relative size-8" aria-label="Filter by certificate type">
                           <IconShieldCheck className="h-4 w-4" />
                           {certificateFilter !== "all" && (
                             <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" />
@@ -546,6 +589,7 @@ export default function TasksPage() {
                       className="size-8"
                       onClick={handleRefetch}
                       disabled={isRefetching}
+                      aria-label="Refresh tasks"
                     >
                       <RotateCcw className={`h-4 w-4 ${isRefetching ? "animate-spin" : ""}`} />
                     </Button>
@@ -816,50 +860,82 @@ export default function TasksPage() {
           </AlertDialogContent>
         </AlertDialog>
 
-        <Dialog open={!!detailTask} onOpenChange={(open) => { if (!open) setDetailTask(null) }}>
+        <Dialog open={!!liveDetailTask} onOpenChange={(open) => { if (!open) setDetailTask(null) }}>
           <DialogContent className="max-w-2xl">
-            {detailTask && (
+            {liveDetailTask && (
               <>
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
-                    {detailTask.name}
-                    {getStatusBadge(detailTask.status)}
+                    {liveDetailTask.name}
+                    {getStatusBadge(liveDetailTask.status, liveDetailTask.attention)}
                   </DialogTitle>
                   <DialogDescription>
-                    Task ID: <span className="font-mono text-xs">{detailTask.id}</span>
+                    Task ID: <span className="font-mono text-xs">{liveDetailTask.id}</span>
                   </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
+                  {liveDetailTask.attention?.kind === "question" && (
+                    <div
+                      className="space-y-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4"
+                      role="status"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <h4 className="text-sm font-medium text-amber-900 dark:text-amber-300">
+                          {liveDetailTask.attention.reason === "filing_contact"
+                            ? "The filing agent needs the filing contact"
+                            : "The filing agent asked a question"}
+                        </h4>
+                        <span className="text-muted-foreground shrink-0 text-xs">
+                          {formatAskedAgo(liveDetailTask.attention.askedAt)}
+                        </span>
+                      </div>
+                      <p className="max-h-48 overflow-y-auto text-sm leading-relaxed break-words" data-testid="task-question-text">
+                        {liveDetailTask.attention.text}
+                      </p>
+                      <div className="flex justify-end pt-1">
+                        <Button size="sm" asChild>
+                          <Link href={`/org/${orgId}/tasks/${liveDetailTask.id}`}>
+                            Answer in task
+                          </Link>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {liveDetailTask.attention?.kind === "paused" && (
+                    <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm" role="status">
+                      The run is paused. Open the task to resume it or send the agent an instruction.
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <h4 className="text-sm font-medium text-muted-foreground">Task Type</h4>
-                      <p>{getTaskTypeLabel(detailTask.taskType)}</p>
+                      <p>{getTaskTypeLabel(liveDetailTask.taskType)}</p>
                     </div>
                     <div className="space-y-1">
                       <h4 className="text-sm font-medium text-muted-foreground">Created At</h4>
-                      <p>{new Date(detailTask.createdAt).toLocaleString()}</p>
+                      <p>{new Date(liveDetailTask.createdAt).toLocaleString()}</p>
                     </div>
                   </div>
 
                   <div className="space-y-2 border rounded-lg p-4 bg-muted/30">
                     <h4 className="text-sm font-medium">Associated Tax Return</h4>
-                    {detailTask.taxReturn ? (
+                    {liveDetailTask.taxReturn ? (
                       <div className="grid gap-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Entity:</span>
-                          <span className="font-medium">{detailTask.taxReturn.entityName}</span>
+                          <span className="font-medium">{liveDetailTask.taxReturn.entityName}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Tax Year:</span>
-                          <span>{detailTask.taxReturn.taxYear}</span>
+                          <span>{liveDetailTask.taxReturn.taxYear}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Jurisdiction:</span>
-                          <span>{detailTask.jurisdiction?.name || "\u2014"}</span>
+                          <span>{liveDetailTask.jurisdiction?.name || "\u2014"}</span>
                         </div>
                         <div className="pt-2 mt-2 border-t flex justify-end">
                           <Button variant="secondary" size="sm" asChild>
-                            <Link href={`/org/${orgId}/returns/${detailTask.taxReturn.id}`}>
+                            <Link href={`/org/${orgId}/returns/${liveDetailTask.taxReturn.id}`}>
                               View Return
                             </Link>
                           </Button>
@@ -870,23 +946,23 @@ export default function TasksPage() {
                     )}
                   </div>
 
-                  {detailTask.substanceForm && (
+                  {liveDetailTask.substanceForm && (
                     <div className="space-y-2 border rounded-lg p-4 bg-muted/30">
                       <div className="flex items-center justify-between">
                         <h4 className="text-sm font-medium">Substance Form Status</h4>
-                        {detailTask.substanceForm.isComplete ? (
+                        {liveDetailTask.substanceForm.isComplete ? (
                           <span className="inline-flex rounded-lg border border-emerald-500/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-400">
                             Complete
                           </span>
                         ) : (
                           <span className="inline-flex rounded-lg border border-amber-500/50 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-400">
-                            {(detailTask.substanceForm.missingFields as string[])?.length ?? 0} Fields Missing
+                            {(liveDetailTask.substanceForm.missingFields as string[])?.length ?? 0} Fields Missing
                           </span>
                         )}
                       </div>
                       <div className="pt-2 flex justify-end">
                         <Button variant="secondary" size="sm" asChild>
-                          <Link href={`/org/${orgId}/tasks/${detailTask.id}/substance-form`}>
+                          <Link href={`/org/${orgId}/tasks/${liveDetailTask.id}/substance-form`}>
                             View Form
                           </Link>
                         </Button>
@@ -894,7 +970,7 @@ export default function TasksPage() {
                     </div>
                   )}
 
-                  {detailTask.status === "pending" && (
+                  {liveDetailTask.status === "pending" && (
                     <div className="flex items-center gap-2 p-3 bg-blue-500/10 text-blue-700 rounded-md text-sm border border-blue-500/20">
                       <Play className="h-4 w-4" />
                       Ready to start processing.
@@ -902,32 +978,32 @@ export default function TasksPage() {
                   )}
                 </div>
                 <DialogFooter className="gap-2 sm:gap-0">
-                  {(detailTask.status === "in_progress" ||
-                    detailTask.status === "running" ||
-                    detailTask.status === "queued" ||
-                    detailTask.status === "starting" ||
-                    detailTask.status === "paused") && (
+                  {(liveDetailTask.status === "in_progress" ||
+                    liveDetailTask.status === "running" ||
+                    liveDetailTask.status === "queued" ||
+                    liveDetailTask.status === "starting" ||
+                    liveDetailTask.status === "paused") && (
                     <Button className="w-full sm:w-auto" asChild>
-                      <Link href={`/org/${orgId}/tasks/${detailTask.id}`}>
+                      <Link href={`/org/${orgId}/tasks/${liveDetailTask.id}`}>
                         <Monitor className="h-4 w-4 mr-2" />
-                        {detailTask.status === "paused" ? "Open Task" : "View Live Stream"}
+                        {liveDetailTask.status === "paused" ? "Open Task" : "View Live Stream"}
                       </Link>
                     </Button>
                   )}
-                  {detailTask.status === "pending" && (
+                  {liveDetailTask.status === "pending" && (
                     <>
                       <Button variant="destructive" className="w-full sm:w-auto sm:mr-auto">
                         <Ban className="h-4 w-4 mr-2" />
                         Cancel Task
                       </Button>
-                      {detailTask.substanceForm && !detailTask.substanceForm.isComplete ? (
+                      {liveDetailTask.substanceForm && !liveDetailTask.substanceForm.isComplete ? (
                         <Button disabled className="w-full sm:w-auto">
                           <AlertCircle className="h-4 w-4 mr-2" />
                           Missing fields
                         </Button>
                       ) : (
                         <Button className="w-full sm:w-auto" asChild>
-                          <Link href={`/org/${orgId}/tasks/${detailTask.id}`}>
+                          <Link href={`/org/${orgId}/tasks/${liveDetailTask.id}`}>
                             <Play className="h-4 w-4 mr-2" />
                             Open & Start
                           </Link>

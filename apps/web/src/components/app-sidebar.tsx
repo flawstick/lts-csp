@@ -14,6 +14,7 @@ import {
   User as UserIcon,
 } from "@/lib/icons"
 import { createClient } from "@/lib/supabase/client"
+import { api } from "@/trpc/react"
 import type { User } from "@supabase/supabase-js"
 
 import { NavMain } from "@/components/nav-main"
@@ -46,7 +47,13 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 
-const getBasePlatformItems = (orgId: string | undefined) => [
+/** Matches the Tasks list refetch, so the badge and the list agree. */
+const TASKS_NEEDING_INPUT_REFETCH_MS = 30_000
+
+const getBasePlatformItems = (
+  orgId: string | undefined,
+  tasksNeedingInput = 0,
+) => [
   {
     title: "Dashboard",
     url: orgId ? `/org/${orgId}` : "/",
@@ -61,6 +68,11 @@ const getBasePlatformItems = (orgId: string | undefined) => [
     title: "Tasks",
     url: orgId ? `/org/${orgId}/tasks` : "/tasks",
     icon: Bot,
+    attentionCount: tasksNeedingInput,
+    attentionLabel:
+      tasksNeedingInput === 1
+        ? "1 task needs input"
+        : `${tasksNeedingInput} tasks need input`,
   },
 ]
 
@@ -108,6 +120,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [feedback, setFeedback] = React.useState("")
   const [isSubmitting, setIsSubmitting] = React.useState(false)
   const supabase = createClient()
+  const { data: needsInput } = api.taxReturn.countTasksNeedingInput.useQuery(
+    { orgId: currentOrg?.id ?? "" },
+    {
+      enabled: !!currentOrg?.id,
+      refetchInterval: TASKS_NEEDING_INPUT_REFETCH_MS,
+    },
+  )
+  const tasksNeedingInput = needsInput?.count ?? 0
 
   React.useEffect(() => {
     const getUser = async () => {
@@ -174,7 +194,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   // Build platform items - add org settings if there's a current org
   const platformItems = currentOrg
     ? [
-        ...getBasePlatformItems(currentOrg.id),
+        ...getBasePlatformItems(currentOrg.id, tasksNeedingInput),
         {
           title: `${currentOrg.name} Settings`,
           url: `/org/${currentOrg.id}/settings`,
