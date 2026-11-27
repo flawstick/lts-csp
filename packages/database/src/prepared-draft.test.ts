@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  describeEarlierSubmitRuns,
+  EARLIER_SUBMIT_BROWSER_CHECK_WINDOW_MS,
+  EARLIER_SUBMIT_QUIET_PERIOD_MS,
   EARLIER_UNRECEIPTED_SUBMIT_JOBS_KEY,
   fingerprintPreparedInputs,
+  getSubmitDispatchedAt,
+  hasSubmitDispatch,
+  planEarlierSubmitBrowserCheck,
+  SUBMIT_DISPATCHED_KEY,
   formatRunNumbers,
   getEarlierUnreceiptedSubmitCaution,
   getEarlierUnreceiptedSubmitJobs,
@@ -481,12 +488,161 @@ describe("earlier submit runs without a receipt (caution, not a lock)", () => {
       "Run #3 reached the portal and saved no receipt. This run first checks the portal shows the return as not yet submitted.",
     );
     expect(getEarlierUnreceiptedSubmitCaution([{ jobNumber: 2 }, { jobNumber: 5 }])).toMatch(/^Runs #2 and #5 reached the portal/);
-    expect(getEarlierUnreceiptedSubmitCaution([{ jobNumber: null }])).toMatch(/^An earlier Submit prepared return run reached/);
+    expect(getEarlierUnreceiptedSubmitCaution([{ jobNumber: null }])).toMatch(/^An earlier submit run reached/);
+    expect(getEarlierUnreceiptedSubmitCaution([{ jobNumber: null }, {}])).toMatch(/^Earlier submit runs reached/);
     expect(formatRunNumbers([{ jobNumber: 1 }, { jobNumber: 2 }, { jobNumber: 4 }])).toBe("Runs #1, #2 and #4");
     expect(formatRunNumbers([{ jobNumber: 1 }, {}])).toBeNull();
+    // Two runs with the same number cannot be told apart by number alone.
+    expect(formatRunNumbers([{ jobNumber: 3 }, { jobNumber: 3 }])).toBeNull();
   });
 
-  it("uses a stable resultData key for traceability", () => {
+  it("lists full-submit runs that reached the portal without a receipt", () => {
+    const fullSubmit = {
+      id: "full-2",
+      status: "failed",
+      createdAt: "2026-11-24T22:49:00Z",
+      resultData: { submissionMode: "submit_and_capture_pdf", [SUBMIT_DISPATCHED_KEY]: 1_000 },
+    };
+    const fullNotDispatched = { ...fullSubmit, id: "full-1", resultData: { submissionMode: "submit_and_capture_pdf" } };
+    expect(getEarlierUnreceiptedSubmitJobs({ jobs: [fullSubmit, fullNotDispatched] }).map((j) => j.id)).toEqual(["full-2"]);
+    expect(getSubmitDispatchedAt(fullSubmit.resultData)).toBe(1_000);
+    // Older Submit prepared return rows only carry the original key.
+    expect(getSubmitDispatchedAt(job("x").resultData)).toBe(Date.parse("2026-11-24T22:50:00Z"));
+    expect(hasSubmitDispatch(job("y", {}, { [SUBMIT_PREPARED_DISPATCHED_KEY]: undefined }).resultData)).toBe(false);
+    expect(hasSubmitDispatch(null)).toBe(false);
+  });
+});
+
+describe("describeEarlierSubmitRuns (run numbers count per task)", () => {
+  const current = { taskId: "task-b", taskName: "Acme 2025 (rerun)" };
+
+  it("names runs on the current task by number only", () => {
+    expect(describeEarlierSubmitRuns([{ jobNumber: 2, taskId: "task-b", taskName: "Acme 2025 (rerun)" }], current)).toBe("Run #2");
+    expect(
+      describeEarlierSubmitRuns(
+        [
+          { jobNumber: 2, taskId: "task-b" },
+          { jobNumber: 3, taskId: "task-b" },
+        ],
+        current,
+      ),
+    ).toBe("Runs #2 and #3");
+  });
+
+  it("names runs on another task with that task's name", () => {
+    expect(describeEarlierSubmitRuns([{ jobNumber: 2, taskId: "task-a", taskName: "Acme 2025" }], current)).toBe(
+      "Run #2 of task \u201cAcme 2025\u201d",
+    );
+    // Both tasks hold a Run #3: still unambiguous.
+    expect(
+      describeEarlierSubmitRuns(
+        [
+          { jobNumber: 3, taskId: "task-a", taskName: "Acme 2025" },
+          { jobNumber: 3, taskId: "task-b", taskName: "Acme 2025 (rerun)" },
+        ],
+        current,
+      ),
+    ).toBe("Run #3 of task \u201cAcme 2025\u201d and Run #3");
+    expect(
+      getEarlierUnreceiptedSubmitCaution([{ jobNumber: 2, taskId: "task-a", taskName: "Acme 2025" }], current),
+    ).toMatch(/^Run #2 of task \u201cAcme 2025\u201d reached the portal/);
+  });
+
+  it("falls back to generic wording when runs cannot be told apart", () => {
+    // Another task with the current task's name.
+    expect(describeEarlierSubmitRuns([{ jobNumber: 2, taskId: "task-a", taskName: "acme 2025 (RERUN)" }], current)).toBeNull();
+    // Two other tasks with the same name.
+    expect(
+      describeEarlierSubmitRuns(
+        [
+          { jobNumber: 2, taskId: "task-a", taskName: "Acme" },
+          { jobNumber: 4, taskId: "task-c", taskName: "Acme" },
+        ],
+        current,
+      ),
+    ).toBeNull();
+    // Another task with no name, a missing number, or mixed task knowledge.
+    expect(describeEarlierSubmitRuns([{ jobNumber: 2, taskId: "task-a", taskName: " " }], current)).toBeNull();
+    expect(describeEarlierSubmitRuns([{ jobNumber: null, taskId: "task-b" }], current)).toBeNull();
+    expect(describeEarlierSubmitRuns([{ jobNumber: 2, taskId: "task-b" }, { jobNumber: 3 }], current)).toBeNull();
+    // No task recorded at all: numbers, unless they collide.
+    expect(describeEarlierSubmitRuns([{ jobNumber: 3 }, { jobNumber: 3 }])).toBeNull();
+    expect(getEarlierUnreceiptedSubmitCaution([{ jobNumber: 3 }, { jobNumber: 3 }])).toMatch(/^Earlier submit runs reached/);
+    expect(describeEarlierSubmitRuns([])).toBeNull();
+  });
+});
+
+describe("planEarlierSubmitBrowserCheck (before a new submit run starts)", () => {
+  const now = Date.parse("2026-11-27T12:00:00Z");
+  const run = (
+    status: string,
+    data: Record<string, unknown>,
+    completedAt: Date | null = new Date(now - 60 * 60_000),
+  ) => ({
+    id: "earlier",
+    status,
+    createdAt: new Date(now - 2 * 60 * 60_000),
+    completedAt,
+    resultData: { submissionMode: "submit_and_capture_pdf", [SUBMIT_DISPATCHED_KEY]: now - 90 * 60_000, ...data },
+  });
+
+  it("stops the session of an ended dispatched run", () => {
+    for (const status of ["failed", "cancelled", "completed"]) {
+      expect(planEarlierSubmitBrowserCheck(run(status, { browserUseSessionId: "s-1" }), now)).toEqual({
+        kind: "stop_session",
+        sessionId: "s-1",
+      });
+    }
+    // Legacy key and the plain sessionId key.
+    expect(
+      planEarlierSubmitBrowserCheck(
+        {
+          ...run("failed", {}),
+          resultData: { filingOperation: "submit_prepared", [SUBMIT_PREPARED_DISPATCHED_KEY]: now - 60_000, sessionId: "s-2" },
+        },
+        now,
+      ),
+    ).toEqual({ kind: "stop_session", sessionId: "s-2" });
+  });
+
+  it("never touches a run that is still active (the active-run guard blocks instead)", () => {
+    for (const status of ["pending", "queued", "starting", "running", "paused"]) {
+      expect(planEarlierSubmitBrowserCheck(run(status, { browserUseSessionId: "s-1" }), now)).toEqual({ kind: "none" });
+    }
+  });
+
+  it("ignores runs that never reached the portal, and long-quiet sessions", () => {
+    expect(
+      planEarlierSubmitBrowserCheck({ ...run("failed", {}), resultData: { submissionMode: "submit_and_capture_pdf", browserUseSessionId: "s" } }, now),
+    ).toEqual({ kind: "none" });
+    const old = new Date(now - EARLIER_SUBMIT_BROWSER_CHECK_WINDOW_MS - 60_000);
+    expect(
+      planEarlierSubmitBrowserCheck(
+        {
+          ...run("failed", { browserUseSessionId: "s-1", lastHeartbeatAt: old.getTime() }, old),
+          resultData: { [SUBMIT_DISPATCHED_KEY]: old.getTime() - 1, browserUseSessionId: "s-1", lastHeartbeatAt: old.getTime() },
+        },
+        now,
+      ),
+    ).toEqual({ kind: "none" });
+  });
+
+  it("waits a quiet period for a run that recorded no session", () => {
+    const justEnded = new Date(now - 30_000);
+    expect(planEarlierSubmitBrowserCheck(run("failed", {}, justEnded), now)).toEqual({ kind: "wait" });
+    // A recent heartbeat counts as activity even with an older end time.
+    expect(planEarlierSubmitBrowserCheck(run("failed", { lastHeartbeatAt: now - 10_000 }), now)).toEqual({ kind: "wait" });
+    expect(
+      planEarlierSubmitBrowserCheck(run("failed", {}, new Date(now - EARLIER_SUBMIT_QUIET_PERIOD_MS - 1)), now),
+    ).toEqual({ kind: "none" });
+  });
+});
+
+describe("earlier submit runs (traceability key)", () => {
+
+  it("uses stable resultData keys", () => {
+    expect(SUBMIT_DISPATCHED_KEY).toBe("submitDispatchedAt");
+    expect(SUBMIT_PREPARED_DISPATCHED_KEY).toBe("submitPreparedDispatchedAt");
     expect(EARLIER_UNRECEIPTED_SUBMIT_JOBS_KEY).toBe("earlierUnreceiptedSubmitJobIds");
   });
 });

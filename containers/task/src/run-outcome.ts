@@ -166,9 +166,19 @@ export type RunOutcome = {
    * portal (REQUIRES_ATTENTION: ALREADY_SUBMITTED:), so it did not submit.
    * Always also `needsAttention`, never `success` or `likelySubmitted`: the
    * filing is not this run's, and the run is held for review rather than
-   * paused and re-driven.
+   * paused and re-driven. Only on a job's first browser task: see
+   * `portalReportsSubmitted`.
    */
   alreadySubmitted: boolean;
+  /**
+   * A submit run reported REQUIRES_ATTENTION: ALREADY_SUBMITTED: at all. On
+   * the first browser task this is `alreadySubmitted`. In a continuation
+   * (the job had dispatched an earlier browser task, which may have clicked
+   * the final button) it never means "not this run's filing": the run is
+   * `likelySubmitted`, never `success`, and is held for review the same way,
+   * so a filing this run made is never written off as someone else's.
+   */
+  portalReportsSubmitted: boolean;
 };
 
 /** Agent output marker for a run that stopped at the GRS contact step. */
@@ -213,6 +223,11 @@ export function classifyRunOutcome(input: {
   sessionStatus: string;
   output: string;
   isTaskSuccessful?: boolean | null;
+  /**
+   * Browser tasks this job has dispatched (first run plus continuations).
+   * More than one: an earlier task of this same run may have submitted.
+   */
+  browserTaskCount?: number;
 }): RunOutcome {
   const { submissionMode, output } = input;
   const lowerOutput = normalize(output);
@@ -224,10 +239,15 @@ export function classifyRunOutcome(input: {
     !startsWithRequiresAttention(output);
   // Only submit runs are asked for the check; the portal's own "Submitted"
   // status it quotes is not a filing by this run.
-  const alreadySubmitted =
+  const portalReportsSubmitted =
     submissionMode === "submit_and_capture_pdf" &&
     isAlreadySubmittedOutput(output);
-  const likelySubmitted = !alreadySubmitted && isLikelySubmittedOutput(output);
+  // After a continuation the filing the portal shows may be this run's own.
+  const continued = (input.browserTaskCount ?? 1) > 1;
+  const alreadySubmitted = portalReportsSubmitted && !continued;
+  const likelySubmitted = alreadySubmitted
+    ? false
+    : portalReportsSubmitted || isLikelySubmittedOutput(output);
   const prepareOnlyLikelySubmitted =
     submissionMode === "prepare_only" && likelySubmitted;
 
@@ -243,7 +263,7 @@ export function classifyRunOutcome(input: {
     success = true;
   }
 
-  if (prepareOnlyLikelySubmitted || alreadySubmitted) {
+  if (prepareOnlyLikelySubmitted || portalReportsSubmitted) {
     success = false;
   }
 
@@ -270,9 +290,10 @@ export function classifyRunOutcome(input: {
     prepareOnlyReady,
     likelySubmitted,
     prepareOnlyLikelySubmitted,
-    needsAttention: needsAttention || alreadySubmitted,
-    needsFilingContact: needsFilingContact && !alreadySubmitted,
+    needsAttention: needsAttention || portalReportsSubmitted,
+    needsFilingContact: needsFilingContact && !portalReportsSubmitted,
     alreadySubmitted,
+    portalReportsSubmitted,
   };
 }
 
@@ -351,7 +372,7 @@ export function resolveFinalRunStatuses(
     RunOutcome,
     "success" | "prepareOnlyLikelySubmitted" | "likelySubmitted"
   > &
-    Partial<Pick<RunOutcome, "alreadySubmitted">>,
+    Partial<Pick<RunOutcome, "alreadySubmitted" | "portalReportsSubmitted">>,
   receiptStatus: ReceiptStatus,
 ): FinalRunStatuses {
   let taxReturnStatus = getTaxReturnStatusForOutcome(submissionMode, outcome);
@@ -359,8 +380,10 @@ export function resolveFinalRunStatuses(
 
   // Held for review whatever was downloaded: a filed-return PDF the agent
   // found is attached to the return (as for any receipt), but the return is
-  // only completed once a person confirms it on the portal.
-  if (outcome.alreadySubmitted) {
+  // only completed once a person confirms it on the portal. The same after a
+  // continuation, where the filing may be this run's own: held, never failed
+  // as "not submitted by this run".
+  if (outcome.alreadySubmitted || outcome.portalReportsSubmitted) {
     return {
       taxReturnStatus: "review_required",
       jobStatus: "failed",

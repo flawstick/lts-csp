@@ -20,6 +20,7 @@ import {
 } from "@repo/database";
 import { publishJobEvent } from "@repo/redis";
 import {
+  EARLIER_SUBMIT_BROWSER_STOPPING_MESSAGE,
   EARLIER_UNRECEIPTED_SUBMIT_JOBS_KEY,
   fingerprintPreparedInputs,
   getEarlierUnreceiptedSubmitJobs,
@@ -27,6 +28,9 @@ import {
   parsePreparedDraftOutput,
   PORTAL_NET_BOOK_VALUE_KEY,
   resolvePreparedDraft,
+  isBrowserSessionStoppedStatus,
+  planEarlierSubmitBrowserCheck,
+  SUBMIT_DISPATCHED_KEY,
   SUBMIT_PREPARED_DISPATCHED_KEY,
   SUBMIT_PREPARED_OPERATION,
   type FilingOperation,
@@ -105,6 +109,14 @@ import {
 /** Job error for a submit run that found the return already submitted. */
 const ALREADY_SUBMITTED_JOB_MESSAGE =
   "The Guernsey Tax Portal shows this return as already submitted, so this run did not submit it. Check the portal and record the filed return (any filed-return PDF the run found is attached to the return).";
+
+/**
+ * Job error for a submit run that reported the return already submitted in a
+ * continuation (after an earlier browser task of the same run, which may
+ * have clicked the final button): it may be this run's own submission.
+ */
+const SUBMITTED_AFTER_CONTINUATION_JOB_MESSAGE =
+  "The Guernsey Tax Portal shows this return as submitted. This run had already continued in the same browser session, so it may have submitted it itself. Check the portal and record the filed return (any filed-return PDF the run found is attached to the return).";
 
 // ============================================================================
 // Configuration
@@ -1031,9 +1043,13 @@ async function listReturnJobs(taxReturnId: string) {
   return db
     .select({
       id: jobs.id,
+      taskId: jobs.taskId,
+      taskName: tasks.name,
       jobNumber: jobs.jobNumber,
       status: jobs.status,
       createdAt: jobs.createdAt,
+      completedAt: jobs.completedAt,
+      updatedAt: jobs.updatedAt,
       resultData: jobs.resultData,
     })
     .from(jobs)
@@ -1042,17 +1058,96 @@ async function listReturnJobs(taxReturnId: string) {
 }
 
 /**
- * Earlier Submit prepared return runs on the return that reached the portal
- * and saved no receipt, for a submit-mode run (full submit or Submit
- * prepared return). They never stop it: its prompt names them and its first
- * check confirms on the portal that the return is not already submitted.
+ * Defence in depth for the web start check: stop the Browser Use session of
+ * every earlier dispatched submit run on the return, and refuse this run
+ * unless each one reads back as stopped (or recorded no session and has been
+ * quiet long enough). Two agents on one return could both file it. Runs
+ * still active are never touched.
  */
-async function findEarlierUnreceiptedSubmitRuns(runtime: ActiveJobRuntime) {
-  if (runtime.submissionMode !== "submit_and_capture_pdf") return [];
-  return getEarlierUnreceiptedSubmitJobs({
-    jobs: await listReturnJobs(runtime.taxReturnId),
-    excludeJobId: runtime.jobId,
-  });
+async function stopEarlierSubmitRunBrowsers(
+  client: BrowserUseClient,
+  returnJobs: Awaited<ReturnType<typeof listReturnJobs>>,
+  currentJobId: string,
+) {
+  const now = Date.now();
+  for (const job of returnJobs) {
+    if (job.id === currentJobId) continue;
+    const plan = planEarlierSubmitBrowserCheck(job, now);
+    if (plan.kind === "none") continue;
+    if (plan.kind === "wait") {
+      throw new Error(
+        `Submission refused: ${EARLIER_SUBMIT_BROWSER_STOPPING_MESSAGE}`,
+      );
+    }
+    try {
+      await client.stopSession(plan.sessionId, "session");
+    } catch (error) {
+      // The read-back below decides; a partial stop may still have worked.
+      await log("Stopping an earlier submit run's browser failed", {
+        phase: "startup",
+        earlierJobId: job.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    let status: string | null = null;
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      try {
+        status = await client.getSessionStatus(plan.sessionId);
+      } catch (error) {
+        status = null;
+        await log("Reading an earlier submit run's browser status failed", {
+          phase: "startup",
+          earlierJobId: job.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        break;
+      }
+      if (status !== "running") break;
+      await sleep(250);
+    }
+    if (!isBrowserSessionStoppedStatus(status)) {
+      await log("An earlier submit run's browser is not confirmed stopped - refusing", {
+        phase: "startup",
+        earlierJobId: job.id,
+        status,
+      });
+      throw new Error(
+        `Submission refused: ${EARLIER_SUBMIT_BROWSER_STOPPING_MESSAGE}`,
+      );
+    }
+    await log("Earlier submit run's browser confirmed stopped", {
+      phase: "startup",
+      earlierJobId: job.id,
+      status,
+    });
+  }
+}
+
+/**
+ * Earlier submit runs (full submit or Submit prepared return) on the return
+ * that reached the portal and saved no receipt, for a submit-mode run, after
+ * stopping every earlier submit run's browser. They never stop this run: its
+ * prompt names them and its first check confirms on the portal that the
+ * return is not already submitted.
+ */
+async function findEarlierUnreceiptedSubmitRuns(
+  runtime: ActiveJobRuntime,
+  client: BrowserUseClient,
+) {
+  if (runtime.submissionMode !== "submit_and_capture_pdf") {
+    return { earlier: [], currentTaskName: null };
+  }
+  const returnJobs = await listReturnJobs(runtime.taxReturnId);
+  await stopEarlierSubmitRunBrowsers(client, returnJobs, runtime.jobId);
+  return {
+    earlier: getEarlierUnreceiptedSubmitJobs({
+      jobs: returnJobs,
+      excludeJobId: runtime.jobId,
+    }),
+    currentTaskName:
+      returnJobs.find((job) => job.id === runtime.jobId)?.taskName ?? null,
+  };
 }
 
 async function verifyPreparedDraftForSubmission(params: {
@@ -1531,8 +1626,10 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
         },
       });
     }
-    const earlierUnreceiptedSubmitJobs =
-      await findEarlierUnreceiptedSubmitRuns(runtime);
+    const {
+      earlier: earlierUnreceiptedSubmitJobs,
+      currentTaskName,
+    } = await findEarlierUnreceiptedSubmitRuns(runtime, client);
     if (earlierUnreceiptedSubmitJobs.length > 0) {
       // Traceability: the runs this run's prompt cautions about.
       await updateActiveJobRecord({
@@ -1554,8 +1651,13 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       );
     }
     const earlierUnreceiptedSubmitRuns = earlierUnreceiptedSubmitJobs.map(
-      (job) => ({ jobNumber: job.jobNumber }),
+      (job) => ({
+        jobNumber: job.jobNumber,
+        taskId: job.taskId,
+        taskName: job.taskName,
+      }),
     );
+    const currentTask = { taskId: runtime.taskId, taskName: currentTaskName };
     const preparedDraft = isSubmitPrepared
       ? await verifyPreparedDraftForSubmission({
           runtime,
@@ -1679,7 +1781,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
       filingOperation: runtime.filingOperation,
     });
 
-    const buildFillPrompt = () =>
+    const buildFillPrompt = (firstDispatch = true) =>
       buildSubstanceFormPrompt({
         taxReturn: taxReturn as any,
         substanceForm: taxReturn.substanceForm as any,
@@ -1693,6 +1795,8 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
         contactEmail: filingContactInfo?.email ?? null,
         contactPhone: filingContactInfo?.phone ?? null,
         earlierUnreceiptedSubmitRuns,
+        currentTask,
+        firstDispatch,
         netBookValue: netBookValueDecision
           ? {
               decision: netBookValueDecision,
@@ -1702,20 +1806,39 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
             }
           : undefined,
       });
+    const buildSubmitPreparedPrompt = (
+      draft: NonNullable<typeof preparedDraft>,
+      firstDispatch: boolean,
+    ) =>
+      buildSubmitPreparedReturnPrompt({
+        taxReturn,
+        substanceForm: taxReturn.substanceForm,
+        portalUrl: taxReturn.jurisdiction?.portalUrl || "https://my.gov.gg",
+        returnLink: taxReturn.link || undefined,
+        reviewUrl: draft.reviewUrl,
+        portalReference: draft.portalReference,
+        // Submit mode only starts with a configured contact (refused above).
+        contactName: filingContactInfo?.name ?? "",
+        contactEmail: filingContactInfo?.email ?? "",
+        earlierUnreceiptedSubmitRuns,
+        currentTask,
+        firstDispatch,
+      });
+    // The first dispatch of the job. Its FIRST CHECK (stop with
+    // ALREADY_SUBMITTED if the portal shows the return submitted) is only
+    // right before this run could have clicked the final button.
     let prompt = preparedDraft
-      ? buildSubmitPreparedReturnPrompt({
-          taxReturn,
-          substanceForm: taxReturn.substanceForm,
-          portalUrl: taxReturn.jurisdiction?.portalUrl || "https://my.gov.gg",
-          returnLink: taxReturn.link || undefined,
-          reviewUrl: preparedDraft.reviewUrl,
-          portalReference: preparedDraft.portalReference,
-          // Submit mode only starts with a configured contact (refused above).
-          contactName: filingContactInfo?.name ?? "",
-          contactEmail: filingContactInfo?.email ?? "",
-          earlierUnreceiptedSubmitRuns,
-        })
+      ? buildSubmitPreparedPrompt(preparedDraft, true)
       : buildFillPrompt();
+    // The base task resent in every continuation of this run (resume,
+    // recovery). For a submit run it carries SUBMISSION STATUS instead of
+    // FIRST CHECK: the run may already have submitted the return itself.
+    const continuationBasePrompt = () =>
+      submissionMode !== "submit_and_capture_pdf"
+        ? prompt
+        : preparedDraft
+          ? buildSubmitPreparedPrompt(preparedDraft, false)
+          : buildFillPrompt(false);
     // Restated in every recovery/resume continuation of a run that reaches
     // the declaration step (submit, submit prepared, prepare with a contact).
     const noticeOfAssessmentRule = noticeOfAssessment
@@ -1761,6 +1884,9 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
     const verifiedGuardBrowserIds = new Set<string>();
     let guardVerificationStartedAt = Date.now();
 
+    // Browser tasks this job has dispatched (first run, then continuations).
+    let browserTaskDispatchCount = 0;
+
     async function dispatchBrowserTask(
       task: string,
       sessionId?: string,
@@ -1786,16 +1912,35 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
         });
       }
       if (
-        isSubmitPrepared &&
-        typeof runtime.resultData[SUBMIT_PREPARED_DISPATCHED_KEY] !== "number"
+        submissionMode === "submit_and_capture_pdf" &&
+        (typeof runtime.resultData[SUBMIT_DISPATCHED_KEY] !== "number" ||
+          (isSubmitPrepared &&
+            typeof runtime.resultData[SUBMIT_PREPARED_DISPATCHED_KEY] !==
+              "number"))
       ) {
         // Durable before dispatch (a failed write aborts it): from here the
         // run may reach Submit, so a later submit run is cautioned about it
-        // (and checks the portal first) unless it saves a receipt.
+        // (and checks the portal first) unless it saves a receipt, and its
+        // browser is stopped before a later submit run starts. Submit
+        // prepared return runs keep their original key too.
+        const dispatchedAt = Date.now();
         await updateActiveJobRecord({
-          resultDataPatch: { [SUBMIT_PREPARED_DISPATCHED_KEY]: Date.now() },
+          resultDataPatch: {
+            ...(typeof runtime.resultData[SUBMIT_DISPATCHED_KEY] !== "number"
+              ? { [SUBMIT_DISPATCHED_KEY]: dispatchedAt }
+              : {}),
+            ...(isSubmitPrepared &&
+            typeof runtime.resultData[SUBMIT_PREPARED_DISPATCHED_KEY] !==
+              "number"
+              ? { [SUBMIT_PREPARED_DISPATCHED_KEY]: dispatchedAt }
+              : {}),
+          },
         });
       }
+      // Every dispatch after the first continues this run (resume,
+      // recovery): its prompt and outcome must not treat a submission this
+      // run may already have made as someone else's.
+      browserTaskDispatchCount += 1;
       const started = await client.runTask(task, {
         sessionId,
         profile: runProfile,
@@ -1822,6 +1967,7 @@ async function runBrowserJob(runtime: ActiveJobRuntime) {
             prepareOnlyGuard: prepareOnlyGuardStatus,
             // As reported by Browser Use for this run (checked against the profile).
             browserUseModel: started.model ?? runProfile.model,
+            browserTaskDispatchCount,
           },
         });
       } catch (error) {
@@ -2062,7 +2208,7 @@ LTS read the reviewer's reply as the tangible-asset Net Book Value${resolved.neg
       );
       const resumed = await dispatchBrowserTask(
         withOperatorMessages(
-          `${netBookValueRules}${noticeOfAssessmentRule}${buildContinuation(prompt)}`,
+          `${netBookValueRules}${noticeOfAssessmentRule}${buildContinuation(continuationBasePrompt())}`,
           {
             messages: pending,
             question,
@@ -2598,12 +2744,12 @@ The browser entered an unstable state after a bad click or detached tab.
 RECOVERY RULES:
 - Use the browser controls exposed by this session's current tool schema; do not invoke unavailable helpers such as get_tabs.
 - Switch back to the main Guernsey portal tab or close the stray tab. If you cannot recover it quickly, follow step 1 of the task below to reopen the prepared draft.
-- First check whether the return was already submitted (a confirmation page, or the case/return shown as submitted). If it was, do NOT submit again: download the completion PDF if offered and report the submission.
-- Otherwise follow the task below from step 1. Do not edit any section.
+- Then follow **SUBMISSION STATUS** in the task below before anything else: this run may already have submitted the return.
+- If it is not submitted, follow the task below from step 1. Do not edit any section.
 ${noticeOfAssessmentRule}
 Continue the original task now:
 
-${prompt}
+${continuationBasePrompt()}
 `
             : `
 The browser entered an unstable state after a bad click or detached tab.
@@ -2622,12 +2768,16 @@ RECOVERY RULES:
               ? " On reviewAndSubmit/declaration, never click Complete submission to Revenue Service or any final filing action."
               : ""
           }
-- From the summary page, use a Change or Edit link to reopen the filing sections and continue the return.
+${
+            submissionMode === "submit_and_capture_pdf"
+              ? "- Before any Change or Edit link, follow **SUBMISSION STATUS** in the task below: if the portal shows this return submitted, do not reopen or edit any section.\n"
+              : ""
+          }- From the summary page, use a Change or Edit link to reopen the filing sections and continue the return.
 - Verify the Financial Statements / Accounts upload before leaving that section, and do not continue while the control still says "No file chosen".
 ${noticeOfAssessmentRule}
 Continue the original task now:
 
-${prompt}
+${continuationBasePrompt()}
 `;
 
           session = await dispatchBrowserTask(recoveryPrompt, session.id);
@@ -2684,6 +2834,7 @@ ${prompt}
           sessionStatus: browserSession.status,
           output,
           isTaskSuccessful: browserSession.isTaskSuccessful,
+          browserTaskCount: browserTaskDispatchCount,
         });
         const { success, prepareOnlyReady, prepareOnlyLikelySubmitted } =
           outcome;
@@ -2715,7 +2866,9 @@ ${prompt}
         // filed return): it ends now, any filed-return PDF it downloaded is
         // captured, and the return is held for review.
         const needsAttention =
-          outcome.needsAttention && !budgetExhausted && !outcome.alreadySubmitted;
+          outcome.needsAttention &&
+          !budgetExhausted &&
+          !outcome.portalReportsSubmitted;
         await updateActiveJobRecord({
           resultDataPatch: {
             browserUseSessionBudgetSpentUsd:
@@ -2753,6 +2906,11 @@ ${prompt}
           await log(
             "Portal shows the return already submitted - not submitting; holding the return for review",
             { phase: "guardrail", output },
+          );
+        } else if (outcome.portalReportsSubmitted) {
+          await log(
+            "Portal shows the return submitted after a continuation of this run - it may be this run's submission; holding the return for review",
+            { phase: "guardrail", output, browserTaskDispatchCount },
           );
         }
 
@@ -2994,11 +3152,13 @@ ${prompt}
               completedAt: new Date(),
               ...(outcome.alreadySubmitted
                 ? { errorMessage: ALREADY_SUBMITTED_JOB_MESSAGE }
-                : budgetExhausted
-                  ? {
-                      errorMessage: `Browser Use session budget (USD ${runProfile.maxCostUsd}) reached; the run was stopped and not retried. Review the return before starting a new run.`,
-                    }
-                  : {}),
+                : outcome.portalReportsSubmitted
+                  ? { errorMessage: SUBMITTED_AFTER_CONTINUATION_JOB_MESSAGE }
+                  : budgetExhausted
+                    ? {
+                        errorMessage: `Browser Use session budget (USD ${runProfile.maxCostUsd}) reached; the run was stopped and not retried. Review the return before starting a new run.`,
+                      }
+                    : {}),
             },
             resultDataPatch: {
               output,

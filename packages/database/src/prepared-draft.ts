@@ -262,6 +262,35 @@ export function hasSubmitPreparedDispatch(resultData: unknown): boolean {
   );
 }
 
+/**
+ * Worker-written `resultData` key on every submit-mode job (a full submit or
+ * Submit prepared return): set durably before its first browser task is
+ * dispatched. From then on the run may have filed, whatever it later
+ * reports. Submit prepared return runs also keep SUBMIT_PREPARED_DISPATCHED_KEY
+ * (older rows only have that one).
+ */
+export const SUBMIT_DISPATCHED_KEY = "submitDispatchedAt" as const;
+
+/** When a submit-mode run was first dispatched to the browser, or null. */
+export function getSubmitDispatchedAt(resultData: unknown): number | null {
+  if (!isRecord(resultData)) return null;
+  const value = resultData[SUBMIT_DISPATCHED_KEY];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (hasSubmitPreparedDispatch(resultData)) {
+    const legacy = resultData[SUBMIT_PREPARED_DISPATCHED_KEY];
+    return typeof legacy === "number" && Number.isFinite(legacy) ? legacy : 0;
+  }
+  return null;
+}
+
+/**
+ * True once any submit-mode run (full submit or Submit prepared return) was
+ * dispatched to the browser, so it may have reached the final Submit.
+ */
+export function hasSubmitDispatch(resultData: unknown): boolean {
+  return getSubmitDispatchedAt(resultData) !== null;
+}
+
 // ── Earlier submit runs that may have filed: a caution, never a lock ───────
 
 /**
@@ -277,13 +306,14 @@ function hasSavedReceipt(data: Record<string, unknown>): boolean {
 }
 
 /**
- * Earlier Submit prepared return runs on the return that reached the portal
- * (dispatched to the browser) and saved no filed-return receipt, oldest
- * first. Any of them may have filed. They never block a new submission: the
- * new run is told about them and first checks on the portal that the return
- * is not already submitted (REQUIRES_ATTENTION: ALREADY_SUBMITTED otherwise).
- * A run that did save a receipt is not listed: the receipt itself refuses a
- * new submission (see the web filing start guard).
+ * Earlier submit runs on the return (full submit or Submit prepared return)
+ * that reached the portal (dispatched to the browser) and saved no
+ * filed-return receipt, oldest first. Any of them may have filed. They never
+ * block a new submission: the new run is told about them and first checks on
+ * the portal that the return is not already submitted
+ * (REQUIRES_ATTENTION: ALREADY_SUBMITTED otherwise). A run that did save a
+ * receipt is not listed: the receipt itself refuses a new submission (see the
+ * web filing start guard).
  */
 export function getEarlierUnreceiptedSubmitJobs<T extends PreparedDraftJob>(input: {
   jobs: T[];
@@ -294,7 +324,7 @@ export function getEarlierUnreceiptedSubmitJobs<T extends PreparedDraftJob>(inpu
     .filter(
       (job) =>
         job.id !== input.excludeJobId &&
-        hasSubmitPreparedDispatch(job.resultData) &&
+        hasSubmitDispatch(job.resultData) &&
         !hasSavedReceipt(jobData(job)),
     )
     .sort(
@@ -312,8 +342,78 @@ export function formatRunNumbers(
     .filter((n): n is number => typeof n === "number" && Number.isFinite(n))
     .map((n) => `#${n}`);
   if (numbers.length === 0 || numbers.length !== jobs.length) return null;
+  if (new Set(numbers).size !== numbers.length) return null;
   if (numbers.length === 1) return `Run ${numbers[0]}`;
   return `Runs ${numbers.slice(0, -1).join(", ")} and ${numbers[numbers.length - 1]}`;
+}
+
+/** An earlier run as named to staff and the agent. */
+export type EarlierSubmitRunRef = {
+  /** Run number within its own task (jobs.job_number). */
+  jobNumber?: number | null;
+  taskId?: string | null;
+  /** The task's name, to tell runs on other tasks of the return apart. */
+  taskName?: string | null;
+};
+
+function joinWithAnd(parts: string[]): string {
+  if (parts.length <= 1) return parts.join("");
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * Unambiguous names for earlier runs on a return, or null when they cannot
+ * be named safely (then use generic wording). Run numbers count per task,
+ * while the runs come from every task on the return, so a run on another
+ * task is named with its task: "Run #3", "Runs #2 and #3",
+ * "Run #3 and Run #2 of task “Acme 2025”". Runs with no task recorded are
+ * named by number only, and only when no run has a task. Null when a number
+ * is missing, two runs would read the same, or two tasks (or another task
+ * and the current one) share a name.
+ */
+export function describeEarlierSubmitRuns(
+  runs: EarlierSubmitRunRef[],
+  current?: { taskId?: string | null; taskName?: string | null },
+): string | null {
+  if (runs.length === 0) return null;
+  if (runs.some((run) => typeof run.jobNumber !== "number" || !Number.isFinite(run.jobNumber))) {
+    return null;
+  }
+  const withTask = runs.filter((run) => typeof run.taskId === "string" && run.taskId);
+  if (withTask.length === 0) return formatRunNumbers(runs);
+  if (withTask.length !== runs.length) return null;
+
+  const currentTaskId = current?.taskId ?? null;
+  // Group by task, keeping the first-seen order (oldest run first).
+  const groups = new Map<string, EarlierSubmitRunRef[]>();
+  for (const run of runs) {
+    const key = run.taskId as string;
+    groups.set(key, [...(groups.get(key) ?? []), run]);
+  }
+  const namesByTask = new Map<string, string>();
+  for (const [taskId, group] of groups) {
+    if (taskId === currentTaskId) continue;
+    const name = group[0]?.taskName?.trim();
+    if (!name) return null;
+    namesByTask.set(taskId, name);
+  }
+  const names = [...namesByTask.values()].map((name) => name.toLowerCase());
+  if (new Set(names).size !== names.length) return null;
+  const currentName = current?.taskName?.trim().toLowerCase();
+  if (currentName && names.includes(currentName)) return null;
+
+  const parts: string[] = [];
+  for (const [taskId, group] of groups) {
+    const numbers = formatRunNumbers(group);
+    if (!numbers) return null;
+    parts.push(
+      taskId === currentTaskId
+        ? numbers
+        : `${numbers} of task \u201c${namesByTask.get(taskId)}\u201d`,
+    );
+  }
+  // Every run on the current task: the compact form ("Runs #2 and #3").
+  return joinWithAnd(parts);
 }
 
 /**
@@ -321,15 +421,126 @@ export function formatRunNumbers(
  * submit runs may have filed, or null when there are none.
  */
 export function getEarlierUnreceiptedSubmitCaution(
-  jobs: Array<{ jobNumber?: number | null }>,
+  jobs: EarlierSubmitRunRef[],
+  current?: { taskId?: string | null; taskName?: string | null },
 ): string | null {
   if (jobs.length === 0) return null;
   const runs =
-    formatRunNumbers(jobs) ??
-    (jobs.length === 1
-      ? "An earlier Submit prepared return run"
-      : "Earlier Submit prepared return runs");
+    describeEarlierSubmitRuns(jobs, current) ??
+    (jobs.length === 1 ? "An earlier submit run" : "Earlier submit runs");
   return `${runs} reached the portal and saved no receipt. This run first checks the portal shows the return as not yet submitted.`;
+}
+
+// ── Earlier submit runs' browsers: stopped before a new submit run starts ──
+
+/**
+ * Job statuses of a run that may still be acting. Such a run is never touched
+ * here: it blocks any new run on the return (the active-run guard).
+ */
+const ACTIVE_RUN_STATUSES = new Set(["pending", "queued", "starting", "running", "paused"]);
+
+/** Browser Use session statuses that mean the agent can no longer act. */
+export const BROWSER_SESSION_STOPPED_STATUSES = [
+  "idle",
+  "stopped",
+  "error",
+  "timed_out",
+] as const;
+
+export function isBrowserSessionStoppedStatus(
+  status: string | null | undefined,
+): boolean {
+  return (
+    typeof status === "string" &&
+    (BROWSER_SESSION_STOPPED_STATUSES as readonly string[]).includes(status)
+  );
+}
+
+/** The Browser Use session a run recorded, if any (same keys the web app reads). */
+export function getSubmitRunBrowserSessionId(resultData: unknown): string | null {
+  if (!isRecord(resultData)) return null;
+  for (const key of ["browserUseSessionId", "sessionId"]) {
+    const value = resultData[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+/**
+ * A dispatched run that recorded no Browser Use session (so the app cannot
+ * stop it or read its state) only stops holding a new submit run once it has
+ * been quiet this long.
+ */
+export const EARLIER_SUBMIT_QUIET_PERIOD_MS = 2 * 60_000;
+
+/**
+ * A dispatched run quiet for longer than this is not checked: no Browser Use
+ * agent run, pause or keep-alive window lasts this long.
+ */
+export const EARLIER_SUBMIT_BROWSER_CHECK_WINDOW_MS = 24 * 60 * 60_000;
+
+/** Why a new submit run may not start yet (never a manual procedure). */
+export const EARLIER_SUBMIT_BROWSER_STOPPING_MESSAGE =
+  "The previous submit run's browser is still shutting down. Try again in a minute.";
+
+export type EarlierSubmitRunJob = PreparedDraftJob & {
+  completedAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+};
+
+function toMillis(value: Date | string | number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const ms = typeof value === "number" ? value : new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** The last time an ended run was seen acting (end, heartbeat, stale mark). */
+export function getRunLastActivityAt(job: EarlierSubmitRunJob): number {
+  const data = jobData(job);
+  const num = (key: string) =>
+    typeof data[key] === "number" ? (data[key] as number) : null;
+  const candidates = [
+    toMillis(job.completedAt),
+    toMillis(num("lastHeartbeatAt")),
+    toMillis(num("staleFailureAt")),
+    toMillis(num("pauseExpiredAt")),
+    toMillis(num("lastResumedAt")),
+    toMillis(getSubmitDispatchedAt(data) || null),
+  ].filter((value): value is number => value !== null);
+  if (candidates.length > 0) return Math.max(...candidates);
+  return toMillis(job.updatedAt) ?? toMillis(job.createdAt) ?? 0;
+}
+
+export type EarlierSubmitBrowserCheck =
+  /** Nothing to do: never dispatched, still active (blocked elsewhere), or long quiet. */
+  | { kind: "none" }
+  /** Stop this session and read back a stopped status before the new run starts. */
+  | { kind: "stop_session"; sessionId: string }
+  /** No session recorded and ended too recently: the new run must wait. */
+  | { kind: "wait" };
+
+/**
+ * What must happen to an earlier submit run's browser before a new submit run
+ * (full submit or Submit prepared return) on the same return may start: a
+ * dispatched, ended run's Browser Use agent may still be driving the portal
+ * (its worker was killed, or a stop failed), and two agents on one draft
+ * could both file it. Shared by the web start (startJob) and the worker.
+ */
+export function planEarlierSubmitBrowserCheck(
+  job: EarlierSubmitRunJob,
+  now: number,
+): EarlierSubmitBrowserCheck {
+  if (ACTIVE_RUN_STATUSES.has(job.status)) return { kind: "none" };
+  const data = jobData(job);
+  if (!hasSubmitDispatch(data)) return { kind: "none" };
+  const quietFor = now - getRunLastActivityAt(job);
+  const sessionId = getSubmitRunBrowserSessionId(data);
+  if (sessionId) {
+    return quietFor > EARLIER_SUBMIT_BROWSER_CHECK_WINDOW_MS
+      ? { kind: "none" }
+      : { kind: "stop_session", sessionId };
+  }
+  return quietFor >= EARLIER_SUBMIT_QUIET_PERIOD_MS ? { kind: "none" } : { kind: "wait" };
 }
 
 /**

@@ -14,7 +14,8 @@ import {
 } from "@repo/database";
 
 import {
-  formatRunNumbers,
+  describeEarlierSubmitRuns,
+  type EarlierSubmitRunRef,
   getGuernseyReviewDraftId,
   getGuernseyReviewSummaryUrl,
   normalizePortalReference,
@@ -135,10 +136,77 @@ interface PromptBuilderOptions {
   netBookValue?: NetBookValuePromptInput;
   /** Submit mode: earlier submit runs that may have filed (see FIRST CHECK). */
   earlierUnreceiptedSubmitRuns?: EarlierUnreceiptedSubmitRun[];
+  /** The task this run belongs to (names the earlier runs relative to it). */
+  currentTask?: CurrentTaskRef;
+  /**
+   * Submit mode: false for every continuation of this run in the same browser
+   * session (resume, recovery). FIRST CHECK applies to the first dispatch
+   * only; a continuation gets the SUBMISSION STATUS rule instead, since this
+   * run may already have clicked the final button.
+   */
+  firstDispatch?: boolean;
 }
 
 /** An earlier submit run on the return that reached the portal and saved no receipt. */
-export type EarlierUnreceiptedSubmitRun = { jobNumber?: number | null };
+export type EarlierUnreceiptedSubmitRun = EarlierSubmitRunRef;
+
+export type CurrentTaskRef = { taskId?: string | null; taskName?: string | null };
+
+/** Heading of the continuation rule (see buildSubmitContinuationCheck). */
+export const SUBMISSION_STATUS_CONTINUATION_HEADING =
+  "SUBMISSION STATUS — THIS CONTINUES THIS SAME RUN (DO THIS BEFORE ANYTHING ELSE)";
+
+function buildEarlierRunsCaution(options: {
+  earlierRuns: EarlierUnreceiptedSubmitRun[];
+  currentTask?: CurrentTaskRef;
+  unsureStop: string;
+}): string {
+  const { earlierRuns, unsureStop } = options;
+  if (earlierRuns.length === 0) return "";
+  const named = describeEarlierSubmitRuns(earlierRuns, options.currentTask);
+  const one = earlierRuns.length === 1;
+  return `
+**CAUTION:** ${
+    named
+      ? `${one ? "an earlier LTS submit run" : "earlier LTS submit runs"} (${named})`
+      : one
+        ? "an earlier LTS submit run"
+        : "earlier LTS submit runs"
+  } on this return reached the portal and saved no filed-return receipt, so ${
+    one ? "it" : "they"
+  } may already have filed this return. Do this check with particular care and do not assume the return is still a draft. If you cannot see the case or return status at all, do **NOT** submit: stop with ${unsureStop} saying the submission status could not be confirmed, and describe what the case page shows.
+`;
+}
+
+/**
+ * Replaces FIRST CHECK in every continuation of a submit run (resume after a
+ * pause or reviewer reply, detached-tab recovery). This run may already have
+ * clicked the final button in an earlier step, so a return the portal now
+ * shows as submitted is reported as this run's submission, never stopped on
+ * with ALREADY_SUBMITTED, unless the agent is certain it never clicked it.
+ */
+export function buildSubmitContinuationCheck(options: {
+  submitPrepared: boolean;
+  earlierRuns?: EarlierUnreceiptedSubmitRun[];
+  currentTask?: CurrentTaskRef;
+}): string {
+  const unsureStop = options.submitPrepared
+    ? `**REQUIRES_ATTENTION: ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}:**`
+    : "**REQUIRES_ATTENTION:**";
+  const caution = buildEarlierRunsCaution({
+    earlierRuns: options.earlierRuns ?? [],
+    currentTask: options.currentTask,
+    unsureStop,
+  });
+  return `
+## ${SUBMISSION_STATUS_CONTINUATION_HEADING}
+This message continues this LTS submit run in the same browser session; it is not a new run. Earlier in this run you may already have clicked **${FINAL_FILING_BUTTON_LABEL}**. Before you change anything, check whether the portal now shows this return as submitted: a submission confirmation or receipt, the case/return shown as **Submitted** / **Received** (or similar), or the declaration step no longer offering **${FINAL_FILING_BUTTON_LABEL}**.
+${caution}
+- **It shows submitted, and you clicked ${FINAL_FILING_BUTTON_LABEL} earlier in this run (or may have, for example the page changed or the browser broke right after a click):** this run submitted it. Do **NOT** click anything to submit again and change nothing. Download the portal's filed-return / completion PDF into the Browser Use session if it is offered, and finish with the final output the task below asks for after a submission (the confirmation and reference shown, and the PDF file name). Do not start that output with REQUIRES_ATTENTION.
+- **It shows submitted, and you are certain you have not clicked ${FINAL_FILING_BUTTON_LABEL} at any point in this run:** do **NOT** submit and change nothing. Download the filed return or its receipt as a PDF if the portal offers it. Your final output MUST start with exactly: **${ALREADY_SUBMITTED_OUTPUT}** followed by what the portal shows, and say that this run never clicked the final button.
+- **It does not show submitted:** continue the task below. Click **${FINAL_FILING_BUTTON_LABEL}** at most once in this whole run, counting any click earlier in the run.
+`;
+}
 
 const ALREADY_SUBMITTED_OUTPUT = `REQUIRES_ATTENTION: ${ALREADY_SUBMITTED_MARKER}:`;
 
@@ -156,27 +224,17 @@ export function buildAlreadySubmittedCheck(options: {
   caseUrl: string | null;
   submitPrepared: boolean;
   earlierRuns?: EarlierUnreceiptedSubmitRun[];
+  currentTask?: CurrentTaskRef;
 }): string {
   const { entityName, taxYear, caseUrl, submitPrepared } = options;
-  const earlierRuns = options.earlierRuns ?? [];
   const unsureStop = submitPrepared
     ? `**REQUIRES_ATTENTION: ${PREPARED_DRAFT_NOT_VERIFIED_MARKER}:**`
     : "**REQUIRES_ATTENTION:**";
-  const named = formatRunNumbers(earlierRuns);
-  const caution =
-    earlierRuns.length > 0
-      ? `
-**CAUTION:** ${
-          named
-            ? `${earlierRuns.length === 1 ? "an earlier LTS submit run" : "earlier LTS submit runs"} (${named})`
-            : earlierRuns.length === 1
-              ? "an earlier LTS submit run"
-              : "earlier LTS submit runs"
-        } on this return reached the portal and saved no filed-return receipt, so ${
-          earlierRuns.length === 1 ? "it" : "they"
-        } may already have filed this return. Do this check with particular care and do not assume the return is still a draft. If you cannot see the case or return status at all, do **NOT** submit: stop with ${unsureStop} saying the submission status could not be confirmed, and describe what the case page shows.
-`
-      : "";
+  const caution = buildEarlierRunsCaution({
+    earlierRuns: options.earlierRuns ?? [],
+    currentTask: options.currentTask,
+    unsureStop,
+  });
   return `
 ## FIRST CHECK — THIS RETURN MUST NOT ALREADY BE SUBMITTED (DO THIS BEFORE ANYTHING ELSE)
 Do this before you change anything: before ${
@@ -255,6 +313,8 @@ export function buildSubstanceFormPrompt(
     contactPhone,
     netBookValue,
     earlierUnreceiptedSubmitRuns,
+    currentTask,
+    firstDispatch = true,
   } = options;
 
   const sections: string[] = [];
@@ -318,13 +378,20 @@ ${
 ${PORTAL_LOGIN_SECTION}${
   isPrepareOnly
     ? ""
-    : buildAlreadySubmittedCheck({
-        entityName: taxReturn.entityName,
-        taxYear: taxReturn.taxYear,
-        caseUrl: caseViewUrl ?? returnLink ?? portalUrl,
-        submitPrepared: false,
-        earlierRuns: earlierUnreceiptedSubmitRuns,
-      })
+    : firstDispatch
+      ? buildAlreadySubmittedCheck({
+          entityName: taxReturn.entityName,
+          taxYear: taxReturn.taxYear,
+          caseUrl: caseViewUrl ?? returnLink ?? portalUrl,
+          submitPrepared: false,
+          earlierRuns: earlierUnreceiptedSubmitRuns,
+          currentTask,
+        })
+      : buildSubmitContinuationCheck({
+          submitPrepared: false,
+          earlierRuns: earlierUnreceiptedSubmitRuns,
+          currentTask,
+        })
 }
 ## NAVIGATION
 1. Go to: ${returnLink || portalUrl}
@@ -1185,6 +1252,9 @@ export function buildSubmitPreparedReturnPrompt(options: {
   contactEmail: string;
   /** Earlier submit runs that may have filed (see FIRST CHECK). */
   earlierUnreceiptedSubmitRuns?: EarlierUnreceiptedSubmitRun[];
+  currentTask?: CurrentTaskRef;
+  /** False for a continuation of this run (see PromptBuilderOptions.firstDispatch). */
+  firstDispatch?: boolean;
 }): string {
   const {
     taxReturn,
@@ -1196,6 +1266,8 @@ export function buildSubmitPreparedReturnPrompt(options: {
     contactName,
     contactEmail,
     earlierUnreceiptedSubmitRuns,
+    currentTask,
+    firstDispatch = true,
   } = options;
   const noticeOfAssessment = getGuernseyNoticeOfAssessment(substanceForm);
   const noticeOfAssessmentSource = describeNoticeOfAssessmentSource(
@@ -1234,13 +1306,22 @@ You are **not** filling or reviewing the return. Do **NOT** open sections, click
 
 **The only exceptions** are on the declaration step in section 3: the notice of assessment question (answer **${noticeOfAssessment}**, ${noticeOfAssessmentSource}) and every declaration confirmation box (the portal shows three). Change nothing else there.
 
-${PORTAL_LOGIN_SECTION}${buildAlreadySubmittedCheck({
-    entityName: taxReturn.entityName,
-    taxYear: taxReturn.taxYear,
-    caseUrl: getCaseViewUrl(returnLink) ?? returnLink ?? null,
-    submitPrepared: true,
-    earlierRuns: earlierUnreceiptedSubmitRuns,
-  })}
+${PORTAL_LOGIN_SECTION}${
+    firstDispatch
+      ? buildAlreadySubmittedCheck({
+          entityName: taxReturn.entityName,
+          taxYear: taxReturn.taxYear,
+          caseUrl: getCaseViewUrl(returnLink) ?? returnLink ?? null,
+          submitPrepared: true,
+          earlierRuns: earlierUnreceiptedSubmitRuns,
+          currentTask,
+        })
+      : buildSubmitContinuationCheck({
+          submitPrepared: true,
+          earlierRuns: earlierUnreceiptedSubmitRuns,
+          currentTask,
+        })
+  }
 ## 1. OPEN THE PREPARED DRAFT
 ${
   draftPath
@@ -1270,9 +1351,13 @@ Read the review/submit page only. Do not change anything to make a check pass.
   }
 - No section is shown as incomplete, not started or in error, and no validation message is shown.
 - If the filing contact is shown, its name is **${contactName}** and its email is **${contactEmail}**.
-- The return still shows as not submitted (see **FIRST CHECK**).
+- The return still shows as not submitted (see **${firstDispatch ? "FIRST CHECK" : "SUBMISSION STATUS"}**).
 
-If any check fails, or you cannot see enough to confirm it, do **NOT** submit. Your final output MUST start with exactly: **${notVerified}** followed by which check failed and what the page shows. If the return appears already submitted or filed, do **NOT** submit: stop with **${ALREADY_SUBMITTED_OUTPUT}** as **FIRST CHECK** says, not with the marker above.
+If any check fails, or you cannot see enough to confirm it, do **NOT** submit. Your final output MUST start with exactly: **${notVerified}** followed by which check failed and what the page shows. ${
+    firstDispatch
+      ? `If the return appears already submitted or filed, do **NOT** submit: stop with **${ALREADY_SUBMITTED_OUTPUT}** as **FIRST CHECK** says, not with the marker above.`
+      : "If the return appears already submitted or filed, do **NOT** submit again: follow **SUBMISSION STATUS** above, not the marker above."
+  }
 
 ## 3. DECLARATION, THEN SUBMIT ONCE
 The declaration step (usually **reviewAndSubmit/declaration**, reached from the review page${

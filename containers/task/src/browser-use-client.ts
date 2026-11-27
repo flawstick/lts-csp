@@ -315,6 +315,15 @@ export class BrowserUseClient {
     return (browser.extensions ?? []).map((extension) => extension.id);
   }
 
+  /**
+   * The session's current status read fresh from Browser Use (never the
+   * cached state), e.g. for another job's session.
+   */
+  async getSessionStatus(sessionId: string): Promise<BrowserUseSessionStatus> {
+    const info = await this.client.sessions.get(sessionId);
+    return normalizeRunStatus(info.status);
+  }
+
   async stopSession(
     sessionId: string,
     strategy: StopStrategy = "session",

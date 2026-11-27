@@ -20,14 +20,27 @@ async function loadReturn(taxReturnId: string) {
 async function returnJobs(taxReturnId: string) {
   const { db, jobs, tasks, eq } = await import("@repo/database");
   return db
-    .select({ id: jobs.id, jobNumber: jobs.jobNumber, status: jobs.status, createdAt: jobs.createdAt, resultData: jobs.resultData })
+    .select({
+      id: jobs.id,
+      taskId: jobs.taskId,
+      taskName: tasks.name,
+      jobNumber: jobs.jobNumber,
+      status: jobs.status,
+      createdAt: jobs.createdAt,
+      resultData: jobs.resultData,
+    })
     .from(jobs)
     .innerJoin(tasks, eq(jobs.taskId, tasks.id))
     .where(eq(tasks.taxReturnId, taxReturnId));
 }
 
 /** The Submit prepared return prompt the worker would build for a queued job. */
-export async function buildPrompt(ctx: FlowContext, key: string, submitJobId?: string) {
+export async function buildPrompt(
+  ctx: FlowContext,
+  key: string,
+  submitJobId?: string,
+  options: { firstDispatch?: boolean } = {},
+) {
   const { fingerprintPreparedInputs, getEarlierUnreceiptedSubmitJobs, resolvePreparedDraft } = await import(
     "@repo/database/prepared-draft"
   );
@@ -64,8 +77,12 @@ export async function buildPrompt(ctx: FlowContext, key: string, submitJobId?: s
     portalReference: resolution.draft.portalReference,
     contactName: "E2E Filing Contact",
     contactEmail: "filing@client-e2e.test",
-    // Same as the worker's startup (findEarlierUnreceiptedSubmitRuns).
+    // Same as the worker's startup (findEarlierUnreceiptedSubmitRuns): runs
+    // on other tasks of the return are named with their task.
     earlierUnreceiptedSubmitRuns: getEarlierUnreceiptedSubmitJobs({ jobs, excludeJobId: submitJobId }),
+    currentTask: { taskId: r.taskId, taskName: jobs.find((j) => j.taskId === r.taskId)?.taskName ?? null },
+    // false: what a resume/recovery continuation of the run resends.
+    firstDispatch: options.firstDispatch ?? true,
   });
   const rule = buildNoticeOfAssessmentContinuationRule({
     answer: getGuernseyNoticeOfAssessment(taxReturn.substanceForm),

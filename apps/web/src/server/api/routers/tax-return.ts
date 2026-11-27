@@ -57,10 +57,15 @@ import {
   RETURN_ALREADY_COMPLETED_MESSAGE,
 } from "@/lib/submit-readiness";
 import {
+  EARLIER_SUBMIT_BROWSER_STOPPING_MESSAGE,
   EARLIER_UNRECEIPTED_SUBMIT_JOBS_KEY,
-  hasSubmitPreparedDispatch,
+  hasSubmitDispatch,
   SUBMIT_PREPARED_OPERATION,
 } from "@repo/database/prepared-draft";
+import {
+  getEarlierSubmitBrowserBlocker,
+  stopEarlierSubmitRunBrowsers,
+} from "@/lib/earlier-submit-browsers";
 import { getFilingMaintenanceBlocker } from "@/lib/filing-maintenance";
 import {
   ACTIVE_JOB_STATUSES,
@@ -298,6 +303,25 @@ async function maybeMarkBrowserJobStale<
 
   if (!failedJob) {
     return job;
+  }
+
+  // A submit run that reached the portal: its worker is gone, but its Browser
+  // Use agent may still be driving the return. Stop it so it cannot file
+  // alongside a later run (startJob also confirms it stopped before one).
+  const staleSessionId = getBrowserUseSessionId(getResultDataRecord(job.resultData));
+  if (staleSessionId && hasSubmitDispatch(job.resultData)) {
+    try {
+      await stopBrowserUseSession(
+        staleSessionId,
+        "session",
+        getBrowserUseApiVersion(getResultDataRecord(job.resultData)),
+      );
+    } catch (error) {
+      console.error("Failed to stop the Browser Use session of a stale submit run", {
+        jobId: job.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   if (ids?.taskId) {
@@ -1365,10 +1389,10 @@ export const taxReturnRouter = createTRPCRouter({
         }
         // A run that reached the portal is the filing audit record, and later
         // submit runs are cautioned about it.
-        if (taskJobs.some((job) => hasSubmitPreparedDispatch(job.resultData))) {
+        if (taskJobs.some((job) => hasSubmitDispatch(job.resultData))) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
-            message: "Keep tasks with a Submit prepared return run that reached the portal: they are the filing audit record.",
+            message: "Keep tasks with a submit run that reached the portal: they are the filing audit record.",
           });
         }
         await tx.delete(tasks).where(inArray(tasks.id, input));
@@ -1935,6 +1959,8 @@ export const taxReturnRouter = createTRPCRouter({
             returnJobs: await ctx.db
               .select({
                 id: jobs.id,
+                taskId: jobs.taskId,
+                taskName: tasks.name,
                 jobNumber: jobs.jobNumber,
                 status: jobs.status,
                 createdAt: jobs.createdAt,
@@ -1944,6 +1970,7 @@ export const taxReturnRouter = createTRPCRouter({
               .innerJoin(tasks, eq(jobs.taskId, tasks.id))
               .where(eq(tasks.taxReturnId, task.taxReturn.id)),
             maintenanceBlocker: getFilingMaintenanceBlocker(),
+            currentTask: { taskId: task.id, taskName: task.name },
           })
         : null;
 
@@ -2078,6 +2105,44 @@ export const taxReturnRouter = createTRPCRouter({
       );
 
       const taxReturnId = task.taxReturn.id;
+      const returnJobColumns = {
+        id: jobs.id,
+        taskId: jobs.taskId,
+        taskName: tasks.name,
+        jobNumber: jobs.jobNumber,
+        status: jobs.status,
+        createdAt: jobs.createdAt,
+        completedAt: jobs.completedAt,
+        updatedAt: jobs.updatedAt,
+        resultData: jobs.resultData,
+      };
+
+      // An earlier dispatched submit run's Browser Use agent may still be on
+      // the portal (its worker was killed, or a stop failed). Two agents on
+      // one return could both file it, so before a new submit run starts
+      // every such browser is stopped and read back as stopped. Active runs
+      // are never touched: they refuse the start below.
+      let stoppedEarlierSubmitJobIds = new Set<string>();
+      if (submissionMode === "submit_and_capture_pdf") {
+        const stop = await stopEarlierSubmitRunBrowsers(
+          await ctx.db
+            .select(returnJobColumns)
+            .from(jobs)
+            .innerJoin(tasks, eq(jobs.taskId, tasks.id))
+            .where(eq(tasks.taxReturnId, taxReturnId)),
+        );
+        if (!stop.ok) {
+          console.warn("startJob: refused, an earlier submit run's browser is not confirmed stopped", {
+            taskId: input.taskId,
+            earlierJobId: stop.jobId,
+            reason: stop.reason,
+            status: stop.status,
+          });
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: stop.message });
+        }
+        stoppedEarlierSubmitJobIds = stop.stoppedJobIds;
+      }
+
       const newJob = await ctx.db.transaction(async (tx) => {
         // Serialize enqueueing with staff completion on the same return.
         const [currentReturn] = await tx
@@ -2126,20 +2191,25 @@ export const taxReturnRouter = createTRPCRouter({
         let earlierUnreceiptedSubmitJobIds: string[] = [];
         if (submissionMode === "submit_and_capture_pdf") {
           const returnJobs = await tx
-            .select({
-              id: jobs.id,
-              jobNumber: jobs.jobNumber,
-              status: jobs.status,
-              createdAt: jobs.createdAt,
-              resultData: jobs.resultData,
-            })
+            .select(returnJobColumns)
             .from(jobs)
             .innerJoin(tasks, eq(jobs.taskId, tasks.id))
             .where(eq(tasks.taxReturnId, taxReturnId));
+          // A run that ended after the stop pass above was not covered by it.
+          const browserBlocker = getEarlierSubmitBrowserBlocker({
+            returnJobs,
+            stoppedJobIds: stoppedEarlierSubmitJobIds,
+          });
+          if (browserBlocker) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: browserBlocker });
+          }
           // Earlier submit runs that reached the portal without a receipt do
           // not block: the new run is told about them and checks the portal
           // first. Recorded on the new job for traceability.
-          earlierUnreceiptedSubmitJobIds = getEarlierSubmitCaution(returnJobs).jobIds;
+          earlierUnreceiptedSubmitJobIds = getEarlierSubmitCaution(returnJobs, {
+            taskId: input.taskId,
+            taskName: task.name,
+          }).jobIds;
           // For Submit prepared return, a draft that still matches this return.
           const gate = getSubmitDraftGate({
             isSubmitPrepared,
@@ -2476,11 +2546,11 @@ export const taxReturnRouter = createTRPCRouter({
       }
       // It is the filing audit record, and later submit runs are cautioned
       // about it.
-      if (hasSubmitPreparedDispatch(job.resultData)) {
+      if (hasSubmitDispatch(job.resultData)) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message:
-            "This Submit prepared return run reached the portal and may have filed the return, so it is kept as a record.",
+            "This submit run reached the portal and may have filed the return, so it is kept as a record.",
         });
       }
 

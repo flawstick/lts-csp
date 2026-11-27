@@ -115,22 +115,35 @@ export function getSubmitDraftGate(input: {
   return { ok: true, preparedJobId: resolution.preparedJob.id };
 }
 
-/** A return job with its run number, as getTask and startJob read it. */
-export type ReturnJob = PreparedDraftJob & { jobNumber?: number | null };
+/**
+ * A return job with its run number and task, as getTask and startJob read
+ * it (run numbers count per task, so other tasks' runs are named with theirs).
+ */
+export type ReturnJob = PreparedDraftJob & {
+  jobNumber?: number | null;
+  taskId?: string | null;
+  taskName?: string | null;
+};
+
+/** The task a submission is being started from. */
+export type CurrentTask = { taskId?: string | null; taskName?: string | null };
 
 /**
  * Ids of the earlier submit runs on the return that reached the portal and
  * saved no receipt, and the one-line caution shown before a new submission
  * (null when there are none). Never a blocker.
  */
-export function getEarlierSubmitCaution(returnJobs: ReturnJob[]): {
+export function getEarlierSubmitCaution(
+  returnJobs: ReturnJob[],
+  currentTask?: CurrentTask,
+): {
   jobIds: string[];
   caution: string | null;
 } {
   const earlier = getEarlierUnreceiptedSubmitJobs({ jobs: returnJobs });
   return {
     jobIds: earlier.map((job) => job.id),
-    caution: getEarlierUnreceiptedSubmitCaution(earlier),
+    caution: getEarlierUnreceiptedSubmitCaution(earlier, currentTask),
   };
 }
 
@@ -166,6 +179,8 @@ export function getSubmitReadiness(input: {
   taxReturn: ReadinessTaxReturn;
   returnJobs: ReturnJob[];
   maintenanceBlocker?: string | null;
+  /** Names the caution's runs relative to this task. */
+  currentTask?: CurrentTask;
 }): SubmitReadiness {
   const blocker =
     input.maintenanceBlocker ||
@@ -204,6 +219,6 @@ export function getSubmitReadinessByOperation(
   return {
     submit: getSubmitReadiness({ ...input, isSubmitPrepared: false }),
     submitPrepared: getSubmitReadiness({ ...input, isSubmitPrepared: true }),
-    caution: getEarlierSubmitCaution(input.returnJobs).caution,
+    caution: getEarlierSubmitCaution(input.returnJobs, input.currentTask).caution,
   };
 }

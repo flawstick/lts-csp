@@ -475,3 +475,14 @@ describe("bu-ultrafast prepare profile", () => {
     expect(sdk.runs.cancel).toHaveBeenCalledWith("swapped");
   });
 });
+
+describe("getSessionStatus", () => {
+  it("reads another job's session fresh, never from the cache", async () => {
+    const client = new BrowserUseClient("key");
+    sdk.sessions.get.mockResolvedValueOnce({ sessionId: "other", latestRunId: "r", status: "running" });
+    expect(await client.getSessionStatus("other")).toBe("running");
+    sdk.sessions.get.mockResolvedValueOnce({ sessionId: "other", latestRunId: "r", status: "cancelled" });
+    expect(await client.getSessionStatus("other")).toBe("stopped");
+    expect(sdk.sessions.get).toHaveBeenCalledTimes(2);
+  });
+});
