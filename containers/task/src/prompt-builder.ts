@@ -461,6 +461,7 @@ If the form already has answers, still open each relevant section and check it a
 - **Entity Activity:** if blank, you may write a short description from the context in this task.
 - **Has Intellectual Property Holding?:** if the saved answer is missing, answer **"Yes"** only if the context clearly shows IP ownership or exploitation (licensing, royalties, trademarks, patents, brands, software IP, or an Intellectual Property Holding Company relevant activity); otherwise **"No"**.
 - **Ownership (parents / UBOs):** if not provided, use a portal-native "No", "None" or empty-list path only where the portal offers one; otherwise STOP and report **REQUIRES_ATTENTION**.
+${buildStandingAnswersNotes(substanceForm)}
 ${buildFilingContactSection({
   hasFilingContact,
   isPrepareOnly,
@@ -1181,6 +1182,21 @@ ${directorList}
 ### Board Meetings:
 ${meetingList}
 `;
+}
+
+/**
+ * LTS standing answers for portal questions the saved form has no field for.
+ * Without them the agent stops and asks, and staff always gave these answers.
+ */
+export function buildStandingAnswersNotes(form: SubstanceForm): string {
+  const cbcrNo = (form.isConstituentEntity || "No").trim().toLowerCase() === "no";
+  const pillarTwo = cbcrNo
+    ? `- **Pillar Two** (Country by Country Reporting section): CbCR constituent entity is **No**, so answer **No** to both "Is the entity a constituent entity of an MNE Group that was in-scope of Pillar 2 Global Minimum Tax during the accounting period?" and "Does the entity expect to be a constituent entity of an in-scope group for the next accounting period?". This is LTS policy; do not ask about it.`
+    : `- **Pillar Two:** the saved CbCR answer is not **No**, so there is no standing answer for the Pillar Two questions. If the portal requires them, STOP and report **REQUIRES_ATTENTION** naming the Pillar Two questions.`;
+  return `- **LTS STANDING ANSWERS:** the saved form has no field for the questions below. Use these answers and do not stop or ask about them, unless a saved value or reviewer reply in this task says otherwise:
+- **Non-residents:** "Did the entity pay any income to a non-resident individual or entity (not including distributions, directors fees, interest or royalties)?" → **No**.
+- **Benefits in kind:** "Did the entity provide any benefits in kind (other than benefits that are exempt) to its employees?" → **No**.
+${pillarTwo}`;
 }
 
 function buildCbcrSection(form: SubstanceForm): string {
