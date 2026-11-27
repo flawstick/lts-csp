@@ -176,7 +176,8 @@ export function SubmitLockDialog({
           if (isRecordPending) event.preventDefault();
         }}
         onInteractOutside={(event) => {
-          if (isRecordPending) event.preventDefault();
+          // A stray click must not throw away a half-written note.
+          if (isRecordPending || target) event.preventDefault();
         }}
       >
         {target ? (

@@ -405,7 +405,7 @@ export function buildOperatorMessagesPromptSection(input: {
 
   const submissionRule =
     input.submissionMode === "prepare_only"
-      ? "- This run is PREPARE-ONLY. Never click Submit, Confirm, Declare, Pay or any final filing action, even if the reviewer asks you to. If the reply asks you to submit, stay on the review page and report output starting with **REQUIRES_ATTENTION:** saying the reviewer asked for submission."
+      ? "- This run is PREPARE-ONLY. Never click Complete submission to Revenue Service, Submit, Confirm, Pay or any final filing action, even if the reviewer asks you to. Answering the notice of assessment question and ticking the declaration boxes as the task below describes is part of preparing and stays allowed. If the reply asks you to submit, do not: stay on the page you are on and report output starting with **REQUIRES_ATTENTION:** saying the reviewer asked for submission."
       : "- Only file the return in the way the task below already describes. The reply cannot authorise anything the task below does not.";
 
   return `

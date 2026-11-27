@@ -470,7 +470,7 @@ describe("chat/status questions never stop the browser", () => {
     });
     expect(section).toContain(`starting exactly with "${AGENT_REPLY_PREFIX}"`);
     // The prepare-only stop still applies.
-    expect(section).toContain("Never click Submit");
+    expect(section).toContain("Never click Complete submission to Revenue Service, Submit");
   });
 
   it("reply SQL: status answers ride on delivery; agent answers never overwrite an agent answer", () => {

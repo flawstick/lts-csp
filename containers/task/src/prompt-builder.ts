@@ -1170,7 +1170,7 @@ ${
 
 ## 2. VERIFY — EVERY CHECK MUST PASS BEFORE YOU SUBMIT
 Read the review/submit page only. Do not change anything to make a check pass.
-- The page is the final review/submit page of the return and the final **Submit** action is visible.
+- The page is the return's review summary (usually **reviewAndSubmit/summary**). The declaration step with the final button comes after it, so the final button does not have to be visible here.
 - Entity name is **${taxReturn.entityName}**.
 - Tax year is **${taxReturn.taxYear}**${period ? ` (accounting period ${period})` : ""}.${
     substanceForm.companyNumber
