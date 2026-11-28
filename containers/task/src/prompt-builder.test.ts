@@ -475,7 +475,8 @@ describe("buildSubmitPreparedReturnPrompt", () => {
     for (const forbidden of [
       "SECTION 1: BACKGROUND",
       "upload_file",
-      "Assign to user",
+      "CASE ASSIGNMENT",
+      "case-assign",
       "re-check/re-fill",
       "Do not skip fields merely because they are already populated",
       "READY_FOR_MANUAL_SUBMISSION",
@@ -1173,5 +1174,41 @@ describe("LTS standing answers", () => {
     const prompt = build({ isConstituentEntity: "Yes" });
     expect(prompt).not.toContain("so answer **No** to both");
     expect(prompt).toContain("no standing answer for the Pillar Two questions");
+  });
+});
+
+describe("case assignment", () => {
+  const prompt = (submissionMode: "prepare_only" | "submit_and_capture_pdf") =>
+    buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: { certificateType: "Certificate 3", relevantActivity: "None of the above" } as any,
+      portalUrl: "https://my.gov.gg",
+      returnLink: "https://my.gov.gg/revenue/case/example/process",
+      submissionMode,
+    });
+
+  it.each(["prepare_only", "submit_and_capture_pdf"] as const)(
+    "gives Amir Isaac's direct assign link and requires reading him back (%s)",
+    (mode) => {
+      const text = prompt(mode);
+      expect(text).toContain(
+        "Open https://my.gov.gg/revenue/case-assign/example/a90e6f83-43a4-f011-9189-005056b8c144:",
+      );
+      expect(text).toContain("Never pick **Amir Issac**");
+      expect(text).toContain("it must show exactly **Amir Isaac** before you open the return");
+      expect(text).toContain("click **I understand** first");
+      expect(text).not.toContain("use the first \"Amir Isaac\"");
+    },
+  );
+
+  it("falls back to the list when the case link is not a case URL", () => {
+    const text = buildSubstanceFormPrompt({
+      taxReturn: baseTaxReturn,
+      substanceForm: { certificateType: "Certificate 3" } as any,
+      portalUrl: "https://my.gov.gg",
+      returnLink: "https://my.gov.gg/somewhere",
+    });
+    expect(text).not.toContain("case-assign");
+    expect(text).toContain("- Use the list: click **Assign**");
   });
 });
