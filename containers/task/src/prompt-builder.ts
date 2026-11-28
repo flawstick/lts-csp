@@ -279,6 +279,9 @@ If prompted for CSP or secret credentials:
 - Security Code: X312E49624
 `;
 
+/** Portal user id of "Amir Isaac" (not the misspelled "Amir Issac"). */
+const AMIR_ISAAC_USER_ID = "a90e6f83-43a4-f011-9189-005056b8c144";
+
 const INFERABLE_FIELDS = new Set([
   "entityActivity",
   "hasIntellectualPropertyHolding",
@@ -332,6 +335,10 @@ export function buildSubstanceFormPrompt(
 
   const sections: string[] = [];
   const caseViewUrl = getCaseViewUrl(returnLink);
+  // Amir Isaac's Assign link on this case's assign list (a plain GET link).
+  const caseAssignUrl = caseViewUrl
+    ? `${caseViewUrl.slice(0, -"/view".length).replace("/revenue/case/", "/revenue/case-assign/")}/${AMIR_ISAAC_USER_ID}`
+    : null;
   const certificateType =
     substanceForm.certificateType === "Certificate 2"
       ? "Certificate 2"
@@ -386,6 +393,7 @@ ${
 - **Portal defaults:** a default or preselected portal value with no contradicting saved value may stay as is. Do not replace defaults with guesses.
 - **Exact entry:** enter saved values exactly as given (numbers including any minus sign, dates, names). Check each section matches this task before Save/Continue.
 - **Inference:** only the low-risk inferences listed under PORTAL FIELD NOTES. Never infer ownership, parent companies, beneficial owners, tax residence, registration or incorporation facts, or Relevant Activity.
+- **Every question:** before **Save and continue**, check every question on the page has an answer from this task (or a rule here says to leave it blank). The portal saves unanswered questions without an error and only shows the section as INCOMPLETE later.
 - **If stuck:** on an error you cannot resolve, STOP and report **REQUIRES_ATTENTION** quoting the portal's message.
 
 ${PORTAL_LOGIN_SECTION}${
@@ -418,13 +426,18 @@ ${PORTAL_LOGIN_SECTION}${
   }
 3. Tax Year: ${taxReturn.taxYear}
 
-## CASE ASSIGNMENT — DO THIS BEFORE PROCESSING THE RETURN
+## CASE ASSIGNMENT — DO THIS BEFORE OPENING THE RETURN
 - Assignment is on the case **view** page (URL ending in **/view**), not the processing form.${
   caseViewUrl ? ` Case view URL: ${caseViewUrl}` : ""
 }
-- Click **"Assign to user"** (or **"Assign to another user"** if it is already assigned to anyone, including Amir Isaac — always reassign).
-- Click **"Assign"** on the **second "Amir Isaac"** in the list. If that does not stick, repeat and use the first "Amir Isaac".
-- Continue only once the case is freshly assigned to **Amir Isaac** in this run, then return to the filing page.
+- If a cookie banner is showing, click **I understand** first: it covers the **Assign** link.${
+  caseAssignUrl
+    ? `\n- Open ${caseAssignUrl}: it is Amir Isaac's **Assign** link for this case and assigns or reassigns it. If that does not work, use the list instead:`
+    : "\n- Use the list:"
+} click **Assign** (or **Assign to a different user** if anyone, including Amir Isaac, is assigned: always reassign), then **Assign** on the row spelled exactly **Amir Isaac**. Never pick **Amir Issac**: it is a different user.
+- Then read **Assigned user** on the case view: it must show exactly **Amir Isaac** before you open the return. If it does not after two tries, STOP and report **REQUIRES_ATTENTION** saying the assignment did not save. Never fill the return unassigned.
+- If the return then says **User has limited access to form**, wait a few seconds and reload it: the assignment takes a moment to apply.
+- In a continuation, skip this only if you already read Amir Isaac as the assigned user earlier in this run. Otherwise do it before you open or change the return (after any FIRST CHECK or SUBMISSION STATUS check).
 
 ## RUN MODE
 **PREPARE-ONLY SAFETY:** ${
@@ -489,10 +502,10 @@ ${
 - Download URL fallback: ${financialStatementsUrl}
 
 **PORTAL FLOW (Upload Accounts section):**
-1. When asked if financial statements are available online, select **"No"**; a file input appears.
-2. Use **upload_file** on that input with the workspace path "${financialStatementsFile.sessionFilePath}".
+1. If the page already lists exactly one attached PDF (a file name with a **Delete** link), keep it: do not delete it or upload another copy. Otherwise, when asked if financial statements are available online, select **"No"**; a file input appears.
+2. Run the EXACT script in step 4 with **evaluate**. In this browser **upload_file** with the workspace path fails with "Files must exist in the downloads directory", so use **upload_file** with "${financialStatementsFile.sessionFilePath}" only if the script errors.
 3. Confirm a filename is shown and the control no longer says **"No file chosen"**. Until then the upload has NOT worked: do not continue.
-4. If **upload_file** fails, use **evaluate** with this EXACT script:
+4. The script:
 
 fetch('${financialStatementsUrl}').then(r=>r.blob()).then(blob=>{const f=new File([blob],'${financialStatementsFile.originalName}',{type:'application/pdf'});const d=new DataTransfer();d.items.add(f);const i=document.querySelector('input[type=\"file\"]');if(i){i.files=d.files;i.dispatchEvent(new Event('change',{bubbles:true}))}})
 
@@ -564,7 +577,7 @@ ${
     } else {
       sections.push(`
 ## SECTIONS 7-10: SKIPPED
-The entity is not in scope of economic substance for this filing. Leave CIGA, Employees (FTE), Outsourcing, and Beneficial Ownership sections blank unless the portal explicitly requires them.
+The entity is not in scope of economic substance for this filing. Leave CIGA, Employees (FTE), Outsourcing, and Beneficial Ownership sections blank unless the portal explicitly requires them. This does not cover the **Employee Information** pages (Non-residents, Benefits in kind): use **LTS STANDING ANSWERS**.
 `);
     }
 
@@ -810,7 +823,7 @@ ${originalPrompt}
   }
 
   return `
-Continue from where you left off. The user has completed the login/authentication.
+Continue from where you left off. The user has completed the login/authentication. A person may also have changed the page on the portal: re-read it before acting. If you had stopped on a question this task does not answer, carry on only if the page now shows it answered; otherwise stop again at once with **REQUIRES_ATTENTION** repeating only that question, without redoing earlier pages. The Net Book Value question is the exception: only a reviewer reply answers it, whatever the field shows, so if it is unanswered ask it again exactly as SECTION 4 says.
 Now proceed with the original task:
 
 ${originalPrompt}
@@ -1368,8 +1381,7 @@ ${
 }
 
 ## 2. VERIFY — EVERY CHECK MUST PASS BEFORE YOU SUBMIT
-Read the review/submit page only. Do not change anything to make a check pass.
-- The page is the return's review summary (usually **reviewAndSubmit/summary**). The declaration step with the final button comes after it, so the final button does not have to be visible here.
+Read two pages and change nothing to make a check pass: the review summary (**reviewAndSubmit/summary**: each section's status), then **Continue to review** to the read-only review page (**reviewAndSubmit/review**: entity, reference, accounting period, contact). A check may pass on either page. The declaration step with the final button comes after the review page.
 - Entity name is **${taxReturn.entityName}**.
 - Tax year is **${taxReturn.taxYear}**${period ? ` (accounting period ${period})` : ""}.${
     substanceForm.companyNumber
@@ -1377,7 +1389,7 @@ Read the review/submit page only. Do not change anything to make a check pass.
       : ""
   }${
     draftPath
-      ? `\n- The browser address path is still **${draftPath}** (the prepared draft).`
+      ? `\n- The browser address path is **${draftPath}** (the prepared draft), or the same path ending in **/review** on the review page.`
       : ""
   }${
     reference
